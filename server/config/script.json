@@ -1,0 +1,32 @@
+{
+  "events": [
+    {
+      "time": 0,
+      "relays": [
+        true,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "state": true,
+      "type": "buttonVar",
+      "channel": 1,
+      "duration": 0.1,
+      "value": 1,
+      "varName": "sparkON"
+    },
+    {
+      "time": 0.1,
+      "duration": 0,
+      "type": "buttonVar",
+      "channel": 0,
+      "state": false,
+      "normallyOpen": true,
+      "varName": "sparkON"
+    }
+  ]
+}

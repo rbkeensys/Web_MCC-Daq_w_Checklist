@@ -1,0 +1,423 @@
+{
+  "pages": [
+    {
+      "name": "Page 1",
+      "widgets": [
+        {
+          "id": "a4125086-f6b0-4725-ac3d-ebff2aab8daf",
+          "type": "dobutton",
+          "x": 21,
+          "y": 105,
+          "w": 223,
+          "h": 102,
+          "opts": {
+            "title": "LOX Press Enable",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "LOXPIDEn",
+            "activeHigh": true,
+            "mode": "toggle",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "9bd97f1d-8eff-4f86-9cf8-fc3e54898bbf",
+          "type": "dobutton",
+          "x": 20,
+          "y": 7,
+          "w": 225,
+          "h": 95,
+          "opts": {
+            "title": "LOX Vent",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "manualLOXVent",
+            "activeHigh": true,
+            "mode": "toggle",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "83bd8cf8-86d8-4faa-957c-aa05eda2bff9",
+          "type": "dobutton",
+          "x": 420,
+          "y": 102,
+          "w": 222,
+          "h": 101,
+          "opts": {
+            "title": "Fuel Press Enable",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "FuelPIDEn",
+            "activeHigh": true,
+            "mode": "toggle",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "76a46b6f-fa7e-4457-b8bd-8150dd87b08b",
+          "type": "dobutton",
+          "x": 420,
+          "y": 4,
+          "w": 221,
+          "h": 94,
+          "opts": {
+            "title": "Fuel Vent",
+            "outputType": "var",
+            "doIndex": 2,
+            "varName": "manualFuelVent",
+            "activeHigh": true,
+            "mode": "toggle",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "aa36e5bd-bd53-4ea3-81cf-30e3b5cf32e7",
+          "type": "dobutton",
+          "x": 21,
+          "y": 212,
+          "w": 222,
+          "h": 91,
+          "opts": {
+            "title": "LOX Out",
+            "outputType": "var",
+            "doIndex": 1,
+            "varName": "LOXOutEn",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "935f192d-f582-41ff-8386-ea9aa1d0b1e7",
+          "type": "dobutton",
+          "x": 417,
+          "y": 208,
+          "w": 222,
+          "h": 91,
+          "opts": {
+            "title": "Fuel Out",
+            "outputType": "var",
+            "doIndex": 3,
+            "varName": "FuelOutEn",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "32565a8c-e134-42f2-8539-3ef30483654b",
+          "type": "dobutton",
+          "x": 369,
+          "y": 1066,
+          "w": 133,
+          "h": 97,
+          "opts": {
+            "title": "Spark",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "sparkON",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "3c94c856-d275-487b-87af-4f153873e4eb",
+          "type": "dobutton",
+          "x": 22,
+          "y": 650,
+          "w": 195,
+          "h": 112,
+          "opts": {
+            "title": "MIXED Out",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "BothOutEn",
+            "activeHigh": true,
+            "mode": "toggle",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "de20f196-d9a9-4e16-9d3c-2394aee6ce96",
+          "type": "chart",
+          "x": 753,
+          "y": 140,
+          "w": 1433,
+          "h": 493,
+          "opts": {
+            "title": "Chart",
+            "series": [
+              {
+                "kind": "ai",
+                "index": 0,
+                "name": "LOX P",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "ai",
+                "index": 1,
+                "name": "Fuel P",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "expr",
+                "index": 3,
+                "name": "Set Point",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "do",
+                "index": 0,
+                "name": "LOX Vent",
+                "displayScale": 2,
+                "displayOffset": 3
+              },
+              {
+                "kind": "do",
+                "index": 2,
+                "name": "Fuel Vent",
+                "displayScale": 2,
+                "displayOffset": 6
+              },
+              {
+                "kind": "do",
+                "index": 1,
+                "name": "LOX Out",
+                "displayScale": 2,
+                "displayOffset": 18
+              },
+              {
+                "kind": "do",
+                "index": 3,
+                "name": "Fuel Out",
+                "displayScale": 2,
+                "displayOffset": 15
+              },
+              {
+                "kind": "do",
+                "index": 8,
+                "name": "Spark",
+                "displayScale": 2,
+                "displayOffset": 0
+              },
+              {
+                "kind": "do",
+                "index": 4,
+                "name": "LOX P",
+                "displayScale": 2,
+                "displayOffset": 9
+              },
+              {
+                "kind": "do",
+                "index": 5,
+                "name": "Fuel P",
+                "displayScale": 2,
+                "displayOffset": 12
+              },
+              {
+                "kind": "do",
+                "index": 6,
+                "name": "Purge",
+                "displayScale": 2,
+                "displayOffset": 21
+              }
+            ],
+            "span": 100,
+            "paused": false,
+            "scale": "manual",
+            "min": 0,
+            "max": 50,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 10,
+            "tFreeze": null
+          },
+          "view": {
+            "span": 100,
+            "paused": false,
+            "tFreeze": 0
+          }
+        },
+        {
+          "id": "bf9b4334-9a54-45ba-8093-b292dc0afa15",
+          "type": "dobutton",
+          "x": 765,
+          "y": 12,
+          "w": 237,
+          "h": 109,
+          "opts": {
+            "title": "Vent ALL",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "ventBoth",
+            "activeHigh": true,
+            "mode": "toggle",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "bd6bc1c8-2a5d-44bf-b87b-586f6130c36f",
+          "type": "dobutton",
+          "x": 28,
+          "y": 1051,
+          "w": 191,
+          "h": 108,
+          "opts": {
+            "title": "Ignition ARM",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "armIgnition",
+            "activeHigh": true,
+            "mode": "toggle",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "288b87e5-f105-402d-9dd8-391320ae4d04",
+          "type": "expr",
+          "x": 20,
+          "y": 323,
+          "w": 280,
+          "h": 285,
+          "opts": {
+            "title": "LOX Pressurization Controller",
+            "exprIndex": 5,
+            "showSource": true,
+            "showOutput": true
+          }
+        },
+        {
+          "id": "eeedc52d-fc1c-4d56-ac09-21c3187747bc",
+          "type": "expr",
+          "x": 415,
+          "y": 325,
+          "w": 280,
+          "h": 283,
+          "opts": {
+            "title": "Fuel Pressurization Controller",
+            "exprIndex": 6,
+            "showSource": true,
+            "showOutput": true
+          }
+        },
+        {
+          "id": "52cc1a11-e29e-462f-b27b-7ce625d7262d",
+          "type": "dobutton",
+          "x": 304,
+          "y": 656,
+          "w": 123,
+          "h": 107,
+          "opts": {
+            "title": "Run Test",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "runTest",
+            "activeHigh": true,
+            "mode": "toggle",
+            "buzzHz": 10,
+            "actuationTime": 0.1,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "43a1c892-539b-4c76-8934-376786988122",
+          "type": "expr",
+          "x": 438,
+          "y": 656,
+          "w": 280,
+          "h": 372,
+          "opts": {
+            "title": "Test Sequencer",
+            "exprIndex": 7,
+            "showSource": true,
+            "showOutput": true
+          }
+        },
+        {
+          "id": "dbd91cb6-6fa9-4b53-9fc2-29f6158bbbbd",
+          "type": "dobutton",
+          "x": 33,
+          "y": 860,
+          "w": 180,
+          "h": 117,
+          "opts": {
+            "title": "Purge",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "purge",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "cafab58e-75a6-467c-a48e-e1d311e6bf59",
+          "type": "dobutton",
+          "x": 233,
+          "y": 859,
+          "w": 194,
+          "h": 118,
+          "opts": {
+            "title": "ABORT",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "abort",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        }
+      ]
+    }
+  ],
+  "checklistDock": {
+    "visible": true,
+    "left": "1030px",
+    "top": "734px",
+    "width": "1438px",
+    "height": "518px",
+    "transform": ""
+  }
+}
