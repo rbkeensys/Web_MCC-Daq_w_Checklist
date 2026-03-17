@@ -1,6 +1,4 @@
 """
-Version: 1.0.0
-Updated: 2026-01-14 23:30:56
 """
 __version__ = "2.1.0"  # Add checklist check_events endpoint
 __updated__ = "2026-01-14 23:30:56"
