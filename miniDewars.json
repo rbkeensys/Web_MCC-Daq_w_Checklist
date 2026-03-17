@@ -126,8 +126,8 @@
         {
           "id": "32565a8c-e134-42f2-8539-3ef30483654b",
           "type": "dobutton",
-          "x": 369,
-          "y": 1066,
+          "x": 234,
+          "y": 1209,
           "w": 133,
           "h": 97,
           "opts": {
@@ -166,10 +166,10 @@
         {
           "id": "de20f196-d9a9-4e16-9d3c-2394aee6ce96",
           "type": "chart",
-          "x": 753,
-          "y": 140,
-          "w": 1433,
-          "h": 493,
+          "x": 730,
+          "y": 36,
+          "w": 1542,
+          "h": 691,
           "opts": {
             "title": "Chart",
             "series": [
@@ -223,8 +223,8 @@
                 "displayOffset": 15
               },
               {
-                "kind": "do",
-                "index": 8,
+                "kind": "expr",
+                "index": 10,
                 "name": "Spark",
                 "displayScale": 2,
                 "displayOffset": 0
@@ -270,8 +270,8 @@
         {
           "id": "bf9b4334-9a54-45ba-8093-b292dc0afa15",
           "type": "dobutton",
-          "x": 765,
-          "y": 12,
+          "x": 90,
+          "y": 1014,
           "w": 237,
           "h": 109,
           "opts": {
@@ -290,8 +290,8 @@
         {
           "id": "bd6bc1c8-2a5d-44bf-b87b-586f6130c36f",
           "type": "dobutton",
-          "x": 28,
-          "y": 1051,
+          "x": 9,
+          "y": 1196,
           "w": 191,
           "h": 108,
           "opts": {
@@ -338,7 +338,7 @@
         {
           "id": "52cc1a11-e29e-462f-b27b-7ce625d7262d",
           "type": "dobutton",
-          "x": 304,
+          "x": 282,
           "y": 656,
           "w": 123,
           "h": 107,
@@ -358,8 +358,8 @@
         {
           "id": "43a1c892-539b-4c76-8934-376786988122",
           "type": "expr",
-          "x": 438,
-          "y": 656,
+          "x": 417,
+          "y": 657,
           "w": 280,
           "h": 372,
           "opts": {
@@ -372,8 +372,8 @@
         {
           "id": "dbd91cb6-6fa9-4b53-9fc2-29f6158bbbbd",
           "type": "dobutton",
-          "x": 33,
-          "y": 860,
+          "x": 13,
+          "y": 858,
           "w": 180,
           "h": 117,
           "opts": {
@@ -382,7 +382,7 @@
             "doIndex": 0,
             "varName": "purge",
             "activeHigh": true,
-            "mode": "momentary",
+            "mode": "toggle",
             "buzzHz": 10,
             "actuationTime": 0,
             "_timer": null
@@ -392,8 +392,8 @@
         {
           "id": "cafab58e-75a6-467c-a48e-e1d311e6bf59",
           "type": "dobutton",
-          "x": 233,
-          "y": 859,
+          "x": 208,
+          "y": 858,
           "w": 194,
           "h": 118,
           "opts": {
@@ -414,10 +414,10 @@
   ],
   "checklistDock": {
     "visible": true,
-    "left": "1030px",
-    "top": "734px",
-    "width": "1438px",
-    "height": "518px",
+    "left": "991px",
+    "top": "848px",
+    "width": "1560px",
+    "height": "539px",
     "transform": ""
   }
 }

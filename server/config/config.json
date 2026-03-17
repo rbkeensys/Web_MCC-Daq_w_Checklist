@@ -2,7 +2,7 @@
   "boards1608": [
     {
       "boardNum": 0,
-      "sampleRateHz": 125.0,
+      "sampleRateHz": 150.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -10,7 +10,7 @@
         {
           "name": "LOX P",
           "slope": 25.31680784977651,
-          "offset": -12.9991239035794,
+          "offset": -12.942028197399637,
           "cutoffHz": 0.1,
           "units": "psi",
           "include": true
@@ -18,7 +18,7 @@
         {
           "name": "Fuel P",
           "slope": 37.56151857509841,
-          "offset": -18.61924750876407,
+          "offset": -18.520093719800872,
           "cutoffHz": 0.1,
           "units": "psi",
           "include": true
@@ -171,7 +171,7 @@
     },
     {
       "boardNum": 2,
-      "sampleRateHz": 125.0,
+      "sampleRateHz": 150.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -252,7 +252,7 @@
           "mode": "toggle"
         },
         {
-          "name": "DO1",
+          "name": "Spark2",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,

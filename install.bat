@@ -1,9 +1,9 @@
 @echo off
-REM MCC ROLL DAQ Complete Installer
+REM Web_MCC_DAQ_w_CheckList Complete Installer
 REM Installs to CURRENT DIRECTORY (wherever this bat file is located)
 
 echo ============================================
-echo   MCC ROLL DAQ - Installation
+echo   Web_MCC_DAQ_w_CheckList - Installation
 echo ============================================
 echo.
 
@@ -37,14 +37,14 @@ if not exist "%INSTALL_DIR%\web" mkdir "%INSTALL_DIR%\web"
 REM =====================================================
 REM CHECK FOR EXECUTABLE IN DIST FOLDER
 REM =====================================================
-if not exist "%INSTALL_DIR%\dist\MCC_ROLL_DAQ.exe" (
+if not exist "%INSTALL_DIR%\dist\Web_MCC_DAQ_w_CheckList.exe" (
     echo.
-    echo ERROR: dist\MCC_ROLL_DAQ.exe not found!
+    echo ERROR: dist\Web_MCC_DAQ_w_CheckList.exe not found!
     echo.
-    echo Looking for: %INSTALL_DIR%\dist\MCC_ROLL_DAQ.exe
+    echo Looking for: %INSTALL_DIR%\dist\Web_MCC_DAQ_w_CheckList.exe
     echo.
     echo Make sure you extracted the entire zip file and
-    echo that dist\MCC_ROLL_DAQ.exe is present.
+    echo that dist\Web_MCC_DAQ_w_CheckList.exe is present.
     echo.
     pause
     exit /b 1
@@ -54,9 +54,9 @@ REM =====================================================
 REM COPY MAIN EXECUTABLE TO INSTALL DIR
 REM =====================================================
 echo Copying executable from dist\ to current directory...
-copy /Y "%INSTALL_DIR%\dist\MCC_ROLL_DAQ.exe" "%INSTALL_DIR%\" >nul
+copy /Y "%INSTALL_DIR%\dist\Web_MCC_DAQ_w_CheckList.exe" "%INSTALL_DIR%\" >nul
 if errorlevel 1 (
-    echo ERROR: Failed to copy MCC_ROLL_DAQ.exe
+    echo ERROR: Failed to copy Web_MCC_DAQ_w_CheckList.exe
     pause
     exit /b 1
 )
@@ -95,22 +95,22 @@ echo Creating desktop shortcut...
 
 REM Determine icon path (use favicon.ico if it exists)
 set ICON_PATH=%INSTALL_DIR%\web\favicon.ico
-if not exist "%ICON_PATH%" set ICON_PATH=%INSTALL_DIR%\MCC_ROLL_DAQ.exe
+if not exist "%ICON_PATH%" set ICON_PATH=%INSTALL_DIR%\Web_MCC_DAQ_w_CheckList.exe
 
-powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\MCC ROLL DAQ.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\MCC_ROLL_DAQ.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%ICON_PATH%'; $Shortcut.Description = 'MCC ROLL DAQ Control System'; $Shortcut.Save()" >nul 2>&1
+powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\Web_MCC_DAQ_w_CheckList.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\Web_MCC_DAQ_w_CheckList.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%ICON_PATH%'; $Shortcut.Description = 'Web_MCC_DAQ_w_CheckList Control System'; $Shortcut.Save()" >nul 2>&1
 echo Desktop shortcut created.
 
 REM =====================================================
 REM CREATE START MENU SHORTCUTS
 REM =====================================================
 echo Creating Start Menu shortcuts...
-if not exist "%APPDATA%\Microsoft\Windows\Start Menu\Programs\MCC ROLL DAQ" mkdir "%APPDATA%\Microsoft\Windows\Start Menu\Programs\MCC ROLL DAQ"
+if not exist "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Web_MCC_DAQ_w_CheckList" mkdir "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Web_MCC_DAQ_w_CheckList"
 
-powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%APPDATA%\Microsoft\Windows\Start Menu\Programs\MCC ROLL DAQ\MCC ROLL DAQ.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\MCC_ROLL_DAQ.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%ICON_PATH%'; $Shortcut.Description = 'MCC ROLL DAQ Control System'; $Shortcut.Save()" >nul 2>&1
+powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%APPDATA%\Microsoft\Windows\Start Menu\Programs\Web_MCC_DAQ_w_CheckList\Web_MCC_DAQ_w_CheckList.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\MCC_ROLL_DAQ.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%ICON_PATH%'; $Shortcut.Description = 'Web_MCC_DAQ_w_CheckList Control System'; $Shortcut.Save()" >nul 2>&1
 
-powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%APPDATA%\Microsoft\Windows\Start Menu\Programs\MCC ROLL DAQ\Config Folder.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\config'; $Shortcut.Description = 'Open MCC ROLL DAQ Config Folder'; $Shortcut.Save()" >nul 2>&1
+powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%APPDATA%\Microsoft\Windows\Start Menu\Programs\Web_MCC_DAQ_w_CheckList\Config Folder.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\config'; $Shortcut.Description = 'Open Web_MCC_DAQ_w_CheckList Config Folder'; $Shortcut.Save()" >nul 2>&1
 
-powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%APPDATA%\Microsoft\Windows\Start Menu\Programs\MCC ROLL DAQ\Logs Folder.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\logs'; $Shortcut.Description = 'Open MCC ROLL DAQ Logs Folder'; $Shortcut.Save()" >nul 2>&1
+powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%APPDATA%\Microsoft\Windows\Start Menu\Programs\Web_MCC_DAQ_w_CheckList\Logs Folder.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\logs'; $Shortcut.Description = 'Open Web_MCC_DAQ_w_CheckList Logs Folder'; $Shortcut.Save()" >nul 2>&1
 
 echo Start Menu shortcuts created.
 
@@ -163,12 +163,12 @@ echo   - logs\             (created, will store logs)
 echo   - web\              (web interface)
 echo.
 echo Shortcuts created:
-echo   - Desktop: MCC ROLL DAQ.lnk
-echo   - Start Menu: MCC ROLL DAQ folder
+echo   - Desktop: Web_MCC_DAQ_w_CheckList.lnk
+echo   - Start Menu: Web_MCC_DAQ_w_CheckList folder
 echo.
 echo ============================================
 echo.
-echo Starting MCC ROLL DAQ now...
+echo Starting Web_MCC_DAQ_w_CheckList now...
 echo.
 
 REM =====================================================
@@ -184,13 +184,13 @@ start http://127.0.0.1:8000
 
 echo.
 echo ============================================
-echo   MCC ROLL DAQ is now running!
+echo   Web_MCC_DAQ_w_CheckList is now running!
 echo ============================================
 echo.
 echo Console window shows server logs.
 echo.
 echo If browser didn't open, go to: http://127.0.0.1:8000
 echo.
-echo To run again: Double-click "MCC ROLL DAQ" on Desktop
+echo To run again: Double-click "Web_MCC_DAQ_w_CheckList" on Desktop
 echo.
 pause

@@ -30,10 +30,11 @@ ITEMS IN ITALLICS  OR  GRAY  TEXT ARE INFORMATIONAL ONLY AND NOT TO BE CALLED OU
 12||       LOX Outlet
 13||       Fuel Vent
 14||       Fuel Outlet
-15||       Zero Pressure Transducers,    LOX Zero ____________,  Fuel Zero ___________
-16|PAD1|Verify clear for Spark check, test and verify 
+15||       Purge
+16||       Zero Pressure Transducers,    LOX Zero ____________,  Fuel Zero ___________
+17|PAD1|Verify clear for Spark check, test and verify 
 =========================================================================================
-20|TD|On control app restart log, note name _____________20260311_152334___________________
+20|TD|On control app restart log, note name _____________20260317_154332___________________
 
 =========================== LOAD LOX TANK ================================================
 30|PAD1|Load LOX Tank
@@ -52,26 +53,25 @@ ITEMS IN ITALLICS  OR  GRAY  TEXT ARE INFORMATIONAL ONLY AND NOT TO BE CALLED OU
 51|PAD1|Verify camera positions
 52|PAD1|Verify Helium Regulator is still OFF
 53|PAD1|Close LOX and Fuel Manual Vents
-54|PAD1|Open Helium Bottle Valve
-55|PAD1|Set Helium regulator to : _____35_____psi
+54|PAD1|Open Helium Bottle Valve, report pressure ________________________
+55|PAD1|Set Helium regulator to : _____50_____psi
 ============================= START PRESSURIZATION =======================================
-61|PAD1|Retreat for test
-62|PAD1|Start Recording CAM1 (normal speed)
+61|PAD1|Start Recording CAM1 (normal speed)
+62|PAD1|Retreat for test, report when ready
 63|TD|Turn OFF 'Vent ALL'
 64|TD|Begin pressurization
 65|TD|Announce when pressurization is complete
 ============================= PRESS COMPLETE ============================================
 70|TD|Press    'MIXED OUT'   Button,   Verify ON/GREEN
-71|TD|Wait 1 minute to chill 
-72|TD|Announce 'CLEAR FOR TEST'
+71|TD|Wait   3  minutes to chill 
 72|PAD1|Go, NOGO for test?
         If NOGO, check with PAD1 on scrub or hold
         IF SCRUB, Go to Appendix A - SCRUB
-73|PAD1|Start Camera 2  (Slow Motion)
+73|TD|Announce 'ARMING THE SYSTEM'
+74|TD|Press    'Ignition ARM'    Button
+75|PAD1|Start Camera 2  (Slow Motion)
 ============================== FIRING SEQUENCE ==========================================
-80|TD|Announce 'ARMING THE SYSTEM'
-81|TD|Press    'Ignition ARM'    Button
-82|TD|Press    RUN TEST   Button
+80|TD|Press    RUN TEST   Button
 Test is automated, ensures mixed out is on for 15 seconds and fires spark
 NOTE: the automated test DOES NOT ARM ignition or spark!
 
@@ -82,9 +82,7 @@ NOTE: the automated test DOES NOT ARM ignition or spark!
 103|TD|Turn OFF   'MIXED Out'
 104|TD|Announce when safe to approach (<5psi)
 105|PAD1|Open Manual Vents
-106|PAD1|Close  Helium  Bottle Valve
-107|PAD1|Turn of Helium Regulator
-108|TD|Turn OFF   'Vent ALL'
+106|TD|Turn OFF   'Vent ALL'
 =========================================================================================
 =========================== POST TEST TASKS ==============================================
 200|PAD1|Open LN2 Dewar Vent
@@ -93,6 +91,13 @@ NOTE: the automated test DOES NOT ARM ignition or spark!
 203|PAD1|Close LOX Dewar Pressure-builder
 204|PAD1|Open LNG Dewar Vent
 205|PAD1|Close LNG Dewar Pressure-builder
+206|PAD1|Turn of Helium Regulator
+207|PAD1|Report final Helium pressure __________________
+208|PAD1|Close  Helium  bottle valve
+
+
+
+
 
 
 

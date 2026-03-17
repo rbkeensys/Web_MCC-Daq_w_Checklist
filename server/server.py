@@ -1,11 +1,6 @@
-"""
-"""
-__version__ = "2.1.0"  # Add checklist check_events endpoint
-__updated__ = "2026-01-14 23:30:56"
-
-
 # server/server.py
 # Python 3.10+
+
 import asyncio, json, time, os, sys
 from datetime import datetime
 from pathlib import Path
@@ -34,7 +29,11 @@ from app_models import LEFile, LogicElementCfg
 from expr_manager import ExpressionManager
 from expr_engine import global_vars as expr_global_vars
 import logging, os, math
-SERVER_VERSION = "2.1.0"  # Add checklist check_events endpoint
+
+# Version tracking - all in one place
+SERVER_VERSION = "2.6.0"  # Versioned DLL files for hot-reload during critical tests!
+__version__ = "2.6.0"
+__updated__ = "2026-03-17"
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
 MCC_DUMP_FIRST = int(os.environ.get("MCC_DUMP_FIRST", "5")) # dump first N ticks fully
@@ -365,6 +364,290 @@ def load_math():
 expr_mgr = ExpressionManager(filepath=str(CFG_DIR / "expressions.json"))
 log.info(f"[EXPR] Loaded {len(expr_mgr.expressions)} expressions")
 
+# ============================================================================
+# C++ EXPRESSION AUTO-COMPILATION
+# ============================================================================
+import subprocess
+
+def should_recompile_cpp_expressions():
+    """Check if C++ expressions need recompilation"""
+    expr_json = CFG_DIR / "expressions.json"
+    cpp_file = Path("compiled/expressions.cpp")
+    dll_file = Path("compiled/expressions.dll")
+    
+    if not expr_json.exists():
+        return False
+    
+    if not dll_file.exists():
+        log.info("[CPP-EXPR] DLL not found, will compile")
+        return True
+    
+    if not cpp_file.exists():
+        log.info("[CPP-EXPR] C++ source not found, will generate")
+        return True
+    
+    expr_mtime = expr_json.stat().st_mtime
+    dll_mtime = dll_file.stat().st_mtime
+    
+    if expr_mtime > dll_mtime:
+        log.info("[CPP-EXPR] expressions.json modified, will recompile")
+        return True
+    
+    return False
+
+def compile_cpp_expressions(dll_name: str = "compiled/expressions.dll"):
+    """Generate C++ code and compile to DLL"""
+    try:
+        log.info("[CPP-EXPR] ========== COMPILING EXPRESSIONS ==========")
+        log.info("[CPP-EXPR] Generating C++ code from expressions...")
+        
+        try:
+            import expr_to_cpp
+            success = expr_to_cpp.compile_all_expressions(
+                str(CFG_DIR / "expressions.json"),
+                str(CFG_DIR / "config.json"),
+                "compiled"
+            )
+            
+            if not success:
+                log.error("[CPP-EXPR] Failed to generate C++ code")
+                return False
+            
+            log.info("[CPP-EXPR] ✓ C++ code generated")
+            
+        except Exception as e:
+            log.error(f"[CPP-EXPR] Error generating C++ code: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        
+        log.info("[CPP-EXPR] Compiling C++ to DLL...")
+        
+        cpp_file = Path("compiled/expressions.cpp")
+        dll_file = Path(dll_name)
+        
+        if not cpp_file.exists():
+            log.error(f"[CPP-EXPR] Generated C++ file not found: {cpp_file}")
+            return False
+        
+        # Find cl.exe automatically
+        def find_cl_exe():
+            """Find cl.exe in Visual Studio installations"""
+            base_paths = [
+                Path(r"C:\Program Files\Microsoft Visual Studio"),
+                Path(r"C:\Program Files (x86)\Microsoft Visual Studio")
+            ]
+            
+            versions = ["18", "2026", "2025", "2024", "2022", "2019"]  # VS 2026 is actually version 18!
+            editions = ["Community", "Professional", "Enterprise", "BuildTools"]
+            
+            for base in base_paths:
+                if not base.exists():
+                    continue
+                
+                for ver in versions:
+                    for ed in editions:
+                        vc_path = base / ver / ed / "VC" / "Tools" / "MSVC"
+                        if not vc_path.exists():
+                            continue
+                        
+                        # Find latest MSVC version
+                        msvc_versions = sorted([d for d in vc_path.iterdir() if d.is_dir()], reverse=True)
+                        if not msvc_versions:
+                            continue
+                        
+                        cl_exe = msvc_versions[0] / "bin" / "Hostx64" / "x64" / "cl.exe"
+                        if cl_exe.exists():
+                            return cl_exe, msvc_versions[0]
+            
+            return None, None
+        
+        def find_windows_sdk():
+            """Find Windows SDK include/lib paths"""
+            sdk_base = Path(r"C:\Program Files (x86)\Windows Kits\10")
+            if not sdk_base.exists():
+                return None, None
+            
+            include_base = sdk_base / "Include"
+            lib_base = sdk_base / "Lib"
+            
+            if not include_base.exists() or not lib_base.exists():
+                return None, None
+            
+            # Find latest SDK version
+            versions = sorted([d for d in include_base.iterdir() if d.is_dir()], reverse=True)
+            if not versions:
+                return None, None
+            
+            sdk_ver = versions[0].name
+            return include_base / sdk_ver, lib_base / sdk_ver
+        
+        # Find compiler
+        cl_exe, msvc_path = find_cl_exe()
+        
+        if not cl_exe:
+            log.warning("[CPP-EXPR] Could not find cl.exe automatically")
+            log.info("[CPP-EXPR] Trying cl.exe from PATH...")
+            
+            # Last resort - try from PATH (works if in Developer PowerShell)
+            compile_cmd = [
+                "cl.exe", "/LD", "/O2", "/fp:fast", "/EHsc", "/nologo",
+                f"/Fe:{dll_file}", str(cpp_file), "/link", "/NOLOGO"
+            ]
+            
+            try:
+                result = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0 and dll_file.exists():
+                    dll_size = dll_file.stat().st_size
+                    log.info(f"[CPP-EXPR] ✓ DLL compiled successfully ({dll_size:,} bytes)")
+                    log.info("[CPP-EXPR] ========== COMPILATION COMPLETE ==========")
+                    return True
+                else:
+                    log.warning("[CPP-EXPR] cl.exe compilation failed")
+                    if result.stderr:
+                        log.warning(f"[CPP-EXPR] Compiler error: {result.stderr[:500]}")
+                    log.info("[CPP-EXPR] Will use Python expression evaluator")
+                    return False
+                    
+            except FileNotFoundError:
+                log.warning("[CPP-EXPR] cl.exe not found in PATH or VS installations")
+                log.info("[CPP-EXPR] Install Visual Studio with C++ Build Tools")
+                log.info("[CPP-EXPR] Will use Python expression evaluator")
+                return False
+        
+        # Found cl.exe! Build paths and compile
+        log.info(f"[CPP-EXPR] ✓ Found cl.exe: {cl_exe}")
+        log.info(f"[CPP-EXPR] ✓ MSVC version: {msvc_path.name}")
+        
+        # Find Windows SDK
+        sdk_include, sdk_lib = find_windows_sdk()
+        if sdk_include:
+            log.info(f"[CPP-EXPR] ✓ Found Windows SDK: {sdk_include.parent.name}")
+        
+        # Build include paths
+        include_paths = [msvc_path / "include"]
+        if sdk_include:
+            include_paths.extend([
+                sdk_include / "ucrt",
+                sdk_include / "um",
+                sdk_include / "shared"
+            ])
+        
+        # Build lib paths
+        lib_paths = [msvc_path / "lib" / "x64"]
+        if sdk_lib:
+            lib_paths.extend([
+                sdk_lib / "ucrt" / "x64",
+                sdk_lib / "um" / "x64"
+            ])
+        
+        # Build command
+        compile_cmd = [str(cl_exe), "/LD", "/O2", "/fp:fast", "/EHsc", "/nologo"]
+        
+        # Add includes
+        for inc in include_paths:
+            if inc.exists():
+                compile_cmd.append(f"/I{inc}")
+        
+        # Output and source
+        compile_cmd.append(f"/Fe:{dll_file}")
+        compile_cmd.append(str(cpp_file))
+        
+        # Linker
+        compile_cmd.append("/link")
+        compile_cmd.append("/NOLOGO")
+        
+        # Add lib paths
+        for lib in lib_paths:
+            if lib.exists():
+                compile_cmd.append(f"/LIBPATH:{lib}")
+        
+        log.info("[CPP-EXPR] Compiling with full paths...")
+        
+        try:
+            result = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=30)
+            
+            # Show compiler output
+            if result.stdout:
+                for line in result.stdout.strip().split('\n'):
+                    if line.strip():
+                        log.info(f"[CPP-CL] {line}")
+            
+            if result.stderr:
+                for line in result.stderr.strip().split('\n'):
+                    if line.strip():
+                        log.warning(f"[CPP-CL-ERR] {line}")
+            
+            if result.returncode == 0 and dll_file.exists():
+                dll_size = dll_file.stat().st_size
+                log.info(f"[CPP-EXPR] ✓ DLL compiled successfully ({dll_size:,} bytes)")
+                log.info("[CPP-EXPR] ========== COMPILATION COMPLETE ==========")
+                return True
+            else:
+                log.warning("[CPP-EXPR] Compilation failed!")
+                log.warning(f"[CPP-EXPR] Return code: {result.returncode}")
+                log.warning(f"[CPP-EXPR] DLL exists: {dll_file.exists()}")
+                
+                # Show full stdout/stderr if compilation failed
+                if result.stdout:
+                    log.warning(f"[CPP-EXPR] STDOUT:\n{result.stdout}")
+                if result.stderr:
+                    log.warning(f"[CPP-EXPR] STDERR:\n{result.stderr}")
+                
+                # Show the command that was run
+                log.warning(f"[CPP-EXPR] Command: {' '.join(str(x) for x in compile_cmd[:5])}...")
+                
+                log.info("[CPP-EXPR] Will use Python expression evaluator")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            log.error("[CPP-EXPR] Compilation timeout!")
+            return False
+            
+    except Exception as e:
+        log.error(f"[CPP-EXPR] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def load_cpp_backend(dll_path: str = "compiled/expressions.dll"):
+    """Try to load the C++ expression backend"""
+    try:
+        from cpp_expr_backend import CPPExpressionBackend
+        backend = CPPExpressionBackend(dll_path=dll_path)
+        
+        if backend:
+            log.info(f"[CPP-EXPR] ✓ C++ expression backend loaded from {dll_path}")
+            log.info(f"[CPP-EXPR] ✓ Loaded metadata: {backend.num_expressions} expressions")
+            for idx, var_names in backend.local_var_names.items():
+                if var_names:
+                    log.info(f"[CPP-EXPR]   Expr {idx}: {len(var_names)} local vars: {var_names}")
+            return backend
+        else:
+            log.info("[CPP-EXPR] C++ backend not available, using Python")
+            return None
+            
+    except Exception as e:
+        log.warning(f"[CPP-EXPR] Could not load C++ backend: {e}")
+        return None
+
+# Auto-compile if needed
+cpp_backend = None
+if should_recompile_cpp_expressions():
+    if compile_cpp_expressions():
+        cpp_backend = load_cpp_backend()
+else:
+    cpp_backend = load_cpp_backend()
+
+USE_CPP_EXPRESSIONS = cpp_backend is not None
+
+if USE_CPP_EXPRESSIONS:
+    log.info("[CPP-EXPR] ✓✓✓ USING C++ EXPRESSIONS (50-500× faster!) ✓✓✓")
+else:
+    log.info("[EXPR] Using Python expression evaluator")
+# ============================================================================
+
 # Button variables storage (synchronized from frontend)
 button_vars: Dict[str, float] = {}
 
@@ -644,31 +927,83 @@ async def acq_loop():
             # Evaluate expressions after everything else so they can see all signal states
             try:
                 tc_count = len(get_all_thermocouples(app_cfg)) if get_all_thermocouples(app_cfg) else 0
-                expr_tel = expr_mgr.evaluate_all({
-                    "ai": ai_scaled,
-                    "ao": ao,
-                    "do": do,
-                    "tc": tc_vals,
-                    "pid": telemetry,
-                    "math": math_tel,
-                    "le": le_tel,
-                    "expr": last_expr_outputs,  # Previous cycle expressions (avoid circular dependency)
-                    "buttonVars": button_vars,  # Button variables from frontend
-                    "ai_list": [{"name": ch.name} for ch in get_all_analogs(app_cfg)],
-                    "ao_list": [{"name": ch.name} for ch in get_all_analog_outputs(app_cfg)],
-                    "tc_list": [{"name": ch.name} for ch in get_all_thermocouples(app_cfg)],
-                    "do_list": [{"name": ch.name} for ch in get_all_digital_outputs(app_cfg)],
-                    "pid_list": [{"name": loop.name} for loop in pid_mgr.meta],
-                    "math_list": [{"name": op.name} for op in math_mgr.operators],
-                    "le_list": [{"name": elem.name} for elem in le_mgr.elements],
-                    "expr_list": [{"name": expr.name} for expr in expr_mgr.expressions]
-                }, bridge=mcc, sample_rate_hz=acq_rate_hz)  # CRITICAL: Pass bridge for hardware writes!
+                
+                if USE_CPP_EXPRESSIONS and cpp_backend is not None:
+                    # Use C++ backend (FAST! 50-500× speedup)
+                    cpp_results = cpp_backend.evaluate(
+                        ai_vals=ai_scaled,
+                        ao_vals=ao,
+                        tc_vals=tc_vals,
+                        do_vals=do,
+                        pid_vals=[tel.get('output', 0.0) for tel in telemetry],
+                        button_vars=button_vars  # CRITICAL: Pass buttonVars!
+                    )
+                    
+                    # Convert to same format as Python evaluator
+                    expr_tel = []
+                    for i in range(len(expr_mgr.expressions)):
+                        expr_tel.append({
+                            'name': expr_mgr.expressions[i].name,
+                            'output': cpp_results['results'][i],
+                            'enabled': expr_mgr.expressions[i].enabled,
+                            'error': None,
+                            'locals': cpp_results['locals'][i],  # DEBUG INFO!
+                            'hw_writes': [],
+                            'branches': {},
+                            'executed_lines': [],  # Empty list (not set!) for JSON
+                            'do_writes': {},
+                            'ao_writes': {}
+                        })
+                    
+                    # Apply hardware writes from C++ - only write what changed
+                    # Track last DO state to avoid redundant writes
+                    if not hasattr(cpp_backend, '_last_do_state'):
+                        cpp_backend._last_do_state = {}
+                    
+                    for ch, val in cpp_results['do_writes'].items():
+                        try:
+                            # Only write if value changed
+                            if cpp_backend._last_do_state.get(ch) != val:
+                                do[ch] = val
+                                mcc.set_do(ch, bool(val), active_high=True)
+                                cpp_backend._last_do_state[ch] = val
+                        except Exception as e:
+                            print(f"[CPP-DO] Failed to write DO{ch}={val}: {e}")
+                    
+                    for ch, val in cpp_results['ao_writes'].items():
+                        try:
+                            ao[ch] = val
+                            mcc.set_ao(ch, val)
+                        except Exception as e:
+                            print(f"[CPP-AO] Failed to write AO{ch}={val}: {e}")
+                else:
+                    # Use Python evaluator (slower but always works)
+                    expr_tel = expr_mgr.evaluate_all({
+                        "ai": ai_scaled,
+                        "ao": ao,
+                        "do": do,
+                        "tc": tc_vals,
+                        "pid": telemetry,
+                        "math": math_tel,
+                        "le": le_tel,
+                        "expr": last_expr_outputs,
+                        "buttonVars": button_vars,
+                        "ai_list": [{"name": ch.name} for ch in get_all_analogs(app_cfg)],
+                        "ao_list": [{"name": ch.name} for ch in get_all_analog_outputs(app_cfg)],
+                        "tc_list": [{"name": ch.name} for ch in get_all_thermocouples(app_cfg)],
+                        "do_list": [{"name": ch.name} for ch in get_all_digital_outputs(app_cfg)],
+                        "pid_list": [{"name": loop.name} for loop in pid_mgr.meta],
+                        "math_list": [{"name": op.name} for op in math_mgr.operators],
+                        "le_list": [{"name": elem.name} for elem in le_mgr.elements],
+                        "expr_list": [{"name": expr.name} for expr in expr_mgr.expressions]
+                    }, bridge=mcc, sample_rate_hz=acq_rate_hz)
                 
                 # Extract expr outputs for use in PID gates and other systems
                 expr_outputs = [e.get("output", 0.0) for e in expr_tel]
                 
                 # Store for next cycle (PIDs will use these as gates/inputs)
                 last_expr_outputs = expr_outputs
+                
             except Exception as e:
                 print(f"[EXPR] Evaluation error: {e}")
                 import traceback
@@ -913,11 +1248,66 @@ def get_expressions():
 
 @app.put("/api/expressions")
 def put_expressions(body: dict):
-    """Save expressions"""
+    """Save expressions and auto-recompile C++ if enabled"""
+    global cpp_backend, USE_CPP_EXPRESSIONS
+    
     try:
         expr_mgr.from_dict(body)
+        
+        # Auto-recompile C++ if it was being used
+        if USE_CPP_EXPRESSIONS or cpp_backend is not None:
+            log.info("[CPP-EXPR] Expressions saved, recompiling...")
+            
+            # CRITICAL: Temporarily disable C++ to stop DAQ loop from calling it
+            old_backend = cpp_backend
+            USE_CPP_EXPRESSIONS = False
+            cpp_backend = None  # Clear immediately so DAQ loop can't use it
+            
+            # Give the DAQ loop time to stop using C++
+            import time
+            time.sleep(0.2)
+            
+            # Now safe to unload old DLL (but don't delete - let it stay for safety)
+            if old_backend is not None:
+                try:
+                    # Close the DLL handle
+                    if hasattr(old_backend, 'dll') and old_backend.dll is not None:
+                        import ctypes
+                        # Free the library on Windows
+                        if hasattr(ctypes, 'windll'):
+                            ctypes.windll.kernel32.FreeLibrary.argtypes = [ctypes.c_void_p]
+                            ctypes.windll.kernel32.FreeLibrary(old_backend.dll._handle)
+                        old_backend.dll = None
+                    log.info("[CPP-EXPR] ✓ Unloaded DLL")
+                except Exception as e:
+                    log.warning(f"[CPP-EXPR] Failed to unload DLL: {e}")
+            
+            # Increment version counter and compile to versioned DLL
+            import time
+            version = int(time.time() * 1000) % 1000000  # Use timestamp for uniqueness
+            versioned_dll = f"compiled/expressions_v{version}.dll"
+            
+            if compile_cpp_expressions(dll_name=versioned_dll):
+                # Reload the backend with versioned DLL
+                new_backend = load_cpp_backend(dll_path=versioned_dll)
+                if new_backend:
+                    # Atomically swap both backend and flag
+                    cpp_backend = new_backend
+                    time.sleep(0.05)  # Small delay for backend to settle
+                    USE_CPP_EXPRESSIONS = True
+                    log.info(f"[CPP-EXPR] ✓ Recompiled to {versioned_dll} and reloaded successfully!")
+                else:
+                    log.warning("[CPP-EXPR] Recompilation succeeded but reload failed, falling back to Python")
+                    USE_CPP_EXPRESSIONS = False
+                    cpp_backend = None
+            else:
+                log.warning("[CPP-EXPR] Recompilation failed, falling back to Python expressions")
+                USE_CPP_EXPRESSIONS = False
+                cpp_backend = None
+        
         return {"ok": True}
     except Exception as e:
+        log.error(f"[EXPR] Failed to save expressions: {e}")
         return {"ok": False, "error": str(e)}
 
 @app.post("/api/expressions/check")
@@ -951,8 +1341,17 @@ def check_expression_syntax(body: dict):
 
 @app.get("/api/expressions/globals")
 def get_expression_globals():
-    """Get all global variables"""
-    return {"globals": expr_global_vars.list_all()}
+    """Get all global variables (from C++ or Python)"""
+    if USE_CPP_EXPRESSIONS and cpp_backend:
+        # Return C++ static vars
+        static_dict = {}
+        if hasattr(cpp_backend, 'staticvar_map') and hasattr(cpp_backend, 'static_vars'):
+            for name, index in cpp_backend.staticvar_map.items():
+                static_dict[name] = float(cpp_backend.static_vars[index])
+        return {"globals": static_dict}
+    else:
+        # Return Python global vars
+        return {"globals": expr_global_vars.list_all()}
 
 @app.delete("/api/expressions/globals")
 def delete_expression_global(body: dict):
