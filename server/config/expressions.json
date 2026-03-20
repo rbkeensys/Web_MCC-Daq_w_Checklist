@@ -3,7 +3,7 @@
     {
       "name": "Spark",
       "enabled": true,
-      "expression": "count    = static.sparkCount\nbutton   = buttonVars.sparkON\nselfBuzz = buttonVars.selfBuzz\narm      = buttonVars.armIgnition\nsparkon  = 0\n\nbutton   = button or static.ignition\n\nif arm == 1 then\n if selfBuzz == 1 and button == 1 then\n    \"DO:Spark\" = 1\n    \"DO:Spark2\" = 1\n endif\n\n if selfBuzz == 0 and button == 1 and arm == 1 then\n    sparkon = 1\n    if \"DO:Spark\" == 1 then\n       \"DO:Spark\" = 0\n       \"DO:Spark2\"= 0\n    else\n       \"DO:Spark\" = 1\n       \"DO:Spark2\"= 1\n    endif\n endif\nelse\n \"DO:Spark\" = 0\n \"DO:Spark2\" = 0\nendif\n\nif button == 0 then\n   \"DO:Spark\" = 0\n   \"DO:Spark2\" = 0\nendif    \n\ncount = static.sparkCount\nspark = \"DO:Spark\"\n\"DO:Igniter\" = sparkon\nsparkon\n",
+      "expression": "count    = static.sparkCount\nbutton   = buttonVars.sparkON\nselfBuzz = buttonVars.selfBuzz\narm      = buttonVars.armIgnition\nsparkon  = 0  \n\nbutton   = button or static.ignition\n\nif arm == 1 then\n if selfBuzz == 1 and button == 1 then\n    \"DO:Spark\" = 1\n    \"DO:Spark2\" = 1\n endif\n\n if selfBuzz == 0 and button == 1 and arm == 1 then\n    sparkon = 1\n    if \"DO:Spark\" == 1 then\n       \"DO:Spark\" = 0\n       \"DO:Spark2\"= 0\n    else\n       \"DO:Spark\" = 1\n       \"DO:Spark2\"= 1\n    endif\n endif\nelse\n \"DO:Spark\" = 0\n \"DO:Spark2\" = 0\nendif\n\nif button == 0 then\n   \"DO:Spark\" = 0\n   \"DO:Spark2\" = 0\nendif    \n\ncount = static.sparkCount\nspark = \"DO:Spark\"\n\"DO:Igniter\" = sparkon\nsparkon\n",
       "execution_rate_hz": null
     },
     {

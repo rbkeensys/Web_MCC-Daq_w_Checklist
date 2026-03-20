@@ -17,8 +17,8 @@ Returns same telemetry as Python evaluator:
 
 Performance: 50-500× faster than Python while maintaining full debug info!
 """
-__version__ = "2.0.0"
-__updated__ = "2026-03-16"
+__version__ = "3.1.2"
+__updated__ = "2026-03-17"
 
 import ctypes
 import json
@@ -196,9 +196,9 @@ class CPPExpressionBackend:
             'globals': {}  # Single dict for all static vars
         }
         
-        # Collect DO writes - include zeros if they differ from input!
+        # Collect DO writes - include zeros if they differ from input (OFF transitions)!
         for i, val in enumerate(self.do_out):
-            # Include if non-zero OR if it changed from input state
+            # Include if non-zero OR if it changed from input state (1->0 transition)
             if val != 0 or (i < len(do_vals) and do_vals[i] != 0):
                 results['do_writes'][i] = bool(val >= 1.0)
         

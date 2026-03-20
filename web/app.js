@@ -1,4 +1,4 @@
-const UI_VERSION = "1.8.0";  // Checklist widget + chart check events  // Fix buttonVar replay: case-preserve + var-btn renders when disconnected  // Duration support for ALL event types  // 2026-01-27: Fixed buttonVars in charts/gauges/bars + removed debug
+const UI_VERSION = "1.8.1";  // Color picker for charts/gauges/bars
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -9,7 +9,140 @@ const el = (tag, props = {}, children = []) => {
   for (const c of children) n.append(c instanceof Node ? c : document.createTextNode(c));
   return n;
 };
-function colorFor(i){ const p=['#7aa2f7','#9ece6a','#f7768e','#bb9af7','#e0af68','#73daca','#f4b8e4','#ffd479']; return p[i%p.length]; }
+
+// ENHANCED: Now supports custom colors per series
+function colorFor(i, customColors = null) {
+  const defaultPalette = ['#7aa2f7','#9ece6a','#f7768e','#bb9af7','#e0af68','#73daca','#f4b8e4','#ffd479'];
+  if (customColors && customColors[i]) return customColors[i];
+  return defaultPalette[i % defaultPalette.length];
+}
+
+// COLOR PICKER: Standard color palette
+const STANDARD_COLORS = [
+  '#ff4d4d','#ff0000','#cc0000','#990000','#660000',
+  '#ff9933','#ff6600','#ff3300','#cc2900','#991f00',
+  '#ffff00','#ffcc00','#ff9900','#ff6600','#cc5200',
+  '#00ff00','#00cc00','#009900','#006600','#003300',
+  '#00ffff','#00cccc','#009999','#006666','#004d4d',
+  '#4d94ff','#0066ff','#0052cc','#003d99','#002966',
+  '#bb9af7','#9966ff','#7733ff','#5500cc','#3d0099',
+  '#ff99ff','#ff66ff','#ff33ff','#cc00cc','#990099',
+  '#ffffff','#cccccc','#999999','#666666','#333333',
+  '#7aa2f7','#9ece6a','#f7768e','#e0af68','#73daca'
+];
+
+// COLOR PICKER: Create modal color picker UI
+function createColorPicker(currentColor, onSelect) {
+  const modal = el('div', {
+    className: 'modal',
+    style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100000;display:flex;align-items:center;justify-content:center',
+    onclick: (e) => { if (e.target === modal) modal.remove(); }
+  });
+  
+  const picker = el('div', {
+    style: 'background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:20px;max-width:400px;box-shadow:0 8px 24px rgba(0,0,0,0.4)'
+  });
+  
+  const header = el('div', {style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px'}, [
+    el('h3', {style: 'margin:0;color:var(--text)'}, 'Choose Color'),
+    el('button', {
+      className: 'icon',
+      style: 'font-size:24px;cursor:pointer;border:none;background:none;color:var(--text);padding:0',
+      onclick: () => modal.remove()
+    }, '×')
+  ]);
+  
+  const preview = el('div', {
+    style: `width:100%;height:50px;border-radius:6px;border:2px solid var(--border);margin-bottom:16px;background:${currentColor};transition:background 0.2s`
+  });
+  
+  const gridLabel = el('div', {
+    style: 'font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600'
+  }, 'Standard Colors');
+  
+  const standardGrid = el('div', {
+    style: 'display:grid;grid-template-columns:repeat(5, 1fr);gap:8px;margin-bottom:20px'
+  });
+  
+  STANDARD_COLORS.forEach(color => {
+    const isSelected = color.toLowerCase() === currentColor.toLowerCase();
+    const swatch = el('div', {
+      style: `width:100%;aspect-ratio:1;background:${color};border-radius:6px;cursor:pointer;border:3px solid ${isSelected ? '#fff' : 'var(--border)'};transition:all 0.15s;box-shadow:${isSelected ? '0 0 8px rgba(255,255,255,0.5)' : 'none'}`,
+      onclick: () => {
+        onSelect(color);
+        modal.remove();
+      },
+      onmouseenter: (e) => {
+        e.target.style.transform = 'scale(1.15)';
+        e.target.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+        preview.style.background = color;
+      },
+      onmouseleave: (e) => {
+        e.target.style.transform = 'scale(1)';
+        e.target.style.boxShadow = isSelected ? '0 0 8px rgba(255,255,255,0.5)' : 'none';
+        preview.style.background = currentColor;
+      }
+    });
+    standardGrid.append(swatch);
+  });
+  
+  const customSection = el('div', {style: 'border-top:1px solid var(--border);padding-top:16px'});
+  
+  const customLabel = el('div', {
+    style: 'font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600'
+  }, 'Custom Color');
+  
+  const pickerRow = el('div', {style: 'display:flex;gap:8px;align-items:stretch'});
+  
+  const customInput = el('input', {
+    type: 'color',
+    value: currentColor,
+    style: 'flex:1;height:50px;border:2px solid var(--border);border-radius:6px;cursor:pointer;background:var(--input-bg)',
+    oninput: (e) => {
+      preview.style.background = e.target.value;
+      hexInput.value = e.target.value;
+    },
+    onchange: (e) => {
+      onSelect(e.target.value);
+      modal.remove();
+    }
+  });
+  
+  const hexInput = el('input', {
+    type: 'text',
+    value: currentColor,
+    placeholder: '#000000',
+    style: 'flex:1;padding:12px;border:2px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);font-family:monospace;font-size:14px',
+    oninput: (e) => {
+      let val = e.target.value.trim();
+      if (!val.startsWith('#')) val = '#' + val;
+      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+        preview.style.background = val;
+        customInput.value = val;
+      }
+    },
+    onchange: (e) => {
+      let val = e.target.value.trim();
+      if (!val.startsWith('#')) val = '#' + val;
+      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+        onSelect(val);
+        modal.remove();
+      } else {
+        alert('Invalid hex color! Use format: #RRGGBB');
+        e.target.value = currentColor;
+      }
+    }
+  });
+  
+  pickerRow.append(customInput, hexInput);
+  customSection.append(customLabel, pickerRow);
+  picker.append(header, preview, gridLabel, standardGrid, customSection);
+  modal.append(picker);
+  document.body.append(modal);
+  
+  return modal;
+}
+
 function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 function safeArc(ctx, cx, cy, r, a0, a1) {
   if (!Number.isFinite(r) || r <= 0) return false;
@@ -2038,6 +2171,37 @@ function openWidgetSettings(w) {
           scaleInput,
           el('span', {style: 'min-width:45px;font-size:11px;color:var(--muted)'}, 'Offset:'),
           offsetInput,
+          el('br', {}),
+          el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Color:'),
+          (() => {
+            const currentColor = s.color || colorFor(idx);
+            const colorBtn = el('div', {
+              style: `width:40px;height:28px;border-radius:6px;border:2px solid var(--border);cursor:pointer;background:${currentColor};transition:transform 0.1s`,
+              title: 'Click to change color',
+              onclick: (e) => {
+                e.stopPropagation();
+                createColorPicker(currentColor, (newColor) => {
+                  s.color = newColor;
+                  colorBtn.style.background = newColor;
+                  saveLayout();
+                });
+              },
+              onmouseenter: (e) => e.target.style.transform = 'scale(1.05)',
+              onmouseleave: (e) => e.target.style.transform = 'scale(1)'
+            });
+            return colorBtn;
+          })(),
+          s.color ? el('span', {
+            className: 'icon',
+            style: 'font-size:14px;color:var(--muted);cursor:pointer;margin-left:4px',
+            title: 'Reset to default color',
+            onclick: (e) => {
+              e.stopPropagation();
+              delete s.color;
+              redrawList();
+              saveLayout();
+            }
+          }, '↺') : '',
           rm
         ]);
         list.append(row);
@@ -2747,6 +2911,7 @@ function mountChart(w, body){
 
       // Draw series
       legend.innerHTML='';
+      const customColors = (w.opts.series||[]).map(s => s.color);
       (w.opts.series||[]).forEach((s, si)=>{
         const displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
         const displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
@@ -2759,10 +2924,10 @@ function mountChart(w, body){
           const y = plotB - (displayValue - ymin) * yscale;
           if (first){ ctx.moveTo(x,y); first=false; } else ctx.lineTo(x,y);
         }
-        ctx.strokeStyle = colorFor(si); ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = colorFor(si, customColors); ctx.lineWidth = 2; ctx.stroke();
         const lab = (s.name && s.name.length) ? s.name : labelFor(s);
         legend.append(el('div',{className:'item'},[
-          el('span',{className:'swatch', style:`background:${colorFor(si)}`},''), lab
+          el('span',{className:'swatch', style:`background:${colorFor(si, customColors)}`},''), lab
         ]));
       });
 
@@ -3425,6 +3590,7 @@ function mountGauge(w, body){
     legend.innerHTML='';
     const needles = Array.isArray(w.opts.needles) ? w.opts.needles : [];
     ctx.lineWidth=3;
+    const customColors = (w.opts.needles||[]).map(n => n.color);
     needles.forEach((s,si)=>{
       const v = readSelection(s);
       const tareOffset = (w.opts.tareOffsets && w.opts.tareOffsets[si]) || 0;
@@ -3435,7 +3601,7 @@ function mountGauge(w, body){
       const frac = clamp((displayValue - lo)/span, 0, 1);
       const ang = Math.PI + (0 - Math.PI) * frac;
       const nx = Math.cos(ang), ny = Math.sin(ang);
-      ctx.strokeStyle=colorFor(si);
+      ctx.strokeStyle=colorFor(si, customColors);
       ctx.beginPath();
       ctx.moveTo(cx, cy);
       ctx.lineTo(cx + (rInner + band*0.9)*nx, cy - (rInner + band*0.9)*ny);
@@ -3444,7 +3610,7 @@ function mountGauge(w, body){
       const lab = s.name && s.name.length ? s.name : labelFor(s);
       const decimals = w.opts.decimals !== undefined ? w.opts.decimals : 3;
       legend.append(el('div',{className:'item'},[
-        el('span',{className:'swatch', style:`background:${colorFor(si)}`},''), `${lab}: ${Number.isFinite(displayValue)?displayValue.toFixed(decimals):'—'}`
+        el('span',{className:'swatch', style:`background:${colorFor(si, customColors)}`},''), `${lab}: ${Number.isFinite(displayValue)?displayValue.toFixed(decimals):'—'}`
       ]));
     });
 
@@ -3532,6 +3698,7 @@ function mountBars(w, body){
     ctx.font = '10px system-ui, sans-serif';
     ctx.textBaseline = 'top';
 
+    const customColors = (w.opts.series || []).map(s => s.color);
     series.forEach((sel, idx) => {
       const v = readSelection(sel);
       const displayScale = sel.displayScale !== undefined ? sel.displayScale : 1.0;
@@ -3543,7 +3710,7 @@ function mountBars(w, body){
       const y = plotB - t * (plotB - plotT);
       const h = plotB - y;
 
-      ctx.fillStyle = colorFor(idx);
+      ctx.fillStyle = colorFor(idx, customColors);
       ctx.fillRect(x - barW / 2, y, barW, h);
 
       // Draw series label at bottom
@@ -5016,14 +5183,96 @@ function normalizeLayoutPages(pages){
 
 /* -------------------------- modal / editors ----------------------------- */
 function showModal(content, onClose){
-  const m=$('#modal'); m.classList.remove('hidden'); m.innerHTML='';
+  const m=$('#modal'); 
+  m.classList.remove('hidden'); 
+  m.innerHTML='';
+  
   const panel=el('div',{className:'panel'});
-  const closeBtn=el('button',{className:'btn',onclick:()=>{ closeModal(onClose); }},'Close');
-  const close=el('div',{style:'text-align:right;margin-bottom:8px;'}, closeBtn);
-  panel.append(close,content); m.append(panel);
+  
+  // DRAGGABLE TITLE BAR
+  const titleBar = el('div', {
+    className: 'modal-titlebar',
+    style: 'cursor:move;user-select:none;padding:8px 12px;background:#1a1f35;border-bottom:1px solid #2b2f45;border-radius:12px 12px 0 0;margin:-14px -14px 10px -14px;display:flex;justify-content:space-between;align-items:center'
+  });
+  
+  const titleText = el('div', {
+    style: 'font-weight:600;color:#a8b3cf;font-size:13px'
+  }, 'Settings');
+  
+  const closeBtn=el('button',{
+    className:'icon',
+    style:'font-size:20px;cursor:pointer;border:none;background:none;color:#a8b3cf;padding:0',
+    onclick:()=>{ closeModal(onClose); }
+  },'×');
+  
+  titleBar.append(titleText, closeBtn);
+  panel.append(titleBar, content);
+  m.append(panel);
+  
+  // Center the panel initially (will be positioned absolute but centered)
+  panel.style.position = 'absolute';
+  panel.style.left = '50%';
+  panel.style.top = '50%';
+  panel.style.transform = 'translate(-50%, -50%)';
+  
+  // Make draggable
+  let isDragging = false;
+  let currentX, currentY, initialX, initialY;
+  let offsetX = 0, offsetY = 0;  // Track offset from center
+  
+  titleBar.addEventListener('mousedown', dragStart);
+  
+  function dragStart(e) {
+    if (e.target.tagName === 'BUTTON') return; // Don't drag when clicking close button
+    
+    isDragging = true;
+    
+    // Get current position
+    const rect = panel.getBoundingClientRect();
+    initialX = e.clientX - rect.left;
+    initialY = e.clientY - rect.top;
+    
+    // Remove transform when starting drag (switch to fixed positioning)
+    panel.style.transform = 'none';
+    panel.style.left = rect.left + 'px';
+    panel.style.top = rect.top + 'px';
+    
+    document.addEventListener('mousemove', drag);
+    document.addEventListener('mouseup', dragEnd);
+    
+    titleBar.style.cursor = 'grabbing';
+    e.preventDefault();
+  }
+  
+  function drag(e) {
+    if (!isDragging) return;
+    
+    e.preventDefault();
+    currentX = e.clientX - initialX;
+    currentY = e.clientY - initialY;
+    
+    // Keep within window bounds
+    const maxX = window.innerWidth - panel.offsetWidth;
+    const maxY = window.innerHeight - panel.offsetHeight;
+    
+    currentX = Math.max(0, Math.min(currentX, maxX));
+    currentY = Math.max(0, Math.min(currentY, maxY));
+    
+    panel.style.left = currentX + 'px';
+    panel.style.top = currentY + 'px';
+  }
+  
+  function dragEnd() {
+    isDragging = false;
+    titleBar.style.cursor = 'move';
+    document.removeEventListener('mousemove', drag);
+    document.removeEventListener('mouseup', dragEnd);
+  }
+  
   bringToFront(m);
   m.addEventListener('mousedown', () => bringToFront(m), { capture: true, once: false });
 }
+
 
 function closeModal(onClose){
   const m=$('#modal'); 

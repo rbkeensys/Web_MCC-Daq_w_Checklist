@@ -2,7 +2,7 @@
   "boards1608": [
     {
       "boardNum": 0,
-      "sampleRateHz": 150.0,
+      "sampleRateHz": 160.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -171,7 +171,7 @@
     },
     {
       "boardNum": 2,
-      "sampleRateHz": 150.0,
+      "sampleRateHz": 160.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,

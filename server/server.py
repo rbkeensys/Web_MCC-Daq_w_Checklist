@@ -951,8 +951,8 @@ async def acq_loop():
                             'hw_writes': [],
                             'branches': {},
                             'executed_lines': [],  # Empty list (not set!) for JSON
-                            'do_writes': {},
-                            'ao_writes': {}
+                            'do_writes': cpp_results['do_writes'],  # Correct!
+                            'ao_writes': cpp_results['ao_writes']   # Correct!
                         })
                     
                     # Apply hardware writes from C++ - only write what changed
