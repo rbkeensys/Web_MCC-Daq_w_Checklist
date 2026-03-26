@@ -137,6 +137,8 @@ class CPPCodeGenerator:
         """Compile one expression to C++ function"""
         self.local_vars = set()
         self.static_vars = set()
+        self._static_assigns = set()  # Track which static vars are ASSIGNED in this expression
+        self._at_top_level = True  # Track if we're at top level (not inside if/while/etc)
         
         # Parse expression
         lexer = Lexer(expr_text)
@@ -170,8 +172,18 @@ class CPPCodeGenerator:
                 code.append(self.indent() + f"double {var} = 0.0;")
             code.append("")
         
-        # Generate body - ALL statements, no special handling
+        # Generate body FIRST to populate _static_assigns
         body = self.generate_statements(ast)
+        
+        # NOW we know which static vars are assigned, so we can declare flags
+        # These need to go BEFORE the body but AFTER local vars
+        if self._static_assigns:
+            code.append(self.indent() + "// One-time initialization flags for static vars")
+            for var_name in sorted(self._static_assigns):
+                code.append(self.indent() + f"static bool {var_name}_initialized = false;")
+            code.append("")
+        
+        # Add body
         if body:
             code.append(body)
         
@@ -333,14 +345,30 @@ class CPPCodeGenerator:
             return f"result = {var_name} = {expr};"
         
         elif node_type == 'STATIC_ASSIGN':
-            # static.varName = expr (also update result)
+            # static.varName = expr
+            # Only treat as initialization if: (1) at top level AND (2) constant value
             var_name = node.value
             if var_name not in self.staticvar_map:
                 self.staticvar_map[var_name] = self.staticvar_counter
                 self.staticvar_counter += 1
             index = self.staticvar_map[var_name]
             expr = self.generate_node(node.children[0]) if node.children else "0.0"
-            return f"result = static_vars[{index}] = {expr};"
+            
+            # Check if RHS is a simple numeric constant (e.g., "35.0" or "2000.0")
+            import re
+            is_constant = bool(re.match(r'^-?\d+\.?\d*$', expr.strip()))
+            
+            # Only initialize if BOTH top-level AND constant
+            if self._at_top_level and is_constant:
+                # Top-level constant initialization - only execute once (e.g., static.pressureSetPoint = 35)
+                if not hasattr(self, '_static_assigns'):
+                    self._static_assigns = set()
+                self._static_assigns.add(var_name)
+                # Generate conditional initialization + read
+                return f"if (!{var_name}_initialized) {{ static_vars[{index}] = {expr}; {var_name}_initialized = true; }} result = static_vars[{index}];"
+            else:
+                # Runtime assignment - always execute (includes resets inside if blocks)
+                return f"result = static_vars[{index}] = {expr};"
         
         elif node_type == 'DO_ASSIGN':
             # "DO:name" = expr (also update result)
@@ -423,6 +451,9 @@ class CPPCodeGenerator:
             
             code = f"if ({condition}) {{\n"
             self.indent_level += 1
+            # Mark that we're inside control flow (not top level)
+            was_top_level = self._at_top_level
+            self._at_top_level = False
             if len(node.children) > 1 and node.children[1]:
                 then_body = self.generate_statements(node.children[1])
                 if then_body:
@@ -439,6 +470,9 @@ class CPPCodeGenerator:
                     code += else_body + "\n"
                 self.indent_level -= 1
                 code += self.indent() + "}"
+            
+            # Restore top level flag
+            self._at_top_level = was_top_level
             
             return code
         
@@ -574,23 +608,23 @@ def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]]) ->
     code.append("    double* do_was_written_per_expr, // Flattened [50*64] - 1.0 if DO was written")
     code.append("    double* ao_was_written_per_expr  // Flattened [50*16] - 1.0 if AO was written")
     code.append(") {")
-    code.append("    // One-time initialization of static vars (like C static variables)")
-    code.append("    static bool static_vars_initialized = false;")
-    code.append("    if (!static_vars_initialized) {")
-    code.append("        printf(\"[C++] Initializing static vars...\\\\n\");")
-    code.append("        // Run initialization expressions ONCE to set default values")
-    code.append("        double init_do[64], init_ao[16];")
-    code.append("        double init_locals[500] = {0};")
-    code.append("        for (int i = 0; i < 64; i++) init_do[i] = 0.0;")
-    code.append("        for (int i = 0; i < 16; i++) init_ao[i] = 0.0;")
-    init_local_offset = 0
-    for i in range(num_exprs):
-        code.append(f"        expr_{i}(ai, ao, tc, do_state, pid, init_do, init_ao, static_vars, buttonVars, init_locals + {init_local_offset});")
-        if local_vars.get(i):
-            init_local_offset += len(local_vars[i])
-    code.append("        printf(\"[C++] Static vars initialized!\\\\n\");")
-    code.append("        static_vars_initialized = true;")
-    code.append("    }")
+    code.append("    // One-time initialization of static vars (TEMPORARILY DISABLED FOR DEBUG)")
+    code.append("    // static bool static_vars_initialized = false;")
+    code.append("    // if (!static_vars_initialized) {")
+    code.append("    //     printf(\"[C++] Initializing static vars...\\\\n\");")
+    code.append("    //     // Run initialization expressions ONCE to set default values")
+    code.append("    //     double init_do[64], init_ao[16];")
+    code.append("    //     double init_locals[500] = {0};")
+    code.append("    //     for (int i = 0; i < 64; i++) init_do[i] = 0.0;")
+    code.append("    //     for (int i = 0; i < 16; i++) init_ao[i] = 0.0;")
+    # init_local_offset = 0
+    # for i in range(num_exprs):
+    #     code.append(f"        expr_{i}(ai, ao, tc, do_state, pid, init_do, init_ao, static_vars, buttonVars, init_locals + {init_local_offset});")
+    #     if local_vars.get(i):
+    #         init_local_offset += len(local_vars[i])
+    code.append("    //     printf(\"[C++] Static vars initialized!\\\\n\");")
+    code.append("    //     static_vars_initialized = true;")
+    code.append("    // }")
     code.append("")
     code.append("    // Reset combined outputs")
     code.append("    for (int i = 0; i < 64; i++) { do_out[i] = 0.0; }")
