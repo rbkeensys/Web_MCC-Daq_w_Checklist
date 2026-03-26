@@ -37,6 +37,7 @@ body.fullscreen #exitFullscreenBtn { display: block; }
 .widget.le-widget, .widget.mathop-widget { min-height:10px; min-width:140px; }
 .widget.pidpanel-widget { min-width:168px; }
 .widget.bars-widget { min-width:100px; } /* Allow very narrow bars */
+.widget.staticvar-widget { min-width:120px; min-height:70px; } /* Compact static var display */
 .widget header { display:flex; align-items:flex-start; gap:8px; padding:8px; cursor:grab; }
 .widget.le-widget header, .widget.mathop-widget header { padding:2px 4px; min-height:14px; font-size:9px; }
 .widget header .title { font-weight:600; }

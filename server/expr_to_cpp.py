@@ -1,7 +1,9 @@
 """
 Expression to C++ Compiler - WORKING VERSION
-Version: 3.1.6
-Updated: 2026-03-17
+Version: 3.2.0
+Updated: 2026-03-20
+
+PER-EXPRESSION WRITE TRACKING with separate flag arrays!
 
 ALL assignments chain to result! result = var = expr; result = DO = expr; etc.
 
@@ -12,8 +14,8 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 - NUMBER, PLUS, MINUS, MULT, DIV, MOD, POWER
 """
 
-__version__ = "3.0.0"
-__updated__ = "2026-03-17"
+__version__ = "3.2.0"
+__updated__ = "2026-03-20"
 
 import json
 import os
@@ -454,6 +456,9 @@ class CPPCodeGenerator:
 def compile_all_expressions(expressions_file: str, config_file: str, output_dir: str = "compiled"):
     """Compile all expressions to C++ DLL"""
     print("[CPP] ========== COMPILING EXPRESSIONS ==========")
+    print(f"[CPP] expr_to_cpp.py VERSION: {__version__} (updated {__updated__})")
+    print(f"[CPP] DLL Signature: 15 parameters (NEW)")
+    print("[CPP] ===============================================")
     
     # Load config
     with open(config_file) as f:
@@ -541,7 +546,7 @@ inline double clamp(double x, double lo, double hi) {
     # Write metadata with variable mappings
     metadata = {
         'num_expressions': len(expressions),
-        'local_vars': {str(k): v for k, v in all_local_vars.items()},
+        'local_var_names': {str(k): v for k, v in all_local_vars.items()},  # FIXED: was 'local_vars'
         'static_vars': list(sorted(all_static_vars)),
         'buttonvar_map': generator.buttonvar_map,  # name -> index
         'staticvar_map': generator.staticvar_map   # name -> index
@@ -555,24 +560,80 @@ inline double clamp(double x, double lo, double hi) {
 
 
 def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]]) -> str:
-    """Generate batch evaluation function"""
+    """Generate batch evaluation function with per-expression write tracking"""
     code = []
-    code.append("// Batch evaluation")
+    code.append("// Batch evaluation with per-expression write tracking")
     code.append("EXPORT void evaluate_all_expressions(")
     code.append("    double* ai, double* ao, double* tc, double* do_state, double* pid,")
     code.append("    double* do_out, double* ao_out,")
     code.append("    double* static_vars, double* buttonVars,")
     code.append("    double* expr_results,")
-    code.append("    double** local_vars_out")
+    code.append("    double* local_vars_out,")
+    code.append("    double* do_writes_per_expr,      // Flattened [50*64] - DO values written")
+    code.append("    double* ao_writes_per_expr,      // Flattened [50*16] - AO values written")
+    code.append("    double* do_was_written_per_expr, // Flattened [50*64] - 1.0 if DO was written")
+    code.append("    double* ao_was_written_per_expr  // Flattened [50*16] - 1.0 if AO was written")
     code.append(") {")
-    code.append("    // Reset outputs")
+    code.append("    // One-time initialization of static vars (like C static variables)")
+    code.append("    static bool static_vars_initialized = false;")
+    code.append("    if (!static_vars_initialized) {")
+    code.append("        printf(\"[C++] Initializing static vars...\\\\n\");")
+    code.append("        // Run initialization expressions ONCE to set default values")
+    code.append("        double init_do[64], init_ao[16];")
+    code.append("        double init_locals[500] = {0};")
+    code.append("        for (int i = 0; i < 64; i++) init_do[i] = 0.0;")
+    code.append("        for (int i = 0; i < 16; i++) init_ao[i] = 0.0;")
+    init_local_offset = 0
+    for i in range(num_exprs):
+        code.append(f"        expr_{i}(ai, ao, tc, do_state, pid, init_do, init_ao, static_vars, buttonVars, init_locals + {init_local_offset});")
+        if local_vars.get(i):
+            init_local_offset += len(local_vars[i])
+    code.append("        printf(\"[C++] Static vars initialized!\\\\n\");")
+    code.append("        static_vars_initialized = true;")
+    code.append("    }")
+    code.append("")
+    code.append("    // Reset combined outputs")
     code.append("    for (int i = 0; i < 64; i++) { do_out[i] = 0.0; }")
     code.append("    for (int i = 0; i < 16; i++) { ao_out[i] = 0.0; }")
     code.append("")
+    code.append("    // Reset per-expression write tracking (flattened arrays)")
+    for i in range(num_exprs):
+        code.append(f"    for (int j = 0; j < 64; j++) {{ do_writes_per_expr[{i}*64 + j] = 0.0; do_was_written_per_expr[{i}*64 + j] = 0.0; }}")
+        code.append(f"    for (int j = 0; j < 16; j++) {{ ao_writes_per_expr[{i}*16 + j] = 0.0; ao_was_written_per_expr[{i}*16 + j] = 0.0; }}")
+    code.append("")
+    code.append("    // Temporary arrays for each expression's writes")
+    code.append("    double temp_do[64];")
+    code.append("    double temp_ao[16];")
+    code.append("")
     code.append("    // Evaluate expressions")
     
+    local_offset = 0
     for i in range(num_exprs):
-        code.append(f"    expr_results[{i}] = expr_{i}(ai, ao, tc, do_state, pid, do_out, ao_out, static_vars, buttonVars, local_vars_out[{i}]);")
+        code.append(f"    // Expression {i}")
+        code.append(f"    for (int j = 0; j < 64; j++) {{ temp_do[j] = -1.0; }}")  # -1 = not written yet
+        code.append(f"    for (int j = 0; j < 16; j++) {{ temp_ao[j] = -999999.0; }}")  # Sentinel for not written
+        code.append(f"    expr_results[{i}] = expr_{i}(ai, ao, tc, do_state, pid, temp_do, temp_ao, static_vars, buttonVars, local_vars_out + {local_offset});")
+        
+        # Track offset for next expression
+        if local_vars.get(i):
+            local_offset += len(local_vars[i])
+        
+        code.append(f"    // Copy this expression's writes")
+        code.append(f"    for (int j = 0; j < 64; j++) {{")
+        code.append(f"        if (temp_do[j] >= 0.0) {{  // Expression wrote this DO (0.0 or 1.0)")
+        code.append(f"            do_out[j] = temp_do[j];  // Combined output")
+        code.append(f"            do_writes_per_expr[{i}*64 + j] = temp_do[j];  // Store value (flat index)")
+        code.append(f"            do_was_written_per_expr[{i}*64 + j] = 1.0;  // Mark as written (flat index)")
+        code.append(f"        }}")
+        code.append(f"    }}")
+        code.append(f"    for (int j = 0; j < 16; j++) {{")
+        code.append(f"        if (temp_ao[j] != -999999.0) {{  // Expression wrote this AO")
+        code.append(f"            ao_out[j] = temp_ao[j];  // Combined output")
+        code.append(f"            ao_writes_per_expr[{i}*16 + j] = temp_ao[j];  // Store value (flat index)")
+        code.append(f"            ao_was_written_per_expr[{i}*16 + j] = 1.0;  // Mark as written (flat index)")
+        code.append(f"        }}")
+        code.append(f"    }}")
+        code.append("")
     
     code.append("}")
     code.append("")

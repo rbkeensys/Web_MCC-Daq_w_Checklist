@@ -32,8 +32,8 @@ import logging, os, math
 
 # Version tracking - all in one place
 SERVER_VERSION = "2.6.0"  # Versioned DLL files for hot-reload during critical tests!
-__version__ = "2.6.0"
-__updated__ = "2026-03-17"
+__version__ = "2.7.0"
+__updated__ = "2026-03-26"
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
 MCC_DUMP_FIRST = int(os.environ.get("MCC_DUMP_FIRST", "5")) # dump first N ticks fully
@@ -939,6 +939,15 @@ async def acq_loop():
                         button_vars=button_vars  # CRITICAL: Pass buttonVars!
                     )
                     
+                    # DEBUG: Check after evaluate
+                    if 'pressureSetPoint' in cpp_backend.staticvar_map:
+                        idx = cpp_backend.staticvar_map['pressureSetPoint']
+                        if ticks < 3:  # Only first 3 ticks
+                            log.info(f"[DEBUG-EVAL] AFTER evaluate: pressureSetPoint index={idx} value={cpp_backend.static_vars[idx]}")
+                            log.info(f"[DEBUG-LOCALS] local_vars_per_expr keys: {list(cpp_results.get('local_vars_per_expr', {}).keys())}")
+                            if 0 in cpp_results.get('local_vars_per_expr', {}):
+                                log.info(f"[DEBUG-LOCALS] Expr 0 locals: {cpp_results['local_vars_per_expr'][0]}")
+                    
                     # Convert to same format as Python evaluator
                     expr_tel = []
                     for i in range(len(expr_mgr.expressions)):
@@ -947,8 +956,8 @@ async def acq_loop():
                             'output': cpp_results['results'][i],
                             'enabled': expr_mgr.expressions[i].enabled,
                             'error': None,
-                            'locals': cpp_results['locals'][i],  # DEBUG INFO!
-                            'hw_writes': [],
+                            'locals': cpp_results.get('local_vars_per_expr', {}).get(i, {}),  # Get locals for this expr
+                            'hw_writes': cpp_results['hw_writes_per_expr'][i],
                             'branches': {},
                             'executed_lines': [],  # Empty list (not set!) for JSON
                             'do_writes': cpp_results['do_writes'],  # Correct!
@@ -1147,7 +1156,18 @@ async def acq_loop():
                 "global_vars": clean_for_json(expr_global_vars.list_all()),
                 # buttonVars synchronized from the frontend
                 "button_vars": clean_for_json(dict(button_vars)),
+                # Static vars from C++ backend (for runtime editing)
+                "static_vars": {}
             }
+            
+            # Populate static_vars from C++ backend
+            if cpp_backend and hasattr(cpp_backend, 'staticvar_map') and hasattr(cpp_backend, 'static_vars'):
+                for name, index in cpp_backend.staticvar_map.items():
+                    frame['static_vars'][name] = float(cpp_backend.static_vars[index])
+                
+                # Debug first 3 ticks
+                if ticks < 3:
+                    log.info(f"[DEBUG] Tick #{ticks+1} static_vars in telemetry: {frame['static_vars']}")
 
             ticks += 1
             log_ctr += 1
@@ -1380,6 +1400,46 @@ def update_button_vars(body: dict):
 def get_button_vars():
     """Get current button variable states"""
     return {"vars": button_vars}
+
+@app.post("/api/static_vars")
+def update_static_var(body: dict):
+    """Update static variable value at runtime (no recompile needed!)"""
+    global cpp_backend
+    
+    var_name = body.get('name')
+    var_value = float(body.get('value', 0))
+    
+    if not var_name:
+        return {"ok": False, "error": "Variable name required"}
+    
+    if cpp_backend and hasattr(cpp_backend, 'staticvar_map') and hasattr(cpp_backend, 'static_vars'):
+        if var_name in cpp_backend.staticvar_map:
+            index = cpp_backend.staticvar_map[var_name]
+            old_value = cpp_backend.static_vars[index]
+            cpp_backend.static_vars[index] = var_value
+            log.info(f"[STATIC-VAR] Updated {var_name} = {var_value} (was {old_value}, index {index})")
+            log.info(f"[STATIC-VAR] Verified: cpp_backend.static_vars[{index}] = {cpp_backend.static_vars[index]}")
+            return {"ok": True, "old_value": old_value, "new_value": var_value}
+        else:
+            available = list(cpp_backend.staticvar_map.keys())
+            log.warning(f"[STATIC-VAR] Variable '{var_name}' not found. Available: {available}")
+            return {"ok": False, "error": f"Variable '{var_name}' not found", "available": available}
+    else:
+        log.warning(f"[STATIC-VAR] C++ backend not available or missing staticvar_map")
+        return {"ok": False, "error": "C++ backend not available"}
+
+@app.get("/api/static_vars")
+def get_static_vars():
+    """Get current static variable values"""
+    global cpp_backend
+    
+    if cpp_backend and hasattr(cpp_backend, 'staticvar_map') and hasattr(cpp_backend, 'static_vars'):
+        vars_dict = {}
+        for name, index in cpp_backend.staticvar_map.items():
+            vars_dict[name] = float(cpp_backend.static_vars[index])
+        return {"ok": True, "vars": vars_dict}
+    else:
+        return {"ok": False, "error": "C++ backend not available", "vars": {}}
 
 @app.get("/api/script")
 def get_script():

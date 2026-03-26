@@ -10,26 +10,26 @@
         {
           "name": "LOX P",
           "slope": 25.31680784977651,
-          "offset": -12.942028197399637,
-          "cutoffHz": 0.1,
+          "offset": -13.041084225671726,
+          "cutoffHz": 0.2,
           "units": "psi",
           "include": true
         },
         {
           "name": "Fuel P",
           "slope": 37.56151857509841,
-          "offset": -18.520093719800872,
-          "cutoffHz": 0.1,
+          "offset": -18.701768679486154,
+          "cutoffHz": 0.2,
           "units": "psi",
           "include": true
         },
         {
-          "name": "DewarP",
-          "slope": 2.9,
-          "offset": -1.5121188354492188,
-          "cutoffHz": 1.0,
+          "name": "DP Level 1",
+          "slope": 50.0,
+          "offset": -25.17803955078125,
+          "cutoffHz": 0.1,
           "units": "psi",
-          "include": false
+          "include": true
         },
         {
           "name": "DP Level 2",
@@ -40,10 +40,10 @@
           "include": false
         },
         {
-          "name": "AI4",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
+          "name": "Ch P",
+          "slope": 50.0,
+          "offset": -27.1905517578125,
+          "cutoffHz": 0.1,
           "units": "",
           "include": false
         },

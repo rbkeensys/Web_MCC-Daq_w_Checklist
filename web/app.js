@@ -1197,6 +1197,10 @@ function feedTick(msg){
     if (!state.buttonVars) state.buttonVars = {};
     Object.assign(state.buttonVars, msg.button_vars);
   }
+  // Static vars from C++ backend (for runtime editing)
+  if (msg.static_vars) {
+    state.static_vars = msg.static_vars;
+  }
   if (msg.t) state.lastT = msg.t;
   onTick();
 }
@@ -1475,6 +1479,29 @@ function addWidget(type){
   // Special handling for Expression - fetch expr config for name
   if (type === 'expr') {
     addExprWidget();
+    return;
+  }
+  
+  // Special handling for Static Var - prompt for variable name
+  if (type === 'staticvar') {
+    const varName = prompt('Enter static variable name (e.g., "setTemp", "setPressure"):\n\nNote: Variable must exist in compiled expressions (e.g., static.setTemp)');
+    if (!varName || varName.trim() === '') return;
+    const w = {
+      id: crypto.randomUUID(),
+      type: 'staticvar',
+      x: 40, y: 40, w: 160, h: 80,  // Smaller default size
+      opts: {
+        title: 'Static Var',
+        varName: varName.trim(),
+        label: varName.trim(),
+        units: '',
+        decimals: 1,
+        min: 0,
+        max: 100
+      }
+    };
+    state.pages[activePageIndex].widgets.push(w);
+    renderPage();
     return;
   }
   
@@ -1833,6 +1860,7 @@ function defaultsFor(type){
     case 'motor':    return { title:'Motor', motorIndex:0, showControls:true };
     case 'mathop':   return { title:'Math', mathIndex:0, showInputs:true };
     case 'expr':     return { title:'Expression', exprIndex:0, showSource:true, showOutput:true };
+    case 'staticvar': return { title:'Static Var', varName:'', label:'', units:'', decimals:1, min:0, max:100 };
   }
   return {};
 }
@@ -2536,6 +2564,7 @@ function renderWidget(w){
   if (w.type === 'pidpanel') classList += ' pidpanel-widget';
   if (w.type === 'bars') classList += ' bars-widget';
   if (w.type === 'expr') classList += ' expr-widget';
+  if (w.type === 'staticvar') classList += ' staticvar-widget';
   const box=el('div',{className:classList, id:'w_'+w.id});
   
   // LE and mathop widgets get minimal headers (via CSS)
@@ -2580,6 +2609,7 @@ function renderWidget(w){
     case 'le':       mountLEWidget(w,body); break;
     case 'mathop':   mountMathOpWidget(w,body); break;
     case 'expr':     mountExprWidget(w,body); break;
+    case 'staticvar': mountStaticVarMonitor(w,body); break;
   }
   return box;
 }
@@ -4972,7 +5002,7 @@ function mountExprWidget(w, body){
     }
     
     // Display variables
-    if (showSource && exprData.locals) {
+    if (showSource && exprData.locals && Object.keys(exprData.locals).length > 0) {
       
       const varsDiv = el('div', {className:'expr-vars'});
       
@@ -5036,6 +5066,176 @@ function mountExprWidget(w, body){
   })();
 }
 
+/* ------------------------ Static Var Monitor Widget ------------------------ */
+function mountStaticVarMonitor(w, body) {
+  body.style.cssText = `
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 12px;
+    cursor: pointer;
+    background: linear-gradient(135deg, #1a1e35 0%, #252b45 100%);
+    border-radius: 8px;
+  `;
+  
+  const labelDiv = document.createElement('div');
+  labelDiv.style.cssText = `
+    font-size: 13px;
+    color: #a8b3cf;
+    margin-bottom: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  `;
+  
+  const valueDiv = document.createElement('div');
+  valueDiv.style.cssText = `
+    font-size: 32px;
+    font-weight: bold;
+    color: #79c0ff;
+    font-family: 'Courier New', monospace;
+  `;
+  
+  const unitsDiv = document.createElement('div');
+  unitsDiv.style.cssText = `
+    font-size: 12px;
+    color: #7a8199;
+    margin-top: 4px;
+  `;
+  
+  body.appendChild(labelDiv);
+  body.appendChild(valueDiv);
+  body.appendChild(unitsDiv);
+  
+  function update() {
+    const varName = w.opts.varName || '';
+    const label = w.opts.label || varName;
+    const units = w.opts.units || '';
+    const decimals = w.opts.decimals !== undefined ? w.opts.decimals : 1;
+    const minVal = w.opts.min;
+    const maxVal = w.opts.max;
+    
+    labelDiv.textContent = label;
+    unitsDiv.textContent = units;
+    
+    if (!state.static_vars) {
+      valueDiv.textContent = '---';
+      valueDiv.style.color = '#666';
+      requestAnimationFrame(update);
+      return;
+    }
+    
+    const val = state.static_vars[varName];
+    if (val !== undefined) {
+      valueDiv.textContent = val.toFixed(decimals);
+      
+      // Color coding based on range
+      if (minVal !== undefined && maxVal !== undefined) {
+        const pct = (val - minVal) / (maxVal - minVal);
+        if (pct < 0 || pct > 1) {
+          valueDiv.style.color = '#ff6b6b'; // Out of range - red
+        } else {
+          valueDiv.style.color = '#79c0ff'; // In range - blue
+        }
+      }
+    } else {
+      valueDiv.textContent = '---';
+      valueDiv.style.color = '#666';
+    }
+    
+    requestAnimationFrame(update);
+  }
+  
+  // Double-click to edit
+  body.addEventListener('dblclick', async (e) => {
+    e.stopPropagation();
+    
+    const varName = w.opts.varName || '';
+    if (!varName) {
+      alert('No variable name configured for this widget!');
+      return;
+    }
+    
+    const currentValue = state.static_vars?.[varName];
+    if (currentValue === undefined) {
+      alert(
+        `Static variable "${varName}" not found!\n\n` +
+        `Make sure:\n` +
+        `1. It's used in an expression (e.g., static.${varName})\n` +
+        `2. Expressions have been compiled\n` +
+        `3. Server is connected`
+      );
+      return;
+    }
+    
+    const decimals = w.opts.decimals !== undefined ? w.opts.decimals : 1;
+    const units = w.opts.units || '';
+    const minVal = w.opts.min;
+    const maxVal = w.opts.max;
+    
+    let promptText = `Enter new value for ${varName}:\n\n`;
+    promptText += `Current: ${currentValue.toFixed(decimals)} ${units}\n`;
+    if (minVal !== undefined && maxVal !== undefined) {
+      promptText += `Range: ${minVal} to ${maxVal}`;
+    }
+    
+    const newValue = prompt(promptText, currentValue);
+    
+    if (newValue !== null) {
+      const numValue = parseFloat(newValue);
+      if (isNaN(numValue)) {
+        alert('Invalid number!');
+        return;
+      }
+      
+      // Validate range
+      if (minVal !== undefined && numValue < minVal) {
+        alert(`Value ${numValue} is below minimum ${minVal}`);
+        return;
+      }
+      if (maxVal !== undefined && numValue > maxVal) {
+        alert(`Value ${numValue} is above maximum ${maxVal}`);
+        return;
+      }
+      
+      // Send to server
+      try {
+        const response = await fetch('/api/static_vars', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: varName,
+            value: numValue
+          })
+        });
+        
+        const result = await response.json();
+        if (!result.ok) {
+          alert(`Error: ${result.error}\n\nAvailable vars: ${result.available?.join(', ') || 'none'}`);
+        } else {
+          console.log(`[STATIC-VAR] Updated ${varName} = ${numValue}`);
+        }
+      } catch (err) {
+        alert(`Failed to update: ${err.message}`);
+      }
+    }
+  });
+  
+  // Hover effect
+  body.addEventListener('mouseenter', () => {
+    body.style.transform = 'scale(1.02)';
+    body.style.transition = 'transform 0.2s';
+  });
+  body.addEventListener('mouseleave', () => {
+    body.style.transform = 'scale(1)';
+  });
+  
+  update();
+}
+
 /* ------------------------ tick / read / drag ---------------------------- */
 function onTick(){
   if (replayMode !== null) {
@@ -5086,10 +5286,12 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'bars') minW = 100;  // Allow narrow bar graphs
   else if (w.type === 'le' || w.type === 'mathop') minW = 140;  // 50% of default 280
   else if (w.type === 'pidpanel') minW = 168;  // 60% of default 280
+  else if (w.type === 'staticvar') minW = 120;  // Compact static var display
   
   let minH = 180;
   if (w.type === 'dobutton') minH = 45;
   else if (w.type === 'le' || w.type === 'mathop') minH = 10;  // Half of default 20
+  else if (w.type === 'staticvar') minH = 70;  // Compact static var display
   
   header.addEventListener('mousedown', (e)=>{
     const tag=(e.target.tagName||'').toUpperCase();
