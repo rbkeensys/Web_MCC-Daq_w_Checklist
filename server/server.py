@@ -31,9 +31,9 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-SERVER_VERSION = "2.6.0"  # Versioned DLL files for hot-reload during critical tests!
 __version__ = "2.7.0"
 __updated__ = "2026-03-26"
+SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
 MCC_DUMP_FIRST = int(os.environ.get("MCC_DUMP_FIRST", "5")) # dump first N ticks fully
