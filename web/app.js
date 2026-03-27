@@ -1,4 +1,4 @@
-const UI_VERSION = "1.8.0";  // Duration support for ALL event types  // 2026-01-27: Fixed buttonVars in charts/gauges/bars + removed debug
+const UI_VERSION = "1.8.1";  // 2026-03-27: Static var widget: editable, smaller min size, tighter name spacing + PID err limits removed
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -4679,11 +4679,11 @@ function mountStaticVarWidget(w, body) {
   body.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;';
 
   const valueEl = el('div', {
-    style: 'font-size:28px;font-weight:700;font-family:Consolas,Monaco,monospace;color:#a8f0a8;cursor:pointer;',
+    style: 'font-size:28px;font-weight:700;font-family:Consolas,Monaco,monospace;color:#a8f0a8;cursor:pointer;line-height:1;',
     title: 'Click to edit'
   }, '—');
   
-  const nameEl  = el('div', {style: 'font-size:11px;color:#9094a1;margin-top:4px;'}, w.opts.varName || '');
+  const nameEl  = el('div', {style: 'font-size:11px;color:#9094a1;margin-top:-2px;'}, w.opts.varName || '');
   
   // Click to edit
   valueEl.onclick = () => {
@@ -4790,10 +4790,12 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'bars') minW = 100;  // Allow narrow bar graphs
   else if (w.type === 'le' || w.type === 'mathop') minW = 140;  // 50% of default 280
   else if (w.type === 'pidpanel') minW = 168;  // 60% of default 280
+  else if (w.type === 'staticvar') minW = 196;  // 70% of default 280
   
   let minH = 180;
   if (w.type === 'dobutton') minH = 45;
   else if (w.type === 'le' || w.type === 'mathop') minH = 10;  // Half of default 20
+  else if (w.type === 'staticvar') minH = 90;  // Half of default 180
   
   header.addEventListener('mousedown', (e)=>{
     const tag=(e.target.tagName||'').toUpperCase();
