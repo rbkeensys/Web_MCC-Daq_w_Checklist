@@ -131,6 +131,28 @@ class CPPExpressionBackend:
             ctypes.POINTER(ctypes.c_double),  # do_was_written_per_expr
             ctypes.POINTER(ctypes.c_double),  # ao_was_written_per_expr
         ]
+        
+        # Try to load PID function (may not exist if no PIDs configured)
+        try:
+            self.pid_func = self.dll.pid_step_all
+            self.pid_func.restype = None
+            self.pid_func.argtypes = [
+                ctypes.POINTER(ctypes.c_double),  # ai
+                ctypes.POINTER(ctypes.c_double),  # tc
+                ctypes.POINTER(ctypes.c_double),  # ao_cache
+                ctypes.POINTER(ctypes.c_double),  # do_state
+                ctypes.POINTER(ctypes.c_double),  # expr_results
+                ctypes.POINTER(ctypes.c_double),  # pid_outputs
+                ctypes.POINTER(ctypes.c_double),  # do_out
+                ctypes.POINTER(ctypes.c_double),  # ao_out
+                ctypes.c_double,                   # dt
+            ]
+            print("[CPP-EXPR] ✓ PID function loaded")
+            self.has_pids = True
+        except AttributeError:
+            self.pid_func = None
+            self.has_pids = False
+            print("[CPP-EXPR] No PID function in DLL (no PIDs configured)")
     
     def evaluate(
         self,
@@ -279,6 +301,54 @@ class CPPExpressionBackend:
                     print(f"[CPP-DEBUG] Expr {idx} locals: {locals_dict}")
         
         return results
+    
+    def evaluate_pids(
+        self,
+        ai_vals: List[float],
+        tc_vals: List[float],
+        ao_cache: List[float],
+        do_state: List[float],
+        expr_results: List[float],
+        num_pids: int,
+        dt: float
+    ) -> List[float]:
+        """
+        Evaluate PID controllers using C++ DLL
+        Returns array of PID outputs
+        """
+        if not self.has_pids or self.pid_func is None:
+            return [0.0] * num_pids
+        
+        # Prepare arrays
+        ai_array = np.array(ai_vals, dtype=np.float64)
+        tc_array = np.array(tc_vals, dtype=np.float64)
+        ao_cache_array = np.array(ao_cache, dtype=np.float64)
+        do_state_array = np.array(do_state, dtype=np.float64)
+        expr_array = np.array(expr_results, dtype=np.float64)
+        
+        # Output arrays
+        pid_outputs = np.zeros(num_pids, dtype=np.float64)
+        do_out = np.zeros(64, dtype=np.float64)  # PID can write DOs
+        ao_out = np.zeros(16, dtype=np.float64)  # PID can write AOs
+        
+        # Call DLL
+        self.pid_func(
+            ai_array.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            tc_array.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            ao_cache_array.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            do_state_array.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            expr_array.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            pid_outputs.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            do_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            ao_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            dt
+        )
+        
+        return {
+            'outputs': list(pid_outputs),
+            'do_writes': {i: bool(v >= 1.0) for i, v in enumerate(do_out) if v != 0},
+            'ao_writes': {i: v for i, v in enumerate(ao_out) if v != 0}
+        }
 
 
 # Global instance

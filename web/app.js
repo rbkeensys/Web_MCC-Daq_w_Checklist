@@ -1,4 +1,4 @@
-const UI_VERSION = "1.8.1";  // Color picker for charts/gauges/bars
+const UI_VERSION = "1.8.0";  // Duration support for ALL event types  // 2026-01-27: Fixed buttonVars in charts/gauges/bars + removed debug
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -9,140 +9,7 @@ const el = (tag, props = {}, children = []) => {
   for (const c of children) n.append(c instanceof Node ? c : document.createTextNode(c));
   return n;
 };
-
-// ENHANCED: Now supports custom colors per series
-function colorFor(i, customColors = null) {
-  const defaultPalette = ['#7aa2f7','#9ece6a','#f7768e','#bb9af7','#e0af68','#73daca','#f4b8e4','#ffd479'];
-  if (customColors && customColors[i]) return customColors[i];
-  return defaultPalette[i % defaultPalette.length];
-}
-
-// COLOR PICKER: Standard color palette
-const STANDARD_COLORS = [
-  '#ff4d4d','#ff0000','#cc0000','#990000','#660000',
-  '#ff9933','#ff6600','#ff3300','#cc2900','#991f00',
-  '#ffff00','#ffcc00','#ff9900','#ff6600','#cc5200',
-  '#00ff00','#00cc00','#009900','#006600','#003300',
-  '#00ffff','#00cccc','#009999','#006666','#004d4d',
-  '#4d94ff','#0066ff','#0052cc','#003d99','#002966',
-  '#bb9af7','#9966ff','#7733ff','#5500cc','#3d0099',
-  '#ff99ff','#ff66ff','#ff33ff','#cc00cc','#990099',
-  '#ffffff','#cccccc','#999999','#666666','#333333',
-  '#7aa2f7','#9ece6a','#f7768e','#e0af68','#73daca'
-];
-
-// COLOR PICKER: Create modal color picker UI
-function createColorPicker(currentColor, onSelect) {
-  const modal = el('div', {
-    className: 'modal',
-    style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100000;display:flex;align-items:center;justify-content:center',
-    onclick: (e) => { if (e.target === modal) modal.remove(); }
-  });
-  
-  const picker = el('div', {
-    style: 'background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:20px;max-width:400px;box-shadow:0 8px 24px rgba(0,0,0,0.4)'
-  });
-  
-  const header = el('div', {style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px'}, [
-    el('h3', {style: 'margin:0;color:var(--text)'}, 'Choose Color'),
-    el('button', {
-      className: 'icon',
-      style: 'font-size:24px;cursor:pointer;border:none;background:none;color:var(--text);padding:0',
-      onclick: () => modal.remove()
-    }, '×')
-  ]);
-  
-  const preview = el('div', {
-    style: `width:100%;height:50px;border-radius:6px;border:2px solid var(--border);margin-bottom:16px;background:${currentColor};transition:background 0.2s`
-  });
-  
-  const gridLabel = el('div', {
-    style: 'font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600'
-  }, 'Standard Colors');
-  
-  const standardGrid = el('div', {
-    style: 'display:grid;grid-template-columns:repeat(5, 1fr);gap:8px;margin-bottom:20px'
-  });
-  
-  STANDARD_COLORS.forEach(color => {
-    const isSelected = color.toLowerCase() === currentColor.toLowerCase();
-    const swatch = el('div', {
-      style: `width:100%;aspect-ratio:1;background:${color};border-radius:6px;cursor:pointer;border:3px solid ${isSelected ? '#fff' : 'var(--border)'};transition:all 0.15s;box-shadow:${isSelected ? '0 0 8px rgba(255,255,255,0.5)' : 'none'}`,
-      onclick: () => {
-        onSelect(color);
-        modal.remove();
-      },
-      onmouseenter: (e) => {
-        e.target.style.transform = 'scale(1.15)';
-        e.target.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-        preview.style.background = color;
-      },
-      onmouseleave: (e) => {
-        e.target.style.transform = 'scale(1)';
-        e.target.style.boxShadow = isSelected ? '0 0 8px rgba(255,255,255,0.5)' : 'none';
-        preview.style.background = currentColor;
-      }
-    });
-    standardGrid.append(swatch);
-  });
-  
-  const customSection = el('div', {style: 'border-top:1px solid var(--border);padding-top:16px'});
-  
-  const customLabel = el('div', {
-    style: 'font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600'
-  }, 'Custom Color');
-  
-  const pickerRow = el('div', {style: 'display:flex;gap:8px;align-items:stretch'});
-  
-  const customInput = el('input', {
-    type: 'color',
-    value: currentColor,
-    style: 'flex:1;height:50px;border:2px solid var(--border);border-radius:6px;cursor:pointer;background:var(--input-bg)',
-    oninput: (e) => {
-      preview.style.background = e.target.value;
-      hexInput.value = e.target.value;
-    },
-    onchange: (e) => {
-      onSelect(e.target.value);
-      modal.remove();
-    }
-  });
-  
-  const hexInput = el('input', {
-    type: 'text',
-    value: currentColor,
-    placeholder: '#000000',
-    style: 'flex:1;padding:12px;border:2px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--text);font-family:monospace;font-size:14px',
-    oninput: (e) => {
-      let val = e.target.value.trim();
-      if (!val.startsWith('#')) val = '#' + val;
-      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-        preview.style.background = val;
-        customInput.value = val;
-      }
-    },
-    onchange: (e) => {
-      let val = e.target.value.trim();
-      if (!val.startsWith('#')) val = '#' + val;
-      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-        onSelect(val);
-        modal.remove();
-      } else {
-        alert('Invalid hex color! Use format: #RRGGBB');
-        e.target.value = currentColor;
-      }
-    }
-  });
-  
-  pickerRow.append(customInput, hexInput);
-  customSection.append(customLabel, pickerRow);
-  picker.append(header, preview, gridLabel, standardGrid, customSection);
-  modal.append(picker);
-  document.body.append(modal);
-  
-  return modal;
-}
-
+function colorFor(i){ const p=['#7aa2f7','#9ece6a','#f7768e','#bb9af7','#e0af68','#73daca','#f4b8e4','#ffd479']; return p[i%p.length]; }
 function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 function safeArc(ctx, cx, cy, r, a0, a1) {
   if (!Number.isFinite(r) || r <= 0) return false;
@@ -228,108 +95,28 @@ function parseCSV(text){
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return {cols:[], rows:[]};
   const cols = lines[0].split(',').map(s=>s.trim());
-  // Find chk_events column index — its values are JSON strings, not numbers
-  const chkCol = cols.findIndex(c => c.toLowerCase() === 'chk_events');
-  const rows = lines.slice(1).map(line => {
-    const parts = line.split(',');
-    return parts.map((v, i) => (i === chkCol) ? v : Number(v));
-  });
-  // On load: restore check events from the first non-empty chk_events cell
-  if (chkCol >= 0 && window.loadCheckEventsFromLog) {
-    for (const row of rows) {
-      const val = row[chkCol];
-      if (typeof val === 'string' && val.trim().startsWith('[')) {
-        window.loadCheckEventsFromLog(val);
-        break;
-      }
-    }
-  }
+  const rows = lines.slice(1).map(line => line.split(',').map(v=>Number(v)));
   return { cols, rows };
 }
 
 function makeTickFromRow(cols, row){
   const obj = { type:'tick' };
   const ai=[], ao=[], dob=[], tc=[];
-  // pid[N] collects field fragments; expr[N] is a scalar output
-  const pidMap = {};   // index -> {pv,sp,u,out,err,p_term,i_term,d_term,enabled,name}
-  const exprMap = {};  // index -> output float
-  const globalVars = {};
-  const buttonVars = {};
-
   for(let c=0;c<cols.length;c++){
-    const rawName = cols[c].trim();          // preserve original casing
-    const name = rawName.toLowerCase();      // lowercase only for prefix matching
+    const name = cols[c].toLowerCase();
     const v = row[c];
-    const vn = (v === '' || v === undefined || v === null) ? null : Number(v);
-
-    if (name === 't' || name === 'time' || name === 'timestamp') {
-      obj.t = vn;
-    } else if (/^ai\d+$/.test(name)) {
-      ai[Number(name.slice(2))] = vn;
-    } else if (/^ao\d+$/.test(name)) {
-      ao[Number(name.slice(2))] = vn;
-    } else if (/^do\d+$/.test(name)) {
-      dob[Number(name.slice(2))] = vn;
-    } else if (/^tc\d+$/.test(name)) {
-      tc[Number(name.slice(2))] = vn;
-    } else if (/^expr\d+$/.test(name)) {
-      exprMap[Number(name.slice(4))] = vn;
-    } else if (/^pid\d+_/.test(name)) {
-      const m = name.match(/^pid(\d+)_(.+)$/);
-      if (m) {
-        const idx = Number(m[1]);
-        const field = m[2];
-        if (!pidMap[idx]) pidMap[idx] = { name: `PID${idx}` };
-        switch(field){
-          case 'pv':      pidMap[idx].pv = vn; break;
-          case 'sp':      pidMap[idx].target = vn; break;
-          case 'u':       pidMap[idx].u = vn; break;
-          case 'out':     pidMap[idx].out = vn; break;
-          case 'err':     pidMap[idx].err = vn; break;
-          case 'p':       pidMap[idx].p_term = vn; break;
-          case 'i':       pidMap[idx].i_term = vn; break;
-          case 'd':       pidMap[idx].d_term = vn; break;
-          case 'enabled': pidMap[idx].enabled = vn !== 0; break;
-        }
-      }
-    } else if (name.startsWith('gvar_')) {
-      globalVars[rawName.slice(5)] = vn;   // use rawName to preserve case
-    } else if (name.startsWith('bvar_')) {
-      buttonVars[rawName.slice(5)] = vn;   // use rawName: bvar_sparkON -> sparkON
-    } else if (name === 'chk_events') {
-      // JSON blob column — handled at parseCSV load time, not per-row
-    }
+    if (name === 't' || name === 'time' || name === 'timestamp') obj.t = v;
+    else if (name.startsWith('ai')) ai[Number(name.slice(2))] = v;
+    else if (name.startsWith('ao')) ao[Number(name.slice(2))] = v;
+    else if (name.startsWith('do')) dob[Number(name.slice(2))] = v;
+    else if (name.startsWith('tc')) tc[Number(name.slice(2))] = v;
   }
-
-  if (ai.length)  obj.ai = ai;
-  if (ao.length)  obj.ao = ao;
+  if (ai.length) obj.ai = ai;
+  if (ao.length) obj.ao = ao;
   if (dob.length) obj.do = dob;
-  if (tc.length)  obj.tc = tc;
-
-  // Reconstruct pid array in index order
-  const pidKeys = Object.keys(pidMap).map(Number).sort((a,b)=>a-b);
-  if (pidKeys.length) {
-    obj.pid = [];
-    for (const k of pidKeys) obj.pid[k] = pidMap[k];
-  }
-
-  // Reconstruct expr array – wrap scalar back into the dict shape widgets expect
-  const exprKeys = Object.keys(exprMap).map(Number).sort((a,b)=>a-b);
-  if (exprKeys.length) {
-    obj.expr = [];
-    for (const k of exprKeys)
-      obj.expr[k] = { output: exprMap[k], enabled: true, error: null };
-  }
-
-  if (Object.keys(globalVars).length) obj.global_vars = globalVars;
-  if (Object.keys(buttonVars).length) obj.button_vars = buttonVars;
-
+  if (tc.length) obj.tc = tc;
   return obj;
 }
-
-// Called by replay loader when a chk_events column is found in the header
-// We only do this once (on the first non-empty value)
-window._checkEventsLoadedFromLog = false;
 
 function startReplay(cols, rows){
   // PAUSE live data
@@ -378,17 +165,9 @@ function loadAllReplayDataIntoCharts(){
           if (sel.kind === 'ao') return msg.ao?.[sel.index] ?? 0;
           if (sel.kind === 'do') return msg.do?.[sel.index] ?? 0;
           if (sel.kind === 'tc') return msg.tc?.[sel.index] ?? 0;
-          if (sel.kind === 'pid') {
-            const pid = msg.pid?.[sel.index];
-            if (!pid) return 0;
-            const prop = sel.prop || 'out';
-            return pid[prop] ?? 0;
-          }
-          if (sel.kind === 'expr') return msg.expr?.[sel.index]?.output ?? 0;
-          if (sel.kind === 'button') return msg.button_vars?.[sel.index] ?? 0;
           return 0;
         });
-        buf.push({t, tServer: t, v: raw});
+        buf.push({t, v: raw});
         chartBuffers.set(w.id, buf);
       }
     }
@@ -407,10 +186,7 @@ function updateGaugesAndBarsFromReplayIndex(){
   if (msg.do) state.do = msg.do;
   if (msg.tc) state.tc = msg.tc;
   if (msg.pid) state.pid = msg.pid;
-  if (msg.expr) state.expr = msg.expr;
   if (msg.motors) state.motors = msg.motors;
-  if (msg.global_vars) state.global_vars = msg.global_vars;
-  if (msg.button_vars) state.buttonVars = msg.button_vars;
 
   updateDOButtons();
 }
@@ -861,14 +637,11 @@ async function executeScriptEvent(evt){
       if (!state.buttonVars) state.buttonVars = {};
       state.buttonVars[varName] = value;
       
-      // Sync to backend (sanitize: replace null/undefined with 0)
-      const _bvSend1 = Object.fromEntries(
-        Object.entries(state.buttonVars).map(([k,v]) => [k, (v == null || isNaN(Number(v))) ? 0 : Number(v)])
-      );
+      // Sync to backend
       const response = await fetch('/api/button_vars', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({vars: _bvSend1})
+        body: JSON.stringify({vars: state.buttonVars})
       });
       
       if (!response.ok) {
@@ -897,13 +670,10 @@ async function executeScriptEvent(evt){
           if (!state.buttonVars) state.buttonVars = {};
           state.buttonVars[varName] = 0;
           
-          const _bvSend2 = Object.fromEntries(
-            Object.entries(state.buttonVars).map(([k,v]) => [k, (v == null || isNaN(Number(v))) ? 0 : Number(v)])
-          );
           await fetch('/api/button_vars', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({vars: _bvSend2})
+            body: JSON.stringify({vars: state.buttonVars})
           });
           console.log(`[Script] ✓ buttonVar.${varName} duration reset complete`);
         }, duration * 1000);
@@ -1191,17 +961,12 @@ function feedTick(msg){
   if (msg.le) state.le = msg.le;  // Logic Elements
   if (msg.math) state.math = msg.math;  // Math Operators
   if (msg.expr) state.expr = msg.expr;  // Expressions
-  // Server echoes button_vars back in every tick; keep state.buttonVars in sync
-  // so the logger settle-window frames contain the actual values
-  if (msg.button_vars && Object.keys(msg.button_vars).length) {
-    if (!state.buttonVars) state.buttonVars = {};
-    Object.assign(state.buttonVars, msg.button_vars);
-  }
-  // Static vars from C++ backend (for runtime editing)
-  if (msg.static_vars) {
+  // Static variables: prefer static_vars (C++) but fall back to global_vars (Python)
+  if (msg.static_vars && Object.keys(msg.static_vars).length > 0) {
     state.static_vars = msg.static_vars;
+  } else if (msg.global_vars) {
+    state.static_vars = msg.global_vars;
   }
-  if (msg.t) state.lastT = msg.t;
   onTick();
 }
 
@@ -1212,17 +977,6 @@ window.addEventListener('tick', (ev)=>{
 });
 
 /* ------------------------ boot / wiring --------------------------------- */
-/* -------------------- checklist event persistence --------------------- */
-window.addEventListener('checklist-check', (ev) => {
-  // POST to server so events get written into the current log session
-  const events = window.checkEvents || [];
-  fetch('/api/check_events', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ events })
-  }).catch(() => {}); // fire-and-forget; server may not be connected in replay mode
-});
-
 document.addEventListener('DOMContentLoaded', () => {
   wireUI();
   ensureStarterPage();
@@ -1234,7 +988,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function wireUI(){
-
   $('#connectBtn')?.addEventListener('click', connect);
   $('#setRate')?.addEventListener('click', setRate);
   $('#fullscreenBtn')?.addEventListener('click', toggleFullscreen);
@@ -1481,30 +1234,67 @@ function addWidget(type){
     addExprWidget();
     return;
   }
-  
+
   // Special handling for Static Var - prompt for variable name
   if (type === 'staticvar') {
-    const varName = prompt('Enter static variable name (e.g., "setTemp", "setPressure"):\n\nNote: Variable must exist in compiled expressions (e.g., static.setTemp)');
-    if (!varName || varName.trim() === '') return;
-    const w = {
-      id: crypto.randomUUID(),
-      type: 'staticvar',
-      x: 40, y: 40, w: 160, h: 80,  // Smaller default size
-      opts: {
-        title: 'Static Var',
-        varName: varName.trim(),
-        label: varName.trim(),
-        units: '',
-        decimals: 1,
-        min: 0,
-        max: 100
+    (async () => {
+      // Fetch available static var names from server
+      let varNames = [];
+      try {
+        const resp = await fetch('/api/static_vars');
+        const data = await resp.json();
+        // Server returns { vars: {name: value, ...} } or { globals: {name: value, ...} }
+        const vars = data.vars || data.globals || data.static_vars || {};
+        varNames = Object.keys(vars);
+      } catch(e) { /* ignore, let user type manually */ }
+
+      const root = el('div', {});
+      root.append(el('h3', {}, 'Add Static Variable Widget'));
+
+      let varInput;
+      if (varNames.length > 0) {
+        varInput = el('select', {style:'width:100%;font-size:14px;padding:6px'});
+        varNames.forEach(n => varInput.append(el('option', {value:n}, n)));
+      } else {
+        varInput = el('input', {type:'text', placeholder:'e.g. pressureSetPoint',
+          style:'width:100%;font-size:14px;padding:6px'});
       }
-    };
-    state.pages[activePageIndex].widgets.push(w);
-    renderPage();
+
+      const decInput = el('input', {type:'number', value:'3', min:'0', max:'10',
+        style:'width:80px;font-size:14px;padding:6px'});
+
+      root.append(
+        el('div', {style:'margin:12px 0'}, [
+          el('label', {}, ['Variable name: ', varInput])
+        ]),
+        el('div', {style:'margin:12px 0'}, [
+          el('label', {}, ['Decimal places: ', decInput])
+        ])
+      );
+
+      const addBtn = el('button', {
+        className:'btn',
+        onclick: () => {
+          const chosen = varInput.tagName === 'SELECT' ? varInput.value : varInput.value.trim();
+          if (!chosen) { alert('Enter a variable name.'); return; }
+          const w = {
+            id: crypto.randomUUID(), type:'staticvar',
+            x:40, y:40, w:220, h:90,
+            opts: { title: chosen, varName: chosen,
+                    decimalPlaces: parseInt(decInput.value) || 3 }
+          };
+          state.pages[activePageIndex].widgets.push(w);
+          renderPage();
+          closeModal();
+        }
+      }, 'Add Widget');
+
+      root.append(el('div', {style:'margin-top:12px'}, addBtn));
+      showModal(root);
+    })();
     return;
   }
-  
+
   // Custom default sizes for different widget types
   let defaultW = 460, defaultH = 280;
   if (type === 'gauge') {
@@ -1860,7 +1650,7 @@ function defaultsFor(type){
     case 'motor':    return { title:'Motor', motorIndex:0, showControls:true };
     case 'mathop':   return { title:'Math', mathIndex:0, showInputs:true };
     case 'expr':     return { title:'Expression', exprIndex:0, showSource:true, showOutput:true };
-    case 'staticvar': return { title:'Static Var', varName:'', label:'', units:'', decimals:1, min:0, max:100 };
+    case 'staticvar': return { title:'Static Var', varName:'', decimalPlaces:3 };
   }
   return {};
 }
@@ -2051,17 +1841,7 @@ async function createSignalSelector(kind, currentIndex, onChange) {
 }
 
 function saveLayoutToFile() {
-  // Also capture checklist dock position/visibility
-  const dock = document.getElementById('clDock');
-  const clState = dock ? {
-    visible: dock.style.display !== 'none',
-    left:    dock.style.left    || '',
-    top:     dock.style.top     || '',
-    width:   dock.style.width   || '',
-    height:  dock.style.height  || '',
-    transform: dock.style.transform || ''
-  } : null;
-  const blob = new Blob([JSON.stringify({pages: state.pages, checklistDock: clState}, null, 2)], {type: 'application/json'});
+  const blob = new Blob([JSON.stringify({pages: state.pages}, null, 2)], {type: 'application/json'});
   const a = el('a', {href: URL.createObjectURL(blob), download: 'layout.json'});
   a.click();
 }
@@ -2079,19 +1859,6 @@ function loadLayoutFromFile() {
         state.pages = normalizeLayoutPages(obj.pages);   // <-- ensure defaults exist
         refreshPages();
         setActivePage(0);
-        // Restore checklist dock position/visibility
-        if (obj.checklistDock) {
-          const dock = document.getElementById('clDock');
-          if (dock) {
-            const cs = obj.checklistDock;
-            dock.style.display   = cs.visible ? 'flex' : 'none';
-            dock.style.left      = cs.left      || '';
-            dock.style.top       = cs.top       || '';
-            dock.style.width     = cs.width     || '';
-            dock.style.height    = cs.height    || '';
-            dock.style.transform = cs.transform || '';
-          }
-        }
       } catch (e) {
         alert('Load failed: ' + e.message);
       }
@@ -2199,37 +1966,6 @@ function openWidgetSettings(w) {
           scaleInput,
           el('span', {style: 'min-width:45px;font-size:11px;color:var(--muted)'}, 'Offset:'),
           offsetInput,
-          el('br', {}),
-          el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Color:'),
-          (() => {
-            const currentColor = s.color || colorFor(idx);
-            const colorBtn = el('div', {
-              style: `width:40px;height:28px;border-radius:6px;border:2px solid var(--border);cursor:pointer;background:${currentColor};transition:transform 0.1s`,
-              title: 'Click to change color',
-              onclick: (e) => {
-                e.stopPropagation();
-                createColorPicker(currentColor, (newColor) => {
-                  s.color = newColor;
-                  colorBtn.style.background = newColor;
-                  saveLayout();
-                });
-              },
-              onmouseenter: (e) => e.target.style.transform = 'scale(1.05)',
-              onmouseleave: (e) => e.target.style.transform = 'scale(1)'
-            });
-            return colorBtn;
-          })(),
-          s.color ? el('span', {
-            className: 'icon',
-            style: 'font-size:14px;color:var(--muted);cursor:pointer;margin-left:4px',
-            title: 'Reset to default color',
-            onclick: (e) => {
-              e.stopPropagation();
-              delete s.color;
-              redrawList();
-              saveLayout();
-            }
-          }, '↺') : '',
           rm
         ]);
         list.append(row);
@@ -2537,6 +2273,40 @@ function openWidgetSettings(w) {
     })();
   }
 
+  if (w.type === 'staticvar') {
+    (async () => {
+      let varNames = [];
+      try {
+        const resp = await fetch('/api/static_vars');
+        const data = await resp.json();
+        const vars = data.vars || data.globals || data.static_vars || {};
+        varNames = Object.keys(vars);
+      } catch(e) { /* ignore */ }
+
+      const varSelector = el('select', {});
+      varNames.forEach(n => {
+        varSelector.append(el('option', {value:n}, n));
+      });
+      // Also add current value if not in list
+      if (w.opts.varName && !varNames.includes(w.opts.varName)) {
+        varSelector.append(el('option', {value: w.opts.varName}, w.opts.varName + ' (current)'));
+      }
+      varSelector.value = w.opts.varName || '';
+      varSelector.onchange = () => {
+        w.opts.varName = varSelector.value;
+        w.opts.title   = varSelector.value;
+        renderPage();
+      };
+
+      const dpInput = inputNum(w.opts, 'decimalPlaces', 1);
+
+      root.append(tableForm([
+        ['Variable', varNames.length > 0 ? varSelector : txt(w.opts, 'varName')],
+        ['Decimal Places', dpInput]
+      ]));
+    })();
+  }
+
   showModal(root, () => {
     renderPage();
   });
@@ -2609,7 +2379,7 @@ function renderWidget(w){
     case 'le':       mountLEWidget(w,body); break;
     case 'mathop':   mountMathOpWidget(w,body); break;
     case 'expr':     mountExprWidget(w,body); break;
-    case 'staticvar': mountStaticVarMonitor(w,body); break;
+    case 'staticvar': mountStaticVarWidget(w,body); break;
   }
   return box;
 }
@@ -2677,16 +2447,7 @@ function widgetOptions(w){
       pause.textContent=w.opts.paused?'Resume':'Pause';
     }}, w.opts.paused?'Resume':'Pause');
 
-    const resetZoom = el('button', {className:'btn', title:'Reset zoom / resume live'}, '↺ Reset');
-    resetZoom.onclick = () => {
-      w.view.span    = w.opts.span || (window.GLOBAL_BUFFER_SPAN || 10);
-      w.view.paused  = false;
-      w.view.tFreeze = 0;
-      w.opts.paused  = false;
-      w.opts.tFreeze = null;
-      pause.textContent = 'Pause';
-    };
-    opts.push(el('span',{},'Span[s]:'), span, el('span',{},'Filter[Hz]:'), filt, el('span',{},'Y Grid:'), yGrid, pause, resetZoom);
+    opts.push(el('span',{},'Span[s]:'), span, el('span',{},'Filter[Hz]:'), filt, el('span',{},'Y Grid:'), yGrid, pause);
   }
   if (w.type==='bars'){
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
@@ -2702,22 +2463,6 @@ const chartBuffers=new Map();
 const chartFilters=new Map();
 const chartCursor=new Map(); // w.id -> {x: number|null, mode:'follow'|'current', ctxEl:HTMLElement|null}
 const chartRAFHandles=new Map(); // w.id -> {rafId: number, isRunning: boolean}
-
-/* ── Z-index focus manager ─────────────────────────────────────────────────
-   Any floating panel or modal calls bringToFront(el) on mousedown/click.
-   Base layer:  5000  (cl-dock default)
-   Modal layer: 10000 (settings, editors)
-   Ceiling:     never exceeds 29999 — resets to base+1 if needed.
-─────────────────────────────────────────────────────────────────────────── */
-let _zTop = 10000;
-function bringToFront(el) {
-  _zTop = (_zTop >= 29990) ? 10001 : _zTop + 1;
-  el.style.zIndex = _zTop;
-}
-// Wire any element so clicking anywhere on it brings it forward
-function makeRaiseable(el) {
-  el.addEventListener('mousedown', () => bringToFront(el), true);
-}
 
 /* ==================== ENHANCED CHART WITH GRID ==================== */
 /* ==================== FIXED CHART SPAN - LIVE UPDATE ==================== */
@@ -2757,86 +2502,27 @@ function mountChart(w, body){
       }
     } else {
       const base = (w.view.span || (window.GLOBAL_BUFFER_SPAN || 10));
-      const newSpan = Math.max(0.1, Math.min(3600, base * ((ev.deltaY>0)?1.15:1/1.15)));
-      w.view.span = newSpan;
-      // Don't change opts.span — that's the "live" span, view.span is the zoom span
-      const nativeSpan = w.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
-      if (newSpan >= nativeSpan * 0.99) {
-        // Zoomed back out to native span — resume live following
-        w.view.paused = false;
-        w.view.tFreeze = 0;
-        w.view.span = nativeSpan;
-      } else {
-        // Zooming in — freeze at current edge only if not already panned
-        const buf = chartBuffers.get(w.id) || [];
-        if (!w.view.paused) {
-          // First zoom: snap freeze to live edge
-          w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
-        }
-        // else: already paused/panned — keep existing tFreeze so zoom centres on current view
-        w.view.paused = true;
-      }
+      w.view.span = Math.max(0.1, Math.min(3600, base * ((ev.deltaY>0)?1.15:1/1.15)));
+      w.opts.span = w.view.span; // Keep in sync
+      const buf = chartBuffers.get(w.id) || [];
+      w.view.paused = true;
+      w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
     }
   }, {passive:false});
 
   canvas.addEventListener('dblclick', ()=>{
-    w.view.span    = w.opts.span || (window.GLOBAL_BUFFER_SPAN || 10);
-    w.view.paused  = false;
-    w.view.tFreeze = 0;
+    w.view.span = w.opts.span || (window.GLOBAL_BUFFER_SPAN || 10);
+    w.view.paused = false;
   });
 
   chartCursor.set(w.id, {x:null, mode:w.opts.cursorMode||'follow', ctxEl:null});
-
-  // Pan state — left-drag pans tFreeze when zoom-paused
-  let _panActive = false;
-  let _panStartX = 0;
-  let _panStartFreeze = 0;
-
-  canvas.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;                // left button only
-    if (!w.view.paused) return;                // only pan when zoomed/paused
-    e.stopPropagation();                       // don't trigger widget drag
-    _panActive = true;
-    _panStartX = e.clientX;
-    _panStartFreeze = w.view.tFreeze || (chartBuffers.get(w.id)||[]).slice(-1)[0]?.t || 0;
-    canvas.style.cursor = 'grabbing';
-    e.preventDefault();
-  });
 
   canvas.addEventListener('mousemove', (e)=>{
     const rect=canvas.getBoundingClientRect(); const x=e.clientX-rect.left;
     const cur=chartCursor.get(w.id); if(!cur) return;
     cur.x=x; chartCursor.set(w.id,cur);
-
-    if (_panActive) {
-      // Pixels → time: dx pixels * (viewSpan / plotWidth) = dt seconds
-      const plotW = rect.width - 60 - 10; // plotL=60, plotR=W-10
-      const viewSpan = w.view.span || w.opts.span || 10;
-      const dtPerPx = viewSpan / plotW;
-      const dx = e.clientX - _panStartX;
-      const newFreeze = _panStartFreeze - dx * dtPerPx; // drag left → go back in time
-
-      // Clamp: can't go past end of buffer or before start of buffer
-      const buf = chartBuffers.get(w.id) || [];
-      if (buf.length) {
-        const bufStart = buf[0].t + viewSpan;   // earliest valid t1
-        const bufEnd   = buf[buf.length-1].t;   // latest valid t1
-        w.view.tFreeze = Math.max(bufStart, Math.min(bufEnd, newFreeze));
-      }
-      e.preventDefault();
-    }
   });
-
-  canvas.addEventListener('mouseup', (e) => {
-    if (_panActive) {
-      _panActive = false;
-      canvas.style.cursor = '';
-    }
-  });
-
   canvas.addEventListener('mouseleave', ()=>{
-    _panActive = false;
-    canvas.style.cursor = '';
     const cur=chartCursor.get(w.id);
     if(cur){ cur.x=null; chartCursor.set(w.id,cur); }
   });
@@ -2846,7 +2532,6 @@ function mountChart(w, body){
     if (cur.ctxEl && cur.ctxEl.parentNode) cur.ctxEl.parentNode.removeChild(cur.ctxEl);
     const menu=buildChartContextMenu(w, canvas, legend);
     document.body.append(menu); menu.style.left=e.pageX+'px'; menu.style.top=e.pageY+'px';
-    bringToFront(menu);
     cur.ctxEl=menu; chartCursor.set(w.id,cur);
   });
 
@@ -2855,8 +2540,6 @@ function mountChart(w, body){
     const W=canvas.clientWidth, H=canvas.clientHeight;
     canvas.width=W; canvas.height=H;
     const plotL=60, plotR=W-10, plotT=10, plotB=H-30;
-    // Show grab cursor when paused so user knows they can pan
-    if (!_panActive) canvas.style.cursor = w.view.paused ? 'grab' : '';
 
     ctx.clearRect(0,0,W,H);
     ctx.strokeStyle='#3b425e'; ctx.lineWidth=1;
@@ -2870,15 +2553,13 @@ function mountChart(w, body){
         : (w.opts.span || window.GLOBAL_BUFFER_SPAN || 10);
 
       // Handle both zoom pause (w.view.paused) and button pause (w.opts.paused)
-      const lastBufT = buf[buf.length-1].t;
       let t1;
       if (w.view.paused) {
-        // Clamp tFreeze to last available data (handles log reload)
-        t1 = Math.min(w.view.tFreeze || lastBufT, lastBufT);
+        t1 = w.view.tFreeze || buf[buf.length-1].t;
       } else if (w.opts.paused && w.opts.tFreeze !== null && w.opts.tFreeze !== undefined) {
-        t1 = Math.min(w.opts.tFreeze, lastBufT);
+        t1 = w.opts.tFreeze;
       } else {
-        t1 = lastBufT;
+        t1 = buf[buf.length-1].t;
       }
       const t0 = t1 - viewSpan;
       const viewBuf = buf.filter(b => b.t >= t0);
@@ -2941,7 +2622,6 @@ function mountChart(w, body){
 
       // Draw series
       legend.innerHTML='';
-      const customColors = (w.opts.series||[]).map(s => s.color);
       (w.opts.series||[]).forEach((s, si)=>{
         const displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
         const displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
@@ -2954,66 +2634,12 @@ function mountChart(w, body){
           const y = plotB - (displayValue - ymin) * yscale;
           if (first){ ctx.moveTo(x,y); first=false; } else ctx.lineTo(x,y);
         }
-        ctx.strokeStyle = colorFor(si, customColors); ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = colorFor(si); ctx.lineWidth = 2; ctx.stroke();
         const lab = (s.name && s.name.length) ? s.name : labelFor(s);
         legend.append(el('div',{className:'item'},[
-          el('span',{className:'swatch', style:`background:${colorFor(si, customColors)}`},''), lab
+          el('span',{className:'swatch', style:`background:${colorFor(si)}`},''), lab
         ]));
       });
-
-      // Check-event vertical lines (from checklist widget)
-      if (window.checkEvents && window.checkEvents.length) {
-        // In replay mode, buf entries use t = Unix epoch (msg.t from CSV).
-        // In live mode,   buf entries use t = performance.now()/1000.
-        // Check events store tServer = Unix epoch always.
-        // We map each event to chart-x by finding the buf entry whose tServer
-        // is closest — tServer==t in replay, and is tagged separately in live.
-        //
-        // For animated playback: only show events whose tServer <= last buf entry's tServer
-        // so they "pop up" as playback progresses.
-        const lastBuf = buf[buf.length - 1];
-        const lastServer = lastBuf ? (lastBuf.tServer ?? lastBuf.t) : Infinity;
-        const firstBuf = buf[0];
-        const firstServer = firstBuf ? (firstBuf.tServer ?? firstBuf.t) : -Infinity;
-
-        ctx.save();
-        ctx.strokeStyle = '#f5c842';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 3]);
-        ctx.font = 'bold 11px system-ui';
-        ctx.fillStyle = '#f5c842';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-
-        for (const ev of window.checkEvents) {
-          const evS = ev.tServer ?? ev.t;
-
-          // Don't show events beyond current playback position
-          if (evS > lastServer) continue;
-          // Don't show events before the buffer starts (scrolled off left)
-          if (evS < firstServer) continue;
-
-          // Find the viewBuf entry whose tServer is closest to evS
-          // viewBuf is already filtered to [t0..t1] in chart-t space
-          // but the event may be in range even if not in viewBuf slice —
-          // compute chart-x directly from tServer ratio across the full buf.
-          // Find closest buf entry (full buf, not just viewBuf) to get the chart-t.
-          let bestT  = null;
-          let bestDiff = Infinity;
-          for (const b of buf) {
-            const bs = b.tServer ?? b.t;
-            const diff = Math.abs(bs - evS);
-            if (diff < bestDiff) { bestDiff = diff; bestT = b.t; }
-          }
-          if (bestT === null) continue;
-          const ex = plotL + (bestT - t0) * xscale;
-          if (ex < plotL || ex > plotR) continue;
-
-          ctx.beginPath(); ctx.moveTo(ex, plotT); ctx.lineTo(ex, plotB); ctx.stroke();
-          ctx.fillText(String(ev.label ?? ev.itemNum ?? ''), ex + 3, plotT + 2);
-        }
-        ctx.restore();
-      }
 
       // Cursor & popup
       const cur = chartCursor.get(w.id);
@@ -3205,10 +2831,8 @@ function buildChartContextMenu(w, canvas, legend){
     }
   });
 
-  // Make it draggable by the header; raise to front on any click
+  // Make it draggable by the header
   makeDraggable(menu, header);
-  menu.addEventListener('mousedown', () => bringToFront(menu), { capture: true });
-  bringToFront(menu);  // Raise immediately on creation
 
   return menu;
 }
@@ -3223,7 +2847,6 @@ function makeDraggable(element, handle){
   handle.addEventListener('mousedown', (e)=>{
     // Don't drag if clicking on close button or inputs
     if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
-    bringToFront(element);  // Raise to front when drag starts
 
     isDragging = true;
     startX = e.clientX;
@@ -3396,11 +3019,11 @@ function updateChartBuffers(){
         cf._t=t;
         chartFilters.set(w.id, cf);
       }
-      buf.push({t, tServer: (typeof state !== 'undefined' && state.lastT) || t, v: filtered});
+      buf.push({t, v: filtered});
 
-      // Keep 2× native span so the user can pan back one full screen while zoomed
+      // KEY FIX: Use the chart's own span setting (with some buffer margin)
       const chartSpan = Math.max(1, w.opts.span || 10);
-      const bufferDepth = chartSpan * 2.0;
+      const bufferDepth = chartSpan * 1.2; // Keep 20% extra for smooth scrolling
 
       // Remove old data beyond the buffer depth
       while (buf.length && (t - buf[0].t) > bufferDepth) {
@@ -3620,7 +3243,6 @@ function mountGauge(w, body){
     legend.innerHTML='';
     const needles = Array.isArray(w.opts.needles) ? w.opts.needles : [];
     ctx.lineWidth=3;
-    const customColors = (w.opts.needles||[]).map(n => n.color);
     needles.forEach((s,si)=>{
       const v = readSelection(s);
       const tareOffset = (w.opts.tareOffsets && w.opts.tareOffsets[si]) || 0;
@@ -3631,7 +3253,7 @@ function mountGauge(w, body){
       const frac = clamp((displayValue - lo)/span, 0, 1);
       const ang = Math.PI + (0 - Math.PI) * frac;
       const nx = Math.cos(ang), ny = Math.sin(ang);
-      ctx.strokeStyle=colorFor(si, customColors);
+      ctx.strokeStyle=colorFor(si);
       ctx.beginPath();
       ctx.moveTo(cx, cy);
       ctx.lineTo(cx + (rInner + band*0.9)*nx, cy - (rInner + band*0.9)*ny);
@@ -3640,7 +3262,7 @@ function mountGauge(w, body){
       const lab = s.name && s.name.length ? s.name : labelFor(s);
       const decimals = w.opts.decimals !== undefined ? w.opts.decimals : 3;
       legend.append(el('div',{className:'item'},[
-        el('span',{className:'swatch', style:`background:${colorFor(si, customColors)}`},''), `${lab}: ${Number.isFinite(displayValue)?displayValue.toFixed(decimals):'—'}`
+        el('span',{className:'swatch', style:`background:${colorFor(si)}`},''), `${lab}: ${Number.isFinite(displayValue)?displayValue.toFixed(decimals):'—'}`
       ]));
     });
 
@@ -3728,7 +3350,6 @@ function mountBars(w, body){
     ctx.font = '10px system-ui, sans-serif';
     ctx.textBaseline = 'top';
 
-    const customColors = (w.opts.series || []).map(s => s.color);
     series.forEach((sel, idx) => {
       const v = readSelection(sel);
       const displayScale = sel.displayScale !== undefined ? sel.displayScale : 1.0;
@@ -3740,7 +3361,7 @@ function mountBars(w, body){
       const y = plotB - t * (plotB - plotT);
       const h = plotB - y;
 
-      ctx.fillStyle = colorFor(idx, customColors);
+      ctx.fillStyle = colorFor(idx);
       ctx.fillRect(x - barW / 2, y, barW, h);
 
       // Draw series label at bottom
@@ -3796,13 +3417,10 @@ function mountDOButton(w, body){
       
       // Sync to backend for expressions
       try {
-        const _bvSend3 = Object.fromEntries(
-          Object.entries(state.buttonVars).map(([k,v]) => [k, (v == null || isNaN(Number(v))) ? 0 : Number(v)])
-        );
         await fetch('/api/button_vars', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({vars: _bvSend3})
+          body: JSON.stringify({vars: state.buttonVars})
         });
       } catch(e) { console.warn('ButtonVars sync failed', e); }
     } else {
@@ -3917,17 +3535,14 @@ function mountDOButton(w, body){
 
 function updateDOButtons(){
   document.querySelectorAll('.do-btn').forEach(b=>{
+    if(!connected||!hwReady){ b.className='do-btn default'; return; }
     const id=b.closest('.widget').id.slice(2);
     const page=state.pages[activePageIndex];
     const w=page.widgets.find(x=>x.id===id);
     if(!w){ b.className='do-btn default'; return; }
-
-    // Var-type buttons can show state from replay even when not connected
-    const isVar = w.opts.outputType === 'var';
-    if(!isVar && (!connected||!hwReady)){ b.className='do-btn default'; return; }
-
+    
     let bit, active;
-    if (isVar) {
+    if (w.opts.outputType === 'var') {
       // Variables: simple logic, 1 = active (green), 0 = inactive (red)
       bit = state.buttonVars?.[w.opts.varName] || 0;
       active = !!bit;  // 1 = true = active
@@ -3974,7 +3589,6 @@ function mountPIDPanel(w, body){
       if (detailsDiv) {
         if (detailsDiv.style.display === 'none') {
           detailsDiv.style.display = 'block';
-          bringToFront(detailsDiv);
           // Position near the widget
           const widgetEl = document.getElementById('w_' + w.id);
           if (widgetEl) {
@@ -4018,12 +3632,9 @@ function mountPIDPanel(w, body){
   let dragOffsetX = 0, dragOffsetY = 0;
   
   header.onmousedown = (e) => {
-    if (e.target.tagName === 'SPAN' && e.target.style.cursor === 'pointer') return; // close btn
-    bringToFront(detailsPanel);
     isDragging = true;
-    const r = detailsPanel.getBoundingClientRect();
-    dragOffsetX = e.clientX - r.left;
-    dragOffsetY = e.clientY - r.top;
+    dragOffsetX = e.clientX - detailsPanel.offsetLeft;
+    dragOffsetY = e.clientY - detailsPanel.offsetTop;
     e.preventDefault();
   };
   
@@ -4038,9 +3649,8 @@ function mountPIDPanel(w, body){
     isDragging = false;
   });
   
-  // Append to body (not to widget); raise to front on any click
+  // Append to body (not to widget)
   document.body.append(detailsPanel);
-  detailsPanel.addEventListener('mousedown', () => bringToFront(detailsPanel), { capture: true });
   
   // Enable indicator container (will be populated if gating is configured)
   const enableContainer = el('div', {style:'display:inline-block;margin-left:8px;vertical-align:middle'});
@@ -4063,7 +3673,7 @@ function mountPIDPanel(w, body){
     const ctr=el('div',{className:'compact'});
     const tbl=el('table',{className:'form'}); const tb=el('tbody');
     const row=(label,input)=>{ const tr=el('tr'); tr.append(el('th',{},label), el('td',{},input)); tb.append(tr); return tr; };
-    const L={enabled:false,name:'',kind:'analog',src:'ai',ai_ch:0,out_ch:0,target:0,kp:0,ki:0,kd:0,out_min:0,out_max:1,out_min_source:'fixed',out_min_channel:0,out_max_source:'fixed',out_max_channel:0,err_min:-1,err_max:1,i_min:-1,i_max:1,enable_gate:false,enable_kind:'do',enable_index:0,sp_source:'fixed',sp_channel:0};
+    const L={enabled:false,name:'',kind:'analog',src:'ai',ai_ch:0,out_ch:0,target:0,kp:0,ki:0,kd:0,out_min:0,out_max:1,out_min_source:'fixed',out_min_channel:0,out_max_source:'fixed',out_max_channel:0,i_min:-1,i_max:1,enable_gate:false,enable_kind:'do',enable_index:0,sp_source:'fixed',sp_channel:0};
 
     fetch('/api/pid').then(r=>r.json()).then(async pid=>{
       const idx=w.opts.loopIndex|0; Object.assign(L, pid.loops?.[idx]||{});
@@ -4166,8 +3776,7 @@ function mountPIDPanel(w, body){
       
       updateVisibility(); // Set initial visibility AFTER all row variables are assigned
       
-      row('err_min',num(L,'err_min',0.0001));
-      row('err_max',num(L,'err_max',0.0001));
+      // Removed err_min/err_max - only I and output limits needed
       row('i_min',  num(L,'i_min',0.0001));
       row('i_max',  num(L,'i_max',0.0001));
       // Enable gate fields removed - edit in main PID editor only
@@ -5002,7 +4611,7 @@ function mountExprWidget(w, body){
     }
     
     // Display variables
-    if (showSource && exprData.locals && Object.keys(exprData.locals).length > 0) {
+    if (showSource && exprData.locals) {
       
       const varsDiv = el('div', {className:'expr-vars'});
       
@@ -5066,174 +4675,71 @@ function mountExprWidget(w, body){
   })();
 }
 
-/* ------------------------ Static Var Monitor Widget ------------------------ */
-function mountStaticVarMonitor(w, body) {
-  body.style.cssText = `
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    padding: 12px;
-    cursor: pointer;
-    background: linear-gradient(135deg, #1a1e35 0%, #252b45 100%);
-    border-radius: 8px;
-  `;
+function mountStaticVarWidget(w, body) {
+  body.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;';
+
+  const valueEl = el('div', {
+    style: 'font-size:28px;font-weight:700;font-family:Consolas,Monaco,monospace;color:#a8f0a8;cursor:pointer;',
+    title: 'Click to edit'
+  }, '—');
   
-  const labelDiv = document.createElement('div');
-  labelDiv.style.cssText = `
-    font-size: 13px;
-    color: #a8b3cf;
-    margin-bottom: 8px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  `;
+  const nameEl  = el('div', {style: 'font-size:11px;color:#9094a1;margin-top:4px;'}, w.opts.varName || '');
   
-  const valueDiv = document.createElement('div');
-  valueDiv.style.cssText = `
-    font-size: 32px;
-    font-weight: bold;
-    color: #79c0ff;
-    font-family: 'Courier New', monospace;
-  `;
-  
-  const unitsDiv = document.createElement('div');
-  unitsDiv.style.cssText = `
-    font-size: 12px;
-    color: #7a8199;
-    margin-top: 4px;
-  `;
-  
-  body.appendChild(labelDiv);
-  body.appendChild(valueDiv);
-  body.appendChild(unitsDiv);
-  
-  function update() {
-    const varName = w.opts.varName || '';
-    const label = w.opts.label || varName;
-    const units = w.opts.units || '';
-    const decimals = w.opts.decimals !== undefined ? w.opts.decimals : 1;
-    const minVal = w.opts.min;
-    const maxVal = w.opts.max;
+  // Click to edit
+  valueEl.onclick = () => {
+    const varName = w.opts.varName;
+    if (!varName) return;
     
-    labelDiv.textContent = label;
-    unitsDiv.textContent = units;
+    const currentValue = (state.static_vars && state.static_vars[varName]) || 0;
+    const newValue = prompt(`Enter new value for ${varName}:`, currentValue);
     
-    if (!state.static_vars) {
-      valueDiv.textContent = '---';
-      valueDiv.style.color = '#666';
-      requestAnimationFrame(update);
-      return;
-    }
-    
-    const val = state.static_vars[varName];
-    if (val !== undefined) {
-      valueDiv.textContent = val.toFixed(decimals);
-      
-      // Color coding based on range
-      if (minVal !== undefined && maxVal !== undefined) {
-        const pct = (val - minVal) / (maxVal - minVal);
-        if (pct < 0 || pct > 1) {
-          valueDiv.style.color = '#ff6b6b'; // Out of range - red
-        } else {
-          valueDiv.style.color = '#79c0ff'; // In range - blue
-        }
-      }
-    } else {
-      valueDiv.textContent = '---';
-      valueDiv.style.color = '#666';
-    }
-    
-    requestAnimationFrame(update);
-  }
-  
-  // Double-click to edit
-  body.addEventListener('dblclick', async (e) => {
-    e.stopPropagation();
-    
-    const varName = w.opts.varName || '';
-    if (!varName) {
-      alert('No variable name configured for this widget!');
-      return;
-    }
-    
-    const currentValue = state.static_vars?.[varName];
-    if (currentValue === undefined) {
-      alert(
-        `Static variable "${varName}" not found!\n\n` +
-        `Make sure:\n` +
-        `1. It's used in an expression (e.g., static.${varName})\n` +
-        `2. Expressions have been compiled\n` +
-        `3. Server is connected`
-      );
-      return;
-    }
-    
-    const decimals = w.opts.decimals !== undefined ? w.opts.decimals : 1;
-    const units = w.opts.units || '';
-    const minVal = w.opts.min;
-    const maxVal = w.opts.max;
-    
-    let promptText = `Enter new value for ${varName}:\n\n`;
-    promptText += `Current: ${currentValue.toFixed(decimals)} ${units}\n`;
-    if (minVal !== undefined && maxVal !== undefined) {
-      promptText += `Range: ${minVal} to ${maxVal}`;
-    }
-    
-    const newValue = prompt(promptText, currentValue);
-    
-    if (newValue !== null) {
+    if (newValue !== null && newValue.trim() !== '') {
       const numValue = parseFloat(newValue);
-      if (isNaN(numValue)) {
-        alert('Invalid number!');
-        return;
-      }
-      
-      // Validate range
-      if (minVal !== undefined && numValue < minVal) {
-        alert(`Value ${numValue} is below minimum ${minVal}`);
-        return;
-      }
-      if (maxVal !== undefined && numValue > maxVal) {
-        alert(`Value ${numValue} is above maximum ${maxVal}`);
-        return;
-      }
-      
-      // Send to server
-      try {
-        const response = await fetch('/api/static_vars', {
+      if (!isNaN(numValue)) {
+        // Update via API
+        fetch('/api/static_vars', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: varName,
-            value: numValue
-          })
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name: varName, value: numValue})
+        }).then(r => {
+          if (r.ok) {
+            console.log(`[STATIC-VAR] Updated ${varName} = ${numValue}`);
+          } else {
+            alert('Failed to update static variable');
+          }
+        }).catch(err => {
+          console.error('Failed to update static var:', err);
+          alert('Failed to update variable');
         });
-        
-        const result = await response.json();
-        if (!result.ok) {
-          alert(`Error: ${result.error}\n\nAvailable vars: ${result.available?.join(', ') || 'none'}`);
-        } else {
-          console.log(`[STATIC-VAR] Updated ${varName} = ${numValue}`);
-        }
-      } catch (err) {
-        alert(`Failed to update: ${err.message}`);
+      } else {
+        alert('Invalid number');
       }
     }
-  });
+  };
   
-  // Hover effect
-  body.addEventListener('mouseenter', () => {
-    body.style.transform = 'scale(1.02)';
-    body.style.transition = 'transform 0.2s';
-  });
-  body.addEventListener('mouseleave', () => {
-    body.style.transform = 'scale(1)';
-  });
-  
-  update();
+  body.append(valueEl, nameEl);
+
+  (function update() {
+    const varName = w.opts.varName;
+    if (!varName) {
+      valueEl.textContent = '—';
+      nameEl.textContent  = '(no var)';
+      setTimeout(update, 500);
+      return;
+    }
+    const vars = state.static_vars || {};
+    if (varName in vars) {
+      const raw = vars[varName];
+      const dp  = Number.isInteger(w.opts.decimalPlaces) ? w.opts.decimalPlaces : 3;
+      valueEl.textContent = (typeof raw === 'number') ? raw.toFixed(dp) : String(raw);
+      valueEl.style.color = getValueColor(raw);
+    } else {
+      valueEl.textContent = 'N/A';
+      valueEl.style.color = '#9094a1';
+    }
+    nameEl.textContent = varName;
+    requestAnimationFrame(update);
+  })();
 }
 
 /* ------------------------ tick / read / drag ---------------------------- */
@@ -5276,8 +4782,6 @@ function readSelection(sel){
 
 // drag/resize — block drag when interacting with inputs
 function makeDragResize(node, w, header, handle){
-  // Bring widget to front when clicked
-  node.addEventListener('mousedown', () => bringToFront(node), { capture: true });
   let dragging=false,resizing=false,sx=0,sy=0,ox=0,oy=0,ow=0,oh=0;
   
   // Set minimum sizes based on widget type
@@ -5286,12 +4790,10 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'bars') minW = 100;  // Allow narrow bar graphs
   else if (w.type === 'le' || w.type === 'mathop') minW = 140;  // 50% of default 280
   else if (w.type === 'pidpanel') minW = 168;  // 60% of default 280
-  else if (w.type === 'staticvar') minW = 120;  // Compact static var display
   
   let minH = 180;
   if (w.type === 'dobutton') minH = 45;
   else if (w.type === 'le' || w.type === 'mathop') minH = 10;  // Half of default 20
-  else if (w.type === 'staticvar') minH = 70;  // Compact static var display
   
   header.addEventListener('mousedown', (e)=>{
     const tag=(e.target.tagName||'').toUpperCase();
@@ -5369,6 +4871,11 @@ function normalizeLayoutPages(pages){
         w.opts.mathIndex = Number.isInteger(w.opts.mathIndex) ? w.opts.mathIndex : 0;
         w.opts.showInputs = (w.opts.showInputs !== false);
         break;
+      case 'staticvar':
+        w.opts.varName       = w.opts.varName || '';
+        w.opts.title         = w.opts.title || w.opts.varName || 'Static Var';
+        w.opts.decimalPlaces = Number.isInteger(w.opts.decimalPlaces) ? w.opts.decimalPlaces : 3;
+        break;
     }
     // ensure position/size exist so renderPage doesn’t choke
     w.x = Number.isFinite(w.x) ? w.x : 40;
@@ -5385,96 +4892,12 @@ function normalizeLayoutPages(pages){
 
 /* -------------------------- modal / editors ----------------------------- */
 function showModal(content, onClose){
-  const m=$('#modal'); 
-  m.classList.remove('hidden'); 
-  m.innerHTML='';
-  
+  const m=$('#modal'); m.classList.remove('hidden'); m.innerHTML='';
   const panel=el('div',{className:'panel'});
-  
-  // DRAGGABLE TITLE BAR
-  const titleBar = el('div', {
-    className: 'modal-titlebar',
-    style: 'cursor:move;user-select:none;padding:8px 12px;background:#1a1f35;border-bottom:1px solid #2b2f45;border-radius:12px 12px 0 0;margin:-14px -14px 10px -14px;display:flex;justify-content:space-between;align-items:center'
-  });
-  
-  const titleText = el('div', {
-    style: 'font-weight:600;color:#a8b3cf;font-size:13px'
-  }, 'Settings');
-  
-  const closeBtn=el('button',{
-    className:'icon',
-    style:'font-size:20px;cursor:pointer;border:none;background:none;color:#a8b3cf;padding:0',
-    onclick:()=>{ closeModal(onClose); }
-  },'×');
-  
-  titleBar.append(titleText, closeBtn);
-  panel.append(titleBar, content);
-  m.append(panel);
-  
-  // Center the panel initially (will be positioned absolute but centered)
-  panel.style.position = 'absolute';
-  panel.style.left = '50%';
-  panel.style.top = '50%';
-  panel.style.transform = 'translate(-50%, -50%)';
-  
-  // Make draggable
-  let isDragging = false;
-  let currentX, currentY, initialX, initialY;
-  let offsetX = 0, offsetY = 0;  // Track offset from center
-  
-  titleBar.addEventListener('mousedown', dragStart);
-  
-  function dragStart(e) {
-    if (e.target.tagName === 'BUTTON') return; // Don't drag when clicking close button
-    
-    isDragging = true;
-    
-    // Get current position
-    const rect = panel.getBoundingClientRect();
-    initialX = e.clientX - rect.left;
-    initialY = e.clientY - rect.top;
-    
-    // Remove transform when starting drag (switch to fixed positioning)
-    panel.style.transform = 'none';
-    panel.style.left = rect.left + 'px';
-    panel.style.top = rect.top + 'px';
-    
-    document.addEventListener('mousemove', drag);
-    document.addEventListener('mouseup', dragEnd);
-    
-    titleBar.style.cursor = 'grabbing';
-    e.preventDefault();
-  }
-  
-  function drag(e) {
-    if (!isDragging) return;
-    
-    e.preventDefault();
-    currentX = e.clientX - initialX;
-    currentY = e.clientY - initialY;
-    
-    // Keep within window bounds
-    const maxX = window.innerWidth - panel.offsetWidth;
-    const maxY = window.innerHeight - panel.offsetHeight;
-    
-    currentX = Math.max(0, Math.min(currentX, maxX));
-    currentY = Math.max(0, Math.min(currentY, maxY));
-    
-    panel.style.left = currentX + 'px';
-    panel.style.top = currentY + 'px';
-  }
-  
-  function dragEnd() {
-    isDragging = false;
-    titleBar.style.cursor = 'move';
-    document.removeEventListener('mousemove', drag);
-    document.removeEventListener('mouseup', dragEnd);
-  }
-  
-  bringToFront(m);
-  m.addEventListener('mousedown', () => bringToFront(m), { capture: true, once: false });
+  const closeBtn=el('button',{className:'btn',onclick:()=>{ closeModal(onClose); }},'Close');
+  const close=el('div',{style:'text-align:right;margin-bottom:8px;'}, closeBtn);
+  panel.append(close,content); m.append(panel);
 }
-
 
 function closeModal(onClose){
   const m=$('#modal'); 
@@ -5950,8 +5373,7 @@ async function openPidForm(){
         out_min_channel: 0,
         out_max_source: 'fixed',
         out_max_channel: 0,
-        err_min: null,
-        err_max: null,
+        // Removed err_min/err_max - only I and output limits needed
         i_min: null,
         i_max: null,
         name: `Loop${loops.length}`,
@@ -5988,8 +5410,7 @@ async function openPidForm(){
       el('th', {}, 'Kd'),
       el('th', {}, 'Out Min'),
       el('th', {}, 'Out Max'),
-      el('th', {}, 'Err Min'),
-      el('th', {}, 'Err Max'),
+      // Removed Err Min/Err Max - only I and output limits needed
       el('th', {}, 'I Min'),
       el('th', {}, 'I Max'),
       el('th', {}, 'Exec Hz'),
@@ -6056,8 +5477,7 @@ async function openPidForm(){
         el('td', {}, num(L, 'kd', 0.0001)),
         outMinCell,  // Combined source + value/channel
         outMaxCell,  // Combined source + value/channel
-        el('td', {}, num(L, 'err_min', 0.0001)),
-        el('td', {}, num(L, 'err_max', 0.0001)),
+        // Removed err_min/err_max - only I and output limits needed
         el('td', {}, num(L, 'i_min', 0.0001)),
         el('td', {}, num(L, 'i_max', 0.0001)),
         el('td', {}, num(L, 'execution_rate_hz', 1)),
