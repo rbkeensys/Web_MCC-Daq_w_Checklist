@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.9.0';
+window.CHECKLIST_VERSION = '1.10.0';  // 2026-03-27: Position/size persistence via localStorage
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -446,6 +446,36 @@ window.clUncheck            = clUncheck;
 window.parseChecklistText   = parseChecklistText;
 window.serializeChecklist   = serializeChecklist;
 
+/* ================================================================ layout persistence */
+function _clSaveLayout(dock) {
+  if (!dock) return;
+  const layout = {
+    top: dock.style.top,
+    left: dock.style.left,
+    width: dock.style.width,
+    height: dock.style.height,
+    display: dock.style.display
+  };
+  localStorage.setItem('checklist_dock_layout', JSON.stringify(layout));
+}
+
+function _clLoadLayout(dock) {
+  if (!dock) return;
+  const saved = localStorage.getItem('checklist_dock_layout');
+  if (!saved) return;
+  
+  try {
+    const layout = JSON.parse(saved);
+    if (layout.top) dock.style.top = layout.top;
+    if (layout.left) dock.style.left = layout.left;
+    if (layout.width) dock.style.width = layout.width;
+    if (layout.height) dock.style.height = layout.height;
+    if (layout.display) dock.style.display = layout.display;
+  } catch (e) {
+    console.error('[Checklist] Failed to load layout:', e);
+  }
+}
+
 /* ================================================================ draggable dock */
 function _makeDraggable(dock, handle) {
   handle.style.cursor = 'grab';
@@ -473,7 +503,11 @@ function _makeDraggable(dock, handle) {
   });
 
   document.addEventListener('mouseup', () => {
-    if (dragging) { dragging = false; handle.style.cursor = 'grab'; }
+    if (dragging) { 
+      dragging = false; 
+      handle.style.cursor = 'grab';
+      _clSaveLayout(dock);  // Save position after dragging
+    }
   });
 }
 
@@ -490,7 +524,10 @@ function _clSelfMount() {
   handle.innerHTML = '<span>📋 Checklist</span>';
   const closeX = document.createElement('button');
   closeX.className = 'cl-drag-close'; closeX.textContent = '✕'; closeX.title = 'Close';
-  closeX.onclick = () => { dock.style.display = 'none'; };
+  closeX.onclick = () => { 
+    dock.style.display = 'none'; 
+    _clSaveLayout(dock);  // Save visibility state
+  };
   handle.appendChild(closeX);
   dock.appendChild(handle);
 
@@ -498,6 +535,17 @@ function _clSelfMount() {
   dock.appendChild(panel);
   document.body.appendChild(dock);
   _makeDraggable(dock, handle);
+
+  // Load saved layout (position, size, visibility)
+  _clLoadLayout(dock);
+
+  // Save layout when resized (CSS resize:both on .cl-dock)
+  if (window.ResizeObserver) {
+    const resizeObserver = new ResizeObserver(() => {
+      _clSaveLayout(dock);
+    });
+    resizeObserver.observe(dock);
+  }
 
   // Clicking anywhere in the dock focuses the panel and brings it to front
   dock.addEventListener('mousedown', () => {
@@ -510,6 +558,7 @@ function _clSelfMount() {
     const vis = dock.style.display !== 'none';
     dock.style.display = vis ? 'none' : 'flex';
     if (!vis) { panel.focus(); }
+    _clSaveLayout(dock);  // Save visibility state
   }
 
   // --- Wire topbar buttons ---
@@ -564,3 +613,12 @@ if (document.readyState === 'loading') {
   _clSelfMount();
   _clAutoLoad();
 }
+
+// Expose save/load for main layout to trigger
+window._clSaveLayout = _clSaveLayout;
+window._clLoadLayout = _clLoadLayout;
+console.log('[Checklist] Exposed functions:', {
+  _clSaveLayout: window._clSaveLayout,
+  _clLoadLayout: window._clLoadLayout
+});
+

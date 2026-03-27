@@ -65,7 +65,7 @@ hr.soft { border:0; border-top:1px solid #1f2330; margin:6px 0; }
 .small { font-size:12px; color:#9aa1b9; }
 
 /* Editors */
-.modal { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); }
+.modal { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); z-index:10000; }
 .modal.hidden { display:none; }
 .modal .panel { min-width:500px; max-width:90vw; width:fit-content; max-height:92vh; overflow:auto; padding:14px; border-radius:12px; background:#141828; border:1px solid #2b2f45; resize:both; box-shadow:0 8px 24px rgba(0,0,0,0.4); resize-origin:top-left; }
 fieldset { border:1px solid #2a3046; border-radius:10px; padding:10px; margin-bottom:10px; }

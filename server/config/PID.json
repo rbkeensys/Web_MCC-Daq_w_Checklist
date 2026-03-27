@@ -1,7 +1,7 @@
 {
   "loops": [
     {
-      "enabled": true,
+      "enabled": false,
       "kind": "var",
       "src": "ai",
       "ai_ch": 0,
@@ -29,7 +29,7 @@
       "execution_rate_hz": 10.0
     },
     {
-      "enabled": true,
+      "enabled": false,
       "kind": "var",
       "src": "ai",
       "ai_ch": 1,

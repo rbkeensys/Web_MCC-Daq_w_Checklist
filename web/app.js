@@ -1,4 +1,4 @@
-const UI_VERSION = "1.8.1";  // 2026-03-27: Static var widget: editable, smaller min size, tighter name spacing + PID err limits removed
+const UI_VERSION = "1.8.8";  // 2026-03-27: Checklist saves check states & times + modals above checklist
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -9,7 +9,127 @@ const el = (tag, props = {}, children = []) => {
   for (const c of children) n.append(c instanceof Node ? c : document.createTextNode(c));
   return n;
 };
-function colorFor(i){ const p=['#7aa2f7','#9ece6a','#f7768e','#bb9af7','#e0af68','#73daca','#f4b8e4','#ffd479']; return p[i%p.length]; }
+// ENHANCED: Now supports custom colors per series
+function colorFor(i, customColors = null) {
+  const defaultPalette = ['#7aa2f7','#9ece6a','#f7768e','#bb9af7','#e0af68','#73daca','#f4b8e4','#ffd479'];
+  if (customColors && customColors[i]) return customColors[i];
+  return defaultPalette[i % defaultPalette.length];
+}
+
+// COLOR PICKER: Standard color palette
+const STANDARD_COLORS = [
+  '#ff4d4d','#ff0000','#cc0000','#990000','#660000',
+  '#ff9933','#ff6600','#ff3300','#cc2900','#991f00',
+  '#ffff00','#ffcc00','#ff9900','#ff6600','#cc5200',
+  '#00ff00','#00cc00','#009900','#006600','#003300',
+  '#00ffff','#00cccc','#009999','#006666','#004d4d',
+  '#4d94ff','#0066ff','#0052cc','#003d99','#002966',
+  '#bb9af7','#9966ff','#7733ff','#5500cc','#3d0099',
+  '#ff99ff','#ff66ff','#ff33ff','#cc00cc','#990099',
+  '#ffffff','#cccccc','#999999','#666666','#333333',
+  '#7aa2f7','#9ece6a','#f7768e','#e0af68','#73daca'
+];
+
+// Create color picker modal
+function createColorPicker(currentColor, onSelect) {
+  const modal = el('div', {
+    className: 'modal',
+    style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center'
+  });
+  
+  const picker = el('div', {
+    className: 'color-picker',
+    style: 'background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:20px;max-width:400px;box-shadow:0 4px 12px rgba(0,0,0,0.3)'
+  });
+  
+  const header = el('div', {style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px'}, [
+    el('h3', {style: 'margin:0;color:var(--text)'}, 'Choose Color'),
+    el('button', {
+      className: 'icon',
+      style: 'font-size:20px;cursor:pointer;border:none;background:none;color:var(--text)',
+      onclick: () => modal.remove()
+    }, '×')
+  ]);
+  
+  const preview = el('div', {
+    style: `width:100%;height:40px;border-radius:4px;border:1px solid var(--border);margin-bottom:16px;background:${currentColor}`
+  });
+  
+  const standardGrid = el('div', {
+    style: 'display:grid;grid-template-columns:repeat(5, 1fr);gap:6px;margin-bottom:16px'
+  });
+  
+  STANDARD_COLORS.forEach(color => {
+    const swatch = el('div', {
+      className: 'color-swatch',
+      style: `width:100%;aspect-ratio:1;background:${color};border-radius:4px;cursor:pointer;border:2px solid ${color === currentColor ? '#fff' : 'transparent'};transition:transform 0.1s`,
+      onclick: () => {
+        onSelect(color);
+        modal.remove();
+      },
+      onmouseenter: (e) => {
+        e.target.style.transform = 'scale(1.1)';
+        preview.style.background = color;
+      },
+      onmouseleave: (e) => {
+        e.target.style.transform = 'scale(1)';
+        preview.style.background = currentColor;
+      }
+    });
+    standardGrid.append(swatch);
+  });
+  
+  const customSection = el('div', {style: 'border-top:1px solid var(--border);padding-top:16px'});
+  const customLabel = el('div', {
+    style: 'font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600'
+  }, 'Custom Color');
+  
+  const customInput = el('input', {
+    type: 'color',
+    value: currentColor,
+    style: 'width:100%;height:40px;border:1px solid var(--border);border-radius:4px;cursor:pointer',
+    oninput: (e) => {
+      preview.style.background = e.target.value;
+    },
+    onchange: (e) => {
+      onSelect(e.target.value);
+      modal.remove();
+    }
+  });
+  
+  const hexInput = el('input', {
+    type: 'text',
+    value: currentColor,
+    placeholder: '#000000',
+    style: 'width:100%;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:4px;background:var(--input-bg);color:var(--text);font-family:monospace',
+    oninput: (e) => {
+      const val = e.target.value;
+      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+        preview.style.background = val;
+        customInput.value = val;
+      }
+    },
+    onchange: (e) => {
+      const val = e.target.value;
+      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+        onSelect(val);
+        modal.remove();
+      }
+    }
+  });
+  
+  customSection.append(customLabel, customInput, hexInput);
+  picker.append(header, preview, standardGrid, customSection);
+  modal.append(picker);
+  
+  modal.onclick = (e) => {
+    if (e.target === modal) modal.remove();
+  };
+  
+  document.body.append(modal);
+  return modal;
+}
+
 function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 function safeArc(ctx, cx, cy, r, a0, a1) {
   if (!Number.isFinite(r) || r <= 0) return false;
@@ -945,6 +1065,14 @@ const state = {
   le: []  // Logic Elements
 };
 
+// Z-index management for bringing widgets to front
+let topZIndex = 100;
+function bringToFront(node) {
+  if (!node) return;
+  topZIndex++;
+  node.style.zIndex = topZIndex;
+}
+
 function feedTick(msg){
   // Debug logging (only for first few ticks or when state.expr appears)
   if (msg.expr && (!state.expr || (window._exprDebugCount || 0) < 5)) {
@@ -1841,10 +1969,32 @@ async function createSignalSelector(kind, currentIndex, onChange) {
 }
 
 function saveLayoutToFile() {
-  const blob = new Blob([JSON.stringify({pages: state.pages}, null, 2)], {type: 'application/json'});
+  const layout = {pages: state.pages};
+  
+  // Save checklist position, filename, and content if it exists
+  const dock = document.querySelector('.cl-dock');
+  if (dock && window.checklistLoaded && window.checklistItems && window.checklistItems.length > 0) {
+    // Use annotated=true to save check states and times
+    const content = window.serializeChecklist ? 
+      window.serializeChecklist(window.checklistItems, true) : '';
+    
+    layout.checklist = {
+      top: dock.style.top,
+      left: dock.style.left,
+      width: dock.style.width,
+      height: dock.style.height,
+      display: dock.style.display,
+      fileName: window.checklistPath || 'checklist.txt',
+      content: content
+    };
+    console.log('[Layout] Saved checklist:', layout.checklist.fileName, 'with', window.checklistItems.length, 'items (annotated)');
+  }
+  
+  const blob = new Blob([JSON.stringify(layout, null, 2)], {type: 'application/json'});
   const a = el('a', {href: URL.createObjectURL(blob), download: 'layout.json'});
   a.click();
 }
+
 
 function loadLayoutFromFile() {
   const inp = el('input', {type: 'file', accept: '.json'});
@@ -1856,9 +2006,69 @@ function loadLayoutFromFile() {
       try {
         const obj = JSON.parse(rd.result);
         if (!obj.pages || !Array.isArray(obj.pages)) throw new Error('Invalid layout file');
-        state.pages = normalizeLayoutPages(obj.pages);   // <-- ensure defaults exist
+        state.pages = normalizeLayoutPages(obj.pages);
         refreshPages();
         setActivePage(0);
+        
+        // Restore checklist if it was saved in layout
+        if (obj.checklist) {
+          console.log('[Layout] Restoring checklist:', obj.checklist);
+          
+          // Check if checklist already exists
+          let dock = document.querySelector('.cl-dock');
+          
+          // If not, trigger the checklist button to create it
+          if (!dock) {
+            const checklistBtn = document.getElementById('clOpenDockBtn');
+            if (checklistBtn) {
+              checklistBtn.click();
+              console.log('[Layout] Created checklist widget');
+              
+              // Wait for it to be created
+              setTimeout(() => {
+                dock = document.querySelector('.cl-dock');
+                if (dock && obj.checklist) {
+                  applyChecklistLayout(dock, obj.checklist);
+                  
+                  // Load the checklist content if it was saved
+                  if (obj.checklist.content && window.parseChecklistText) {
+                    window.checklistPath = obj.checklist.fileName || 'checklist.txt';
+                    window.checklistItems = window.parseChecklistText(obj.checklist.content);
+                    window.checklistActiveRow = 0;
+                    window.checklistShowRow = 0;
+                    window.checklistReturnRow = 0;
+                    window.checklistLoaded = true;
+                    if (window.checklistItems.length > 0) {
+                      window.checklistItems[0].timeIn = new Date().toLocaleTimeString('en-US',{hour12:false});
+                    }
+                    window.checkEvents = [];
+                    if (window._renderTable) window._renderTable();
+                    console.log('[Layout] Loaded checklist content:', obj.checklist.fileName);
+                  }
+                }
+              }, 100);
+            }
+          } else {
+            // Checklist already exists, just apply layout
+            applyChecklistLayout(dock, obj.checklist);
+            
+            // Load the checklist content if it was saved
+            if (obj.checklist.content && window.parseChecklistText) {
+              window.checklistPath = obj.checklist.fileName || 'checklist.txt';
+              window.checklistItems = window.parseChecklistText(obj.checklist.content);
+              window.checklistActiveRow = 0;
+              window.checklistShowRow = 0;
+              window.checklistReturnRow = 0;
+              window.checklistLoaded = true;
+              if (window.checklistItems.length > 0) {
+                window.checklistItems[0].timeIn = new Date().toLocaleTimeString('en-US',{hour12:false});
+              }
+              window.checkEvents = [];
+              if (window._renderTable) window._renderTable();
+              console.log('[Layout] Loaded checklist content:', obj.checklist.fileName);
+            }
+          }
+        }
       } catch (e) {
         alert('Load failed: ' + e.message);
       }
@@ -1867,6 +2077,17 @@ function loadLayoutFromFile() {
   };
   inp.click();
 }
+
+function applyChecklistLayout(dock, layout) {
+  if (!dock || !layout) return;
+  if (layout.top) dock.style.top = layout.top;
+  if (layout.left) dock.style.left = layout.left;
+  if (layout.width) dock.style.width = layout.width;
+  if (layout.height) dock.style.height = layout.height;
+  if (layout.display) dock.style.display = layout.display;
+  console.log('[Layout] Applied checklist layout');
+}
+
 
 /* ----------------------- widget settings modal -------------------------- */
 function openWidgetSettings(w) {
@@ -1968,6 +2189,41 @@ function openWidgetSettings(w) {
           offsetInput,
           rm
         ]);
+        
+        // Color picker button
+        const currentColor = s.color || colorFor(idx);
+        const colorBtn = el('div', {
+          style: `width:30px;height:24px;border-radius:4px;border:1px solid var(--border);cursor:pointer;background:${currentColor};position:relative`,
+          title: 'Change color',
+          onclick: (e) => {
+            e.stopPropagation();
+            createColorPicker(currentColor, (newColor) => {
+              s.color = newColor;
+              colorBtn.style.background = newColor;
+              saveLayout();
+            });
+          }
+        });
+        
+        // Add color reset button if custom color is set
+        if (s.color) {
+          const resetBtn = el('span', {
+            className: 'icon',
+            style: 'font-size:11px;color:var(--text);cursor:pointer;margin-left:4px',
+            title: 'Reset to default color',
+            onclick: (e) => {
+              e.stopPropagation();
+              delete s.color;
+              colorBtn.style.background = colorFor(idx);
+              redrawList();
+              saveLayout();
+            }
+          }, '↺');
+          row.append(el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Color:'), colorBtn, resetBtn);
+        } else {
+          row.append(el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Color:'), colorBtn);
+        }
+        
         list.append(row);
       });
     }
@@ -2634,10 +2890,11 @@ function mountChart(w, body){
           const y = plotB - (displayValue - ymin) * yscale;
           if (first){ ctx.moveTo(x,y); first=false; } else ctx.lineTo(x,y);
         }
-        ctx.strokeStyle = colorFor(si); ctx.lineWidth = 2; ctx.stroke();
+        const customColors = (w.opts.series || []).map(s => s.color);
+        ctx.strokeStyle = colorFor(si, customColors); ctx.lineWidth = 2; ctx.stroke();
         const lab = (s.name && s.name.length) ? s.name : labelFor(s);
         legend.append(el('div',{className:'item'},[
-          el('span',{className:'swatch', style:`background:${colorFor(si)}`},''), lab
+          el('span',{className:'swatch', style:`background:${colorFor(si, customColors)}`},''), lab
         ]));
       });
 
@@ -3253,7 +3510,8 @@ function mountGauge(w, body){
       const frac = clamp((displayValue - lo)/span, 0, 1);
       const ang = Math.PI + (0 - Math.PI) * frac;
       const nx = Math.cos(ang), ny = Math.sin(ang);
-      ctx.strokeStyle=colorFor(si);
+      const customColors = (w.opts.needles || []).map(n => n.color);
+      ctx.strokeStyle=colorFor(si, customColors);
       ctx.beginPath();
       ctx.moveTo(cx, cy);
       ctx.lineTo(cx + (rInner + band*0.9)*nx, cy - (rInner + band*0.9)*ny);
@@ -3262,7 +3520,7 @@ function mountGauge(w, body){
       const lab = s.name && s.name.length ? s.name : labelFor(s);
       const decimals = w.opts.decimals !== undefined ? w.opts.decimals : 3;
       legend.append(el('div',{className:'item'},[
-        el('span',{className:'swatch', style:`background:${colorFor(si)}`},''), `${lab}: ${Number.isFinite(displayValue)?displayValue.toFixed(decimals):'—'}`
+        el('span',{className:'swatch', style:`background:${colorFor(si, customColors)}`},''), `${lab}: ${Number.isFinite(displayValue)?displayValue.toFixed(decimals):'—'}`
       ]));
     });
 
@@ -3361,7 +3619,8 @@ function mountBars(w, body){
       const y = plotB - t * (plotB - plotT);
       const h = plotB - y;
 
-      ctx.fillStyle = colorFor(idx);
+      const customColors = (w.opts.series || []).map(s => s.color);
+      ctx.fillStyle = colorFor(idx, customColors);
       ctx.fillRect(x - barW / 2, y, barW, h);
 
       // Draw series label at bottom
@@ -4796,6 +5055,11 @@ function makeDragResize(node, w, header, handle){
   if (w.type === 'dobutton') minH = 45;
   else if (w.type === 'le' || w.type === 'mathop') minH = 10;  // Half of default 20
   else if (w.type === 'staticvar') minH = 90;  // Half of default 180
+  
+  // Bring to front when clicking anywhere on widget
+  node.addEventListener('mousedown', (e)=>{
+    bringToFront(node);
+  });
   
   header.addEventListener('mousedown', (e)=>{
     const tag=(e.target.tagName||'').toUpperCase();
