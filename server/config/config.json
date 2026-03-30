@@ -42,7 +42,7 @@
         {
           "name": "Ch P",
           "slope": 50.0,
-          "offset": -29.42840576171875,
+          "offset": -27.203521728515625,
           "cutoffHz": 1.0,
           "units": "",
           "include": false

@@ -1,4 +1,4 @@
-const UI_VERSION = "1.9.1";  // 2026-03-30: Cursor-centered zoom, progressive re-decimation on zoom/pan in replay mode
+const UI_VERSION = "1.9.3";  // 2026-03-30: Fix opts wrap (no max-width), clip reset after save, full span on log open
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -314,6 +314,20 @@ function startReplay(cols, rows){
   chartBuffers.clear();
   chartRawBuffers.clear();
   chartFilters.clear();
+
+  // Reset any clip state from previous log
+  for (const p of state.pages){
+    for (const ww of p.widgets){
+      if (ww.type !== 'chart') continue;
+      ww._clippedRows = null;
+      if (ww._clipBtn) ww._clipBtn.textContent = '✂ Clip';
+    }
+  }
+
+  // Load ALL data into charts (decimated), keeping full-res raw buffers
+  loadAllReplayDataIntoCharts();
+
+  // Set every chart view to show the full log span immediately
   for (const p of state.pages){
     for (const w of p.widgets){
       if (w.type !== 'chart') continue;
@@ -514,6 +528,96 @@ function closeReplay(){
 
   updateReplayUI();
 }
+
+/* ==================== CLIP & SAVE LOG ==================== */
+
+// Clip the loaded log to the current chart view window (full raw detail).
+// Stores the clipped rows on w._clippedRows and updates button state.
+function clipLogToView(w) {
+  if (!replayData || !replayData.rows.length) {
+    alert('No log loaded.');
+    return;
+  }
+  if (!w.view || !w.view.paused) {
+    alert('Zoom/pause the chart first to define a clip window.');
+    return;
+  }
+
+  const t1 = w.view.tFreeze;
+  const t0 = t1 - w.view.span;
+  const tCol = replayData.cols.findIndex(c => {
+    const n = c.toLowerCase();
+    return n === 't' || n === 'time' || n === 'timestamp';
+  });
+
+  let clipped;
+  if (tCol >= 0) {
+    clipped = replayData.rows.filter(row => row[tCol] >= t0 && row[tCol] <= t1);
+  } else {
+    // No time column — clip by row index proportionally
+    const total = replayData.rows.length;
+    const raw = chartRawBuffers.get(w.id) || [];
+    if (raw.length) {
+      const tRawMin = raw[0].t, tRawMax = raw[raw.length-1].t, tRawSpan = tRawMax - tRawMin || 1;
+      const i0 = Math.round(((t0 - tRawMin) / tRawSpan) * total);
+      const i1 = Math.round(((t1 - tRawMin) / tRawSpan) * total);
+      clipped = replayData.rows.slice(Math.max(0,i0), Math.min(total, i1+1));
+    } else {
+      clipped = replayData.rows;
+    }
+  }
+
+  if (!clipped.length) {
+    alert('No data in the current view window.');
+    return;
+  }
+
+  w._clippedRows = clipped;
+  if (w._clipBtn) w._clipBtn.textContent = `✂ Clipped (${clipped.length} rows)`;
+  if (w._saveBtn) { w._saveBtn.disabled = false; w._saveBtn.style.opacity = '1'; }
+  console.log(`[Clip] ${clipped.length} rows from t=${t0.toFixed(3)} to t=${t1.toFixed(3)}`);
+}
+
+// Save the clipped (or full) log as a CSV file via browser download dialog.
+function saveClippedLog(w) {
+  const rows = w._clippedRows || (replayData && replayData.rows);
+  const cols = replayData && replayData.cols;
+  if (!rows || !rows.length || !cols) {
+    alert('Nothing to save. Load a log and optionally clip it first.');
+    return;
+  }
+
+  // Build CSV
+  const lines = [cols.join(',')];
+  for (const row of rows) {
+    lines.push(row.join(','));
+  }
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], {type: 'text/csv'});
+  const url = URL.createObjectURL(blob);
+
+  // Suggest a filename based on clip bounds if available
+  let filename = 'log_clipped.csv';
+  if (w._clippedRows && w.view) {
+    const t0 = (w.view.tFreeze - w.view.span).toFixed(1);
+    const t1 = w.view.tFreeze.toFixed(1);
+    filename = `log_t${t0}_to_t${t1}.csv`;
+  }
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  // Reset clip button text now that the file has been saved
+  w._clippedRows = null;
+  if (w._clipBtn) w._clipBtn.textContent = '✂ Clip';
+}
+
+/* ========================================================= */
 
 function seekReplay(index){
   if (!replayData) return;
@@ -2714,15 +2818,12 @@ function renderWidget(w){
   if (w.type === 'staticvar') classList += ' staticvar-widget';
   const box=el('div',{className:classList, id:'w_'+w.id});
   
-  // LE and mathop widgets get minimal headers (via CSS)
   const isCompact = (w.type === 'le' || w.type === 'mathop');
   
-  // LE widgets don't need settings - only close button
   let toolButtons;
   if (w.type === 'le') {
     toolButtons = [el('span',{className:'icon', title:'Close', onclick:()=>removeWidget(w.id)}, '×')];
   } else if (w.type === 'expr') {
-    // Expression widgets get debug button
     toolButtons = [
       el('span',{className:'icon', title:'Debug View', onclick:()=>openExpressionDebug(w)}, '🔍'),
       el('span',{className:'icon', title:'Settings', onclick:()=>openWidgetSettings(w)}, '⚙'),
@@ -2735,13 +2836,33 @@ function renderWidget(w){
     ];
   }
   
-  const tools=el('div',{className:'tools'}, toolButtons);
-  const header=el('header',{},[
-    el('span',{className:'title'}, w.opts.title||w.type),
-    el('div',{className:'spacer'}),
-    el('div',{className:'opts'}, widgetOptions(w)),
-    tools
-  ]);
+  const tools = el('div',{className:'tools'}, toolButtons);
+
+  // Chart headers: title | │ | opts (fills remaining, no-wrap) | tools (pushed right)
+  // Other widgets: title | spacer | opts | tools  (unchanged)
+  let header;
+  if (w.type === 'chart') {
+    const sep = el('span', {style:'color:#3b425e;font-size:14px;padding:0 4px;align-self:center;flex-shrink:0;user-select:none'}, '│');
+    const optsEl = el('div', {
+      className:'opts',
+      style:'flex:1;min-width:0;flex-wrap:nowrap;overflow:visible;gap:4px'
+    }, widgetOptions(w));
+    const toolsEl = el('div', {className:'tools', style:'margin-left:auto;flex-shrink:0'}, toolButtons);
+    header = el('header', {style:'flex-wrap:nowrap;overflow:hidden'}, [
+      el('span',{className:'title',style:'flex-shrink:0'}, w.opts.title||w.type),
+      sep,
+      optsEl,
+      toolsEl
+    ]);
+  } else {
+    header = el('header',{},[
+      el('span',{className:'title'}, w.opts.title||w.type),
+      el('div',{className:'spacer'}),
+      el('div',{className:'opts'}, widgetOptions(w)),
+      tools
+    ]);
+  }
+
   const body=el('div',{className:'body'});
   const rez=el('div',{className:'resize'});
   box.append(header,body,rez);
@@ -2837,6 +2958,34 @@ function widgetOptions(w){
       zoomBadge,
       fullSpanBtn
     );
+
+    // Clip/Save buttons — only meaningful in replay mode, but always present
+    // so the header layout is stable; they're greyed out when no log is loaded.
+    const clipBtn = el('button', {
+      className: 'btn',
+      title: 'Clip log to current view window (full detail)',
+      style: 'padding:3px 7px;font-size:11px',
+      onclick: () => clipLogToView(w)
+    }, '✂ Clip');
+
+    const saveBtn = el('button', {
+      className: 'btn',
+      title: 'Save clipped log to CSV file',
+      style: 'padding:3px 7px;font-size:11px',
+      onclick: () => saveClippedLog(w)
+    }, '💾 Save');
+
+    // Store refs so we can update enabled state from draw()
+    w._clipBtn = clipBtn;
+    w._saveBtn = saveBtn;
+
+    // Initial enabled state
+    const inReplay = replayMode !== null && !!replayData;
+    clipBtn.disabled = !inReplay;
+    saveBtn.disabled = !(inReplay && w._clippedRows);
+    if (!inReplay) { clipBtn.style.opacity='0.4'; saveBtn.style.opacity='0.4'; }
+
+    opts.push(clipBtn, saveBtn);
   }
   if (w.type==='bars'){
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
@@ -3088,6 +3237,17 @@ function mountChart(w, body){
       const txt = `🔍 ${zr.toFixed(2)}×`;
       if (w._zoomBadgeEl.textContent !== txt) w._zoomBadgeEl.textContent = txt;
       w._zoomBadgeEl.style.color = (zr > 1.02) ? '#f7768e' : '#a8b3cf';
+    }
+    // Update clip/save button enabled state
+    if (w._clipBtn) {
+      const canClip = replayMode !== null && !!replayData && w.view && w.view.paused;
+      w._clipBtn.disabled = !canClip;
+      w._clipBtn.style.opacity = canClip ? '1' : '0.4';
+    }
+    if (w._saveBtn) {
+      const canSave = !!(w._clippedRows && w._clippedRows.length) || (replayMode !== null && !!replayData);
+      w._saveBtn.disabled = !canSave;
+      w._saveBtn.style.opacity = canSave ? '1' : '0.4';
     }
 
     if (!buf.length) {
