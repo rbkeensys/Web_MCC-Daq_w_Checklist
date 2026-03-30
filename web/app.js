@@ -319,7 +319,7 @@ function startReplay(cols, rows){
   for (const p of state.pages){
     for (const ww of p.widgets){
       if (ww.type !== 'chart') continue;
-      ww._clippedRows = null;
+      ww._clippedData = null;
       if (ww._clipBtn) ww._clipBtn.textContent = '✂ Clip';
     }
   }
@@ -531,13 +531,9 @@ function closeReplay(){
 
 /* ==================== CLIP & SAVE LOG ==================== */
 
-// Clip the loaded log to the current chart view window (full raw detail).
-// Stores the clipped rows on w._clippedRows and updates button state.
+// Clip the loaded log (or live buffer) to the current chart view window.
+// Stores the clipped data on w._clippedData = {cols, rows} and updates button state.
 function clipLogToView(w) {
-  if (!replayData || !replayData.rows.length) {
-    alert('No log loaded.');
-    return;
-  }
   if (!w.view || !w.view.paused) {
     alert('Zoom/pause the chart first to define a clip window.');
     return;
@@ -545,63 +541,106 @@ function clipLogToView(w) {
 
   const t1 = w.view.tFreeze;
   const t0 = t1 - w.view.span;
-  const tCol = replayData.cols.findIndex(c => {
-    const n = c.toLowerCase();
-    return n === 't' || n === 'time' || n === 'timestamp';
-  });
 
-  let clipped;
-  if (tCol >= 0) {
-    clipped = replayData.rows.filter(row => row[tCol] >= t0 && row[tCol] <= t1);
-  } else {
-    // No time column — clip by row index proportionally
-    const total = replayData.rows.length;
-    const raw = chartRawBuffers.get(w.id) || [];
-    if (raw.length) {
-      const tRawMin = raw[0].t, tRawMax = raw[raw.length-1].t, tRawSpan = tRawMax - tRawMin || 1;
-      const i0 = Math.round(((t0 - tRawMin) / tRawSpan) * total);
-      const i1 = Math.round(((t1 - tRawMin) / tRawSpan) * total);
-      clipped = replayData.rows.slice(Math.max(0,i0), Math.min(total, i1+1));
+  if (replayMode !== null && replayData && replayData.rows.length) {
+    // --- Replay mode: slice full-resolution raw rows by time column ---
+    const tCol = replayData.cols.findIndex(c => {
+      const n = c.toLowerCase();
+      return n === 't' || n === 'time' || n === 'timestamp';
+    });
+
+    let clipped;
+    if (tCol >= 0) {
+      clipped = replayData.rows.filter(row => row[tCol] >= t0 && row[tCol] <= t1);
     } else {
-      clipped = replayData.rows;
+      const total = replayData.rows.length;
+      const raw = chartRawBuffers.get(w.id) || [];
+      if (raw.length) {
+        const tRawMin = raw[0].t, tRawMax = raw[raw.length-1].t, tRawSpan = tRawMax - tRawMin || 1;
+        const i0 = Math.round(((t0 - tRawMin) / tRawSpan) * total);
+        const i1 = Math.round(((t1 - tRawMin) / tRawSpan) * total);
+        clipped = replayData.rows.slice(Math.max(0,i0), Math.min(total, i1+1));
+      } else {
+        clipped = replayData.rows;
+      }
     }
+
+    if (!clipped.length) { alert('No data in the current view window.'); return; }
+    w._clippedData = { cols: replayData.cols, rows: clipped };
+
+  } else {
+    // --- Live mode: slice the chart's own display buffer ---
+    const buf = chartBuffers.get(w.id) || [];
+    const slice = buf.filter(b => b.t >= t0 && b.t <= t1);
+    if (!slice.length) { alert('No data in the current view window.'); return; }
+
+    // Use ai0/ao0/do0/tc0 column names so the file round-trips correctly
+    // when reopened in the viewer (makeTickFromRow expects this format).
+    const series = w.opts.series || [];
+    const cols = ['t', ...series.map(s => {
+      const k = s.kind || 'ai';
+      const i = s.index ?? 0;
+      // map kind names to the prefix makeTickFromRow recognises
+      if (k === 'ai')  return `ai${i}`;
+      if (k === 'ao')  return `ao${i}`;
+      if (k === 'do')  return `do${i}`;
+      if (k === 'tc')  return `tc${i}`;
+      // For other kinds (pid, math, expr, button) use a generic ai-style name
+      // so the data still loads; label with kind+index
+      return `ai_${k}${i}`;
+    })];
+    const rows = slice.map(b => [b.t, ...b.v]);
+    w._clippedData = { cols, rows };
   }
 
-  if (!clipped.length) {
-    alert('No data in the current view window.');
-    return;
-  }
-
-  w._clippedRows = clipped;
-  if (w._clipBtn) w._clipBtn.textContent = `✂ Clipped (${clipped.length} rows)`;
+  const count = w._clippedData.rows.length;
+  if (w._clipBtn) w._clipBtn.textContent = `✂ Clipped (${count} rows)`;
   if (w._saveBtn) { w._saveBtn.disabled = false; w._saveBtn.style.opacity = '1'; }
-  console.log(`[Clip] ${clipped.length} rows from t=${t0.toFixed(3)} to t=${t1.toFixed(3)}`);
+  console.log(`[Clip] ${count} rows from t=${t0.toFixed(3)} to t=${t1.toFixed(3)}`);
 }
 
 // Save the clipped (or full) log as a CSV file via browser download dialog.
 function saveClippedLog(w) {
-  const rows = w._clippedRows || (replayData && replayData.rows);
-  const cols = replayData && replayData.cols;
-  if (!rows || !rows.length || !cols) {
-    alert('Nothing to save. Load a log and optionally clip it first.');
-    return;
+  let cols, rows;
+
+  if (w._clippedData) {
+    cols = w._clippedData.cols;
+    rows = w._clippedData.rows;
+  } else if (replayMode !== null && replayData) {
+    cols = replayData.cols;
+    rows = replayData.rows;
+  } else {
+    // Live fallback: save the entire current buffer for this chart
+    const buf = chartBuffers.get(w.id) || [];
+    if (!buf.length) { alert('No data to save.'); return; }
+    const series = w.opts.series || [];
+    cols = ['t', ...series.map(s => {
+      const k = s.kind || 'ai';
+      const i = s.index ?? 0;
+      if (k === 'ai')  return `ai${i}`;
+      if (k === 'ao')  return `ao${i}`;
+      if (k === 'do')  return `do${i}`;
+      if (k === 'tc')  return `tc${i}`;
+      return `ai_${k}${i}`;
+    })];
+    rows = buf.map(b => [b.t, ...b.v]);
   }
 
-  // Build CSV
+  if (!rows || !rows.length || !cols) { alert('Nothing to save.'); return; }
+
   const lines = [cols.join(',')];
-  for (const row of rows) {
-    lines.push(row.join(','));
-  }
+  for (const row of rows) lines.push(row.join(','));
   const csv = lines.join('\n');
   const blob = new Blob([csv], {type: 'text/csv'});
   const url = URL.createObjectURL(blob);
 
-  // Suggest a filename based on clip bounds if available
   let filename = 'log_clipped.csv';
-  if (w._clippedRows && w.view) {
+  if (w._clippedData && w.view) {
     const t0 = (w.view.tFreeze - w.view.span).toFixed(1);
     const t1 = w.view.tFreeze.toFixed(1);
     filename = `log_t${t0}_to_t${t1}.csv`;
+  } else if (replayMode === null) {
+    filename = `live_${new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)}.csv`;
   }
 
   const a = document.createElement('a');
@@ -613,7 +652,7 @@ function saveClippedLog(w) {
   URL.revokeObjectURL(url);
 
   // Reset clip button text now that the file has been saved
-  w._clippedRows = null;
+  w._clippedData = null;
   if (w._clipBtn) w._clipBtn.textContent = '✂ Clip';
 }
 
@@ -2979,11 +3018,11 @@ function widgetOptions(w){
     w._clipBtn = clipBtn;
     w._saveBtn = saveBtn;
 
-    // Initial enabled state
-    const inReplay = replayMode !== null && !!replayData;
-    clipBtn.disabled = !inReplay;
-    saveBtn.disabled = !(inReplay && w._clippedRows);
-    if (!inReplay) { clipBtn.style.opacity='0.4'; saveBtn.style.opacity='0.4'; }
+    // Initial enabled state — clip needs paused view, save always available if buffer has data
+    const isPaused = w.view && w.view.paused;
+    clipBtn.disabled = !isPaused;
+    saveBtn.disabled = false; // always available; saveClippedLog handles empty case gracefully
+    if (!isPaused) { clipBtn.style.opacity='0.4'; }
 
     opts.push(clipBtn, saveBtn);
   }
@@ -3199,8 +3238,11 @@ function mountChart(w, body){
     }
   };
   canvas.addEventListener('mouseup', endPan);
+  // Also catch mouseup outside canvas (user drags beyond boundary then releases)
+  // endPan is a no-op when pan.dragging is false so this is safe.
+  document.addEventListener('mouseup', endPan);
+  // Do NOT call endPan on mouseleave — dragging outside the canvas is normal.
   canvas.addEventListener('mouseleave', (e) => {
-    endPan(e);
     const cur = chartCursor.get(w.id);
     if (cur) { cur.x = null; chartCursor.set(w.id, cur); }
   });
@@ -3240,14 +3282,15 @@ function mountChart(w, body){
     }
     // Update clip/save button enabled state
     if (w._clipBtn) {
-      const canClip = replayMode !== null && !!replayData && w.view && w.view.paused;
+      const canClip = w.view && w.view.paused;
       w._clipBtn.disabled = !canClip;
       w._clipBtn.style.opacity = canClip ? '1' : '0.4';
     }
     if (w._saveBtn) {
-      const canSave = !!(w._clippedRows && w._clippedRows.length) || (replayMode !== null && !!replayData);
-      w._saveBtn.disabled = !canSave;
-      w._saveBtn.style.opacity = canSave ? '1' : '0.4';
+      // Save is always available when there's any data
+      const hasBuf = (chartBuffers.get(w.id) || []).length > 0;
+      w._saveBtn.disabled = !hasBuf;
+      w._saveBtn.style.opacity = hasBuf ? '1' : '0.4';
     }
 
     if (!buf.length) {
