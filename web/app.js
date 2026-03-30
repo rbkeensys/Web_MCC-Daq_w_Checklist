@@ -1,4 +1,4 @@
-const UI_VERSION = "1.8.8";  // 2026-03-27: Checklist saves check states & times + modals above checklist
+const UI_VERSION = "1.9.1";  // 2026-03-30: Cursor-centered zoom, progressive re-decimation on zoom/pan in replay mode
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -137,6 +137,64 @@ function safeArc(ctx, cx, cy, r, a0, a1) {
   return true;
 }
 
+/* ==================== CHART DECIMATION (LTTB) ====================
+   Largest-Triangle-Three-Buckets algorithm.
+   Reduces `pts` (array of {t, v}) to at most `threshold` points while
+   preserving the visual shape of every series.  `seriesCount` tells it
+   how many value slots exist in each point's .v array so it can compute
+   the triangle area across all series simultaneously.
+   Returns a new (smaller) array; returns pts unchanged when no reduction needed.
+   ================================================================== */
+const CHART_MAX_RENDER_PTS = 2000; // max points sent to canvas per series
+
+function lttbDecimate(pts, threshold) {
+  if (!pts || pts.length <= threshold || threshold < 3) return pts;
+  const result = [];
+  const bucketSize = (pts.length - 2) / (threshold - 2);
+  let a = 0; // always start with first point
+  result.push(pts[0]);
+
+  for (let i = 0; i < threshold - 2; i++) {
+    // Calculate point average for next bucket (look-ahead)
+    let avgT = 0, avgLen = 0;
+    const nextBucketStart = Math.floor((i + 1) * bucketSize) + 1;
+    const nextBucketEnd   = Math.min(Math.floor((i + 2) * bucketSize) + 1, pts.length);
+    for (let j = nextBucketStart; j < nextBucketEnd; j++) {
+      avgT += pts[j].t;
+      avgLen++;
+    }
+    avgT /= avgLen;
+    // Average v[0] for triangle area (use first series; good enough heuristic)
+    let avgV = 0;
+    for (let j = nextBucketStart; j < nextBucketEnd; j++) avgV += (pts[j].v[0] || 0);
+    avgV /= avgLen;
+
+    // Find point in current bucket with largest triangle
+    const curBucketStart = Math.floor(i * bucketSize) + 1;
+    const curBucketEnd   = Math.min(Math.floor((i + 1) * bucketSize) + 1, pts.length);
+    const aT = pts[a].t, aV = pts[a].v[0] || 0;
+    let maxArea = -1, maxIdx = curBucketStart;
+    for (let j = curBucketStart; j < curBucketEnd; j++) {
+      const area = Math.abs((aT - avgT) * ((pts[j].v[0]||0) - aV) -
+                            (aT - pts[j].t) * (avgV - aV)) * 0.5;
+      if (area > maxArea) { maxArea = area; maxIdx = j; }
+    }
+    result.push(pts[maxIdx]);
+    a = maxIdx;
+  }
+  result.push(pts[pts.length - 1]);
+  return result;
+}
+
+/* How many render points to target based on zoom level (more zoom = more detail) */
+function decimTargetForZoom(zoomRatio) {
+  // zoomRatio = viewSpan / opts.span  (1.0 = full span, <1 = zoomed in)
+  // Zoomed in sees fewer raw pts, so we can afford more detail per pixel.
+  // Cap between 500 and CHART_MAX_RENDER_PTS.
+  const r = Math.max(0.01, Math.min(1, zoomRatio));
+  return Math.round(CHART_MAX_RENDER_PTS * Math.sqrt(r) + 500 * (1 - Math.sqrt(r)));
+}
+
 /* ==================== FILE LOAD/SAVE HELPERS ==================== */
 // Create a Load button that loads JSON from file
 function createLoadButton(onLoad) {
@@ -254,32 +312,41 @@ function startReplay(cols, rows){
 
   // Clear existing chart buffers
   chartBuffers.clear();
+  chartRawBuffers.clear();
   chartFilters.clear();
-
-  // Load ALL data into charts
-  loadAllReplayDataIntoCharts();
+  for (const p of state.pages){
+    for (const w of p.widgets){
+      if (w.type !== 'chart') continue;
+      const buf = chartBuffers.get(w.id);
+      if (buf && buf.length) {
+        const logSpan = buf[buf.length-1].t - buf[0].t;
+        w.view = w.view || {};
+        w.view.span = Math.max(0.1, logSpan);
+        w.view.tFreeze = buf[buf.length-1].t;
+        w.view.paused = true;
+      }
+    }
+  }
 
   // Set cursor to first frame for gauges/bars
   replayIndex = 0;
   updateGaugesAndBarsFromReplayIndex();
-
   updateReplayUI();
 }
 
 function loadAllReplayDataIntoCharts(){
   if (!replayData) return;
 
-  // Feed all data to charts at once
-  for (let i = 0; i < replayData.rows.length; i++) {
-    const row = replayData.rows[i];
-    const msg = makeTickFromRow(replayData.cols, row);
-
-    // Only feed to chart buffers, not to state (that would update gauges/bars)
-    for (const p of state.pages){
-      for (const w of p.widgets){
-        if (w.type !== 'chart') continue;
-        const buf = chartBuffers.get(w.id) || [];
-        const t = msg.t || (i * 0.01); // Use message time or fallback
+  // Build per-widget full-resolution raw buffers, store them, then set a
+  // decimated version as the display buffer for the initial full-log view.
+  for (const p of state.pages){
+    for (const w of p.widgets){
+      if (w.type !== 'chart') continue;
+      const rawBuf = [];
+      for (let i = 0; i < replayData.rows.length; i++) {
+        const row = replayData.rows[i];
+        const msg = makeTickFromRow(replayData.cols, row);
+        const t = msg.t || (i * 0.01);
         const raw = (w.opts.series||[]).map(sel => {
           if (sel.kind === 'ai') return msg.ai?.[sel.index] ?? 0;
           if (sel.kind === 'ao') return msg.ao?.[sel.index] ?? 0;
@@ -287,11 +354,36 @@ function loadAllReplayDataIntoCharts(){
           if (sel.kind === 'tc') return msg.tc?.[sel.index] ?? 0;
           return 0;
         });
-        buf.push({t, v: raw});
-        chartBuffers.set(w.id, buf);
+        rawBuf.push({t, v: raw});
       }
+      // Keep the full-res buffer so zoom can re-decimate at higher detail
+      chartRawBuffers.set(w.id, rawBuf);
+      // Decimated version for the initial full-log view
+      chartBuffers.set(w.id, lttbDecimate(rawBuf, CHART_MAX_RENDER_PTS));
     }
   }
+}
+
+/* Re-decimate the raw replay buffer for a specific time window.
+   Called after each zoom/pan settle in replay mode.
+   Binary-searches the raw buffer, slices the window, decimates to
+   CHART_MAX_RENDER_PTS, and replaces chartBuffers[id]. */
+function reDecimateReplayWindow(w, t0, t1){
+  const raw = chartRawBuffers.get(w.id);
+  if (!raw || !raw.length) return;
+
+  // Binary search for t0
+  let lo = 0, hi = raw.length - 1;
+  while (lo < hi){ const m=(lo+hi)>>1; if(raw[m].t < t0) lo=m+1; else hi=m; }
+  const start = Math.max(0, lo - 1);
+
+  // Binary search for t1
+  let lo2 = start, hi2 = raw.length - 1;
+  while (lo2 < hi2){ const m=(lo2+hi2+1)>>1; if(raw[m].t > t1) hi2=m-1; else lo2=m; }
+  const end = Math.min(raw.length - 1, lo2 + 1);
+
+  const slice = raw.slice(start, end + 1);
+  chartBuffers.set(w.id, lttbDecimate(slice, CHART_MAX_RENDER_PTS));
 }
 
 function updateGaugesAndBarsFromReplayIndex(){
@@ -320,9 +412,8 @@ function playReplay(){
 
   // Clear charts for animated playback
   chartBuffers.clear();
+  chartRawBuffers.clear();
   chartFilters.clear();
-
-  updateReplayUI();
 
   const stepMs = Math.max(10, 1000 / replayRate);
   replayTimer = setInterval(() => {
@@ -363,10 +454,26 @@ function showFullLog(){
   replayMode = 'paused';
   replayPaused = false;
 
-  // Reload all data into charts
+  // Reload all data into charts (decimated)
   chartBuffers.clear();
+  chartRawBuffers.clear();
   chartFilters.clear();
   loadAllReplayDataIntoCharts();
+
+  // Now set every chart's view to show the full log span
+  for (const p of state.pages){
+    for (const w of p.widgets){
+      if (w.type !== 'chart') continue;
+      const buf = chartBuffers.get(w.id);
+      if (buf && buf.length) {
+        const logSpan = buf[buf.length-1].t - buf[0].t;
+        w.view = w.view || {};
+        w.view.span = Math.max(0.1, logSpan);
+        w.view.tFreeze = buf[buf.length-1].t;
+        w.view.paused = true;
+      }
+    }
+  }
 
   // Keep current cursor position for gauges/bars
   updateGaugesAndBarsFromReplayIndex();
@@ -384,9 +491,23 @@ function closeReplay(){
   replayMode = null;
   replayPaused = false;
 
-  // Clear chart buffers
+  // Clear chart buffers and pan state
   chartBuffers.clear();
+  chartRawBuffers.clear();
   chartFilters.clear();
+  chartPan.clear();
+
+  // Reset all chart views to live (unpaused) mode
+  for (const p of state.pages){
+    for (const ww of p.widgets){
+      if (ww.type !== 'chart') continue;
+      if (ww.view) {
+        ww.view.paused = false;
+        ww.view.tFreeze = 0;
+        ww.view.span = ww.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
+      }
+    }
+  }
 
   // Reconnect to live data
   connect();
@@ -2652,7 +2773,7 @@ function widgetOptions(w){
       el('option',{value:'auto'}, 'Auto'),
       el('option',{value:'manual'}, 'Manual')
     ]);
-    sel.value = w.opts.scale || 'auto';  // Set value AFTER options are added
+    sel.value = w.opts.scale || 'auto';
     sel.onchange=e=>{ w.opts.scale=e.target.value; };
     const min=el('input',{type:'number',value:w.opts.min, step:'any', style:'width:90px'});
     const max=el('input',{type:'number',value:w.opts.max, step:'any', style:'width:90px'});
@@ -2665,25 +2786,19 @@ function widgetOptions(w){
     span.oninput=()=>{
       const newSpan = parseFloat(span.value)||10;
       w.opts.span = newSpan;
-
-      // If not zoom-paused, update view span too
-      if (!w.view.paused) {
-        w.view.span = newSpan;
+      if (!w.view || !w.view.paused) {
+        if (w.view) w.view.span = newSpan;
       }
-
-      // Clear any data beyond the new buffer depth immediately
       const buf = chartBuffers.get(w.id);
       if (buf && buf.length) {
         const t = performance.now()/1000;
         const bufferDepth = newSpan * 1.2;
-        while (buf.length && (t - buf[0].t) > bufferDepth) {
-          buf.shift();
-        }
+        while (buf.length && (t - buf[0].t) > bufferDepth) buf.shift();
       }
     };
 
     const filt=el('input',{type:'number', value:w.opts.filterHz||0, min:0, step:'any', style:'width:80px'});
-    filt.oninput =()=>{ w.opts.filterHz=parseFloat(filt.value)||0; };
+    filt.oninput=()=>{ w.opts.filterHz=parseFloat(filt.value)||0; };
 
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
     yGrid.oninput=()=>{ w.opts.yGridLines=parseInt(yGrid.value)||5; };
@@ -2691,19 +2806,37 @@ function widgetOptions(w){
     const pause=el('button',{className:'btn', onclick:()=>{
       w.opts.paused=!w.opts.paused;
       if (w.opts.paused) {
-        // Freeze current time when pausing
         const buf = chartBuffers.get(w.id) || [];
-        if (buf.length) {
-          w.opts.tFreeze = buf[buf.length - 1].t;
-        }
+        if (buf.length) w.opts.tFreeze = buf[buf.length - 1].t;
       } else {
-        // Clear freeze time when resuming
         w.opts.tFreeze = null;
       }
       pause.textContent=w.opts.paused?'Resume':'Pause';
     }}, w.opts.paused?'Resume':'Pause');
 
-    opts.push(el('span',{},'Span[s]:'), span, el('span',{},'Filter[Hz]:'), filt, el('span',{},'Y Grid:'), yGrid, pause);
+    // Zoom level badge — mountChart stores a ref to update it each frame
+    const zoomBadge = el('span', {
+      style: 'font-size:11px;padding:2px 6px;background:#1e2235;border-radius:4px;color:#a8b3cf;cursor:default;user-select:none',
+      title: 'Current zoom level (1.00× = full span)'
+    }, '🔍 1.00×');
+    w._zoomBadgeEl = zoomBadge;
+
+    // Full-span button
+    const fullSpanBtn = el('button', {
+      className: 'btn',
+      title: 'Reset to full span (also: double-click chart)',
+      style: 'padding:3px 7px;font-size:11px',
+      onclick: () => { if (w._resetZoom) w._resetZoom(); }
+    }, '⟷ Full');
+
+    opts.push(
+      el('span',{},'Span[s]:'), span,
+      el('span',{},'Filter[Hz]:'), filt,
+      el('span',{},'Y Grid:'), yGrid,
+      pause,
+      zoomBadge,
+      fullSpanBtn
+    );
   }
   if (w.type==='bars'){
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
@@ -2712,25 +2845,21 @@ function widgetOptions(w){
   }
   return opts;
 }
-
-
-/* ------------------------------- chart ---------------------------------- */
 const chartBuffers=new Map();
+const chartRawBuffers=new Map(); // w.id -> full-resolution replay buffer (never decimated)
 const chartFilters=new Map();
 const chartCursor=new Map(); // w.id -> {x: number|null, mode:'follow'|'current', ctxEl:HTMLElement|null}
 const chartRAFHandles=new Map(); // w.id -> {rafId: number, isRunning: boolean}
+// Pan state stored per widget-id so it survives mountChart re-renders
+const chartPan=new Map(); // w.id -> {dragging,startX,startTFreeze,reDecimateTimer}
 
-/* ==================== ENHANCED CHART WITH GRID ==================== */
-/* ==================== FIXED CHART SPAN - LIVE UPDATE ==================== */
-// The issue is that w.view.span gets used in draw(), but when NOT paused,
-// it should follow w.opts.span. Let me fix the draw function logic:
 
 function mountChart(w, body){
   const legend=el('div',{className:'legend'}); body.append(legend);
   const canvas=el('canvas'); body.append(canvas);
   const ctx=canvas.getContext('2d');
 
-  // Initialize view
+  // Initialize view state
   w.view = w.view || { span: (window.GLOBAL_BUFFER_SPAN || 10), paused: false, tFreeze: 0 };
   w.opts.yGridLines = w.opts.yGridLines || 5;
 
@@ -2741,249 +2870,400 @@ function mountChart(w, body){
     w.view.span = w.opts.span;
   }
 
+  w._zoomBadgeEl = w._zoomBadgeEl || null;
+
+  /* ---- getZoomRatio: >1 means zoomed IN (viewing less than full span) ---- */
+  function getZoomRatio() {
+    const fullSpan = w.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
+    return fullSpan / Math.max(0.001, w.view.span);
+  }
+
+  /* ---- resetToFullSpan: show everything, resume live if no log ---- */
+  function resetToFullSpan() {
+    if (replayMode !== null) {
+      // Replay mode: show the entire loaded log, re-decimate from full raw buffer
+      const raw = chartRawBuffers.get(w.id);
+      if (raw && raw.length) {
+        chartBuffers.set(w.id, lttbDecimate(raw, CHART_MAX_RENDER_PTS));
+      }
+      const buf = chartBuffers.get(w.id) || [];
+      if (buf.length) {
+        const logSpan = buf[buf.length-1].t - buf[0].t;
+        w.view.span = Math.max(0.1, logSpan);
+        w.view.tFreeze = buf[buf.length-1].t;
+        w.view.paused = true;
+      }
+    } else {
+      // Live mode: restore to configured span and resume scrolling
+      w.view.span = w.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
+      w.view.paused = false;
+      w.view.tFreeze = 0;
+      w.opts.paused = false;
+      w.opts.tFreeze = null;
+    }
+  }
+
+  /* ---- MOUSE WHEEL: zoom centered on cursor ---- */
+  // Track last known cursor X for centering
+  let lastCursorX = null;
+  // Debounce re-decimation: only re-slice raw buffer after wheel stops
+  let reDecimateTimer = null;
+
   canvas.addEventListener('wheel', (ev)=>{
     ev.preventDefault();
+    const buf = chartBuffers.get(w.id) || [];
+    const latestT = buf.length ? buf[buf.length-1].t : performance.now()/1000;
+
     if (ev.shiftKey){
-      window.GLOBAL_BUFFER_SPAN = Math.max(1, Math.min(3600, (window.GLOBAL_BUFFER_SPAN || 10) * ((ev.deltaY>0)?1.15:1/1.15)));
+      // Shift+wheel: change base opts.span globally
+      window.GLOBAL_BUFFER_SPAN = Math.max(1, Math.min(3600,
+        (window.GLOBAL_BUFFER_SPAN || 10) * (ev.deltaY > 0 ? 1.15 : 1/1.15)));
       for (const p of state.pages){
         for (const w2 of p.widgets){
-          if (w2.type==='chart'){
-            w2.view = w2.view || { span: window.GLOBAL_BUFFER_SPAN, paused:false, tFreeze:0 };
-            if (!w2.view.paused) {
-              w2.view.span = window.GLOBAL_BUFFER_SPAN;
-              w2.opts.span = window.GLOBAL_BUFFER_SPAN;
-            }
+          if (w2.type !== 'chart') continue;
+          w2.view = w2.view || { span: window.GLOBAL_BUFFER_SPAN, paused:false, tFreeze:0 };
+          if (!w2.view.paused) {
+            w2.view.span = window.GLOBAL_BUFFER_SPAN;
+            w2.opts.span = window.GLOBAL_BUFFER_SPAN;
           }
         }
       }
-    } else {
-      const base = (w.view.span || (window.GLOBAL_BUFFER_SPAN || 10));
-      w.view.span = Math.max(0.1, Math.min(3600, base * ((ev.deltaY>0)?1.15:1/1.15)));
-      w.opts.span = w.view.span; // Keep in sync
-      const buf = chartBuffers.get(w.id) || [];
-      w.view.paused = true;
-      w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
+      return;
     }
+
+    // --- Compute the anchor fraction (cursor position for both zoom in AND out) ---
+    const rect = canvas.getBoundingClientRect();
+    const cursorPx = (lastCursorX !== null) ? lastCursorX : (rect.width / 2);
+    const plotL = 60, plotR = rect.width - 10;
+    const plotW = plotR - plotL;
+    const frac = Math.max(0, Math.min(1, (cursorPx - plotL) / Math.max(1, plotW)));
+
+    // Current view window
+    const curSpan = w.view.paused ? w.view.span : (w.opts.span || window.GLOBAL_BUFFER_SPAN || 10);
+    const curT1 = w.view.paused
+      ? (w.view.tFreeze || latestT)
+      : (w.opts.paused && w.opts.tFreeze != null ? w.opts.tFreeze : latestT);
+    const curT0 = curT1 - curSpan;
+    const tUnderCursor = curT0 + frac * curSpan;
+
+    // New span after zoom
+    const newSpan = Math.max(0.1, Math.min(3600, curSpan * (ev.deltaY > 0 ? 1.15 : 1/1.15)));
+
+    // Recompute tFreeze so tUnderCursor stays under the cursor
+    // tUnderCursor = newT0 + frac * newSpan  =>  newT1 = tUnderCursor + (1-frac)*newSpan
+    let newT1 = tUnderCursor + (1 - frac) * newSpan;
+
+    // Clamp using raw buffer bounds when in replay (true extent), else display buffer
+    const clampBuf = (chartRawBuffers.get(w.id) || buf);
+    if (clampBuf.length) {
+      const tMax = clampBuf[clampBuf.length-1].t;
+      const tMin = clampBuf[0].t;
+      // If right edge would exceed tMax, slide the whole window left
+      // (preserves cursor-relative position instead of pinning right edge)
+      if (newT1 > tMax) newT1 = tMax;
+      // If left edge would go before tMin, push right edge forward to compensate
+      if (newT1 - newSpan < tMin) newT1 = tMin + newSpan;
+      // Final safety clamp
+      newT1 = Math.min(tMax, newT1);
+    }
+
+    w.view.span = newSpan;
+    w.view.tFreeze = newT1;
+    w.view.paused = true;
+
+    // In replay mode, schedule a re-decimation from the raw buffer after
+    // the user stops scrolling (300 ms debounce)
+    if (replayMode !== null && chartRawBuffers.has(w.id)) {
+      if (reDecimateTimer) clearTimeout(reDecimateTimer);
+      reDecimateTimer = setTimeout(() => {
+        reDecimateTimer = null;
+        const t1 = w.view.tFreeze;
+        const t0 = t1 - w.view.span;
+        reDecimateReplayWindow(w, t0, t1);
+      }, 300);
+    }
+
   }, {passive:false});
 
-  canvas.addEventListener('dblclick', ()=>{
-    w.view.span = w.opts.span || (window.GLOBAL_BUFFER_SPAN || 10);
-    w.view.paused = false;
+  /* ---- DOUBLE-CLICK: reset to full span ---- */
+  canvas.addEventListener('dblclick', resetToFullSpan);
+
+  /* ---- PAN: left-button drag while paused ----
+     State is stored in chartPan map (keyed by w.id) so it survives
+     mountChart being called again on re-render. Each mount replaces
+     the canvas element, so we attach fresh listeners to the new canvas
+     but read/write shared state from the map.                         */
+  if (!chartPan.has(w.id)) chartPan.set(w.id, {dragging:false, startX:0, startTFreeze:0, reDecimateTimer:null});
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (!w.view || !w.view.paused) return;
+    const pan = chartPan.get(w.id);
+    const buf = chartBuffers.get(w.id) || [];
+    pan.dragging = true;
+    pan.startX = e.clientX;
+    pan.startTFreeze = w.view.tFreeze || (buf.length ? buf[buf.length-1].t : performance.now()/1000);
+    canvas.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    lastCursorX = x;
+    const cur = chartCursor.get(w.id);
+    if (cur) { cur.x = x; chartCursor.set(w.id, cur); }
+
+    const pan = chartPan.get(w.id);
+    if (!pan || !pan.dragging || !w.view || !w.view.paused) return;
+
+    const plotW = rect.width - 70;
+    const dtPerPx = w.view.span / Math.max(1, plotW);
+    const dx = e.clientX - pan.startX;
+    let newFreeze = pan.startTFreeze - dx * dtPerPx;
+
+    // Clamp using raw buffer when available (true time extent of log)
+    const raw = chartRawBuffers.get(w.id);
+    const buf = (raw && raw.length) ? raw : (chartBuffers.get(w.id) || []);
+    if (buf.length) {
+      const tMax = buf[buf.length-1].t;
+      const tMin = buf[0].t + w.view.span;
+      newFreeze = (tMax > tMin) ? Math.max(tMin, Math.min(tMax, newFreeze)) : tMax;
+    }
+    w.view.tFreeze = newFreeze;
+  });
+
+  const endPan = (e) => {
+    const pan = chartPan.get(w.id);
+    if (!pan || !pan.dragging) return;
+    pan.dragging = false;
+    canvas.style.cursor = '';
+    // Re-decimate after pan in replay mode
+    if (replayMode !== null && chartRawBuffers.has(w.id)) {
+      if (pan.reDecimateTimer) clearTimeout(pan.reDecimateTimer);
+      pan.reDecimateTimer = setTimeout(() => {
+        pan.reDecimateTimer = null;
+        const t1 = w.view.tFreeze;
+        const t0 = t1 - w.view.span;
+        reDecimateReplayWindow(w, t0, t1);
+      }, 150);
+    }
+  };
+  canvas.addEventListener('mouseup', endPan);
+  canvas.addEventListener('mouseleave', (e) => {
+    endPan(e);
+    const cur = chartCursor.get(w.id);
+    if (cur) { cur.x = null; chartCursor.set(w.id, cur); }
+  });
+
+  canvas.addEventListener('contextmenu', (e)=>{
+    e.preventDefault();
+    const cur = chartCursor.get(w.id) || {x:null, mode:'follow', ctxEl:null};
+    if (cur.ctxEl && cur.ctxEl.parentNode) cur.ctxEl.parentNode.removeChild(cur.ctxEl);
+    const menu = buildChartContextMenu(w, canvas, legend);
+    document.body.append(menu);
+    menu.style.left = e.pageX + 'px';
+    menu.style.top  = e.pageY + 'px';
+    cur.ctxEl = menu; chartCursor.set(w.id, cur);
   });
 
   chartCursor.set(w.id, {x:null, mode:w.opts.cursorMode||'follow', ctxEl:null});
 
-  canvas.addEventListener('mousemove', (e)=>{
-    const rect=canvas.getBoundingClientRect(); const x=e.clientX-rect.left;
-    const cur=chartCursor.get(w.id); if(!cur) return;
-    cur.x=x; chartCursor.set(w.id,cur);
-  });
-  canvas.addEventListener('mouseleave', ()=>{
-    const cur=chartCursor.get(w.id);
-    if(cur){ cur.x=null; chartCursor.set(w.id,cur); }
-  });
-  canvas.addEventListener('contextmenu', (e)=>{
-    e.preventDefault();
-    const cur=chartCursor.get(w.id)||{x:null,mode:'follow',ctxEl:null};
-    if (cur.ctxEl && cur.ctxEl.parentNode) cur.ctxEl.parentNode.removeChild(cur.ctxEl);
-    const menu=buildChartContextMenu(w, canvas, legend);
-    document.body.append(menu); menu.style.left=e.pageX+'px'; menu.style.top=e.pageY+'px';
-    cur.ctxEl=menu; chartCursor.set(w.id,cur);
-  });
+  w._resetZoom = resetToFullSpan;
+  w._getZoomRatio = getZoomRatio;
 
   function draw(){
-    const buf=chartBuffers.get(w.id)||[];
-    const W=canvas.clientWidth, H=canvas.clientHeight;
-    canvas.width=W; canvas.height=H;
-    const plotL=60, plotR=W-10, plotT=10, plotB=H-30;
+    const buf = chartBuffers.get(w.id) || [];
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    canvas.width = W; canvas.height = H;
+    const plotL = 60, plotR = W - 10, plotT = 10, plotB = H - 30;
 
-    ctx.clearRect(0,0,W,H);
-    ctx.strokeStyle='#3b425e'; ctx.lineWidth=1;
-    ctx.strokeRect(plotL,plotT,plotR-plotL,plotB-plotT);
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = '#3b425e'; ctx.lineWidth = 1;
+    ctx.strokeRect(plotL, plotT, plotR - plotL, plotB - plotT);
 
-    if (buf.length){
-      // KEY FIX: When NOT paused by zoom, use opts.span (the spinner value)
-      // When paused by zoom, use view.span (the zoomed value)
-      const viewSpan = w.view.paused
-        ? w.view.span
-        : (w.opts.span || window.GLOBAL_BUFFER_SPAN || 10);
+    // Update zoom badge
+    if (w._zoomBadgeEl) {
+      const zr = getZoomRatio();
+      const txt = `🔍 ${zr.toFixed(2)}×`;
+      if (w._zoomBadgeEl.textContent !== txt) w._zoomBadgeEl.textContent = txt;
+      w._zoomBadgeEl.style.color = (zr > 1.02) ? '#f7768e' : '#a8b3cf';
+    }
 
-      // Handle both zoom pause (w.view.paused) and button pause (w.opts.paused)
-      let t1;
-      if (w.view.paused) {
-        t1 = w.view.tFreeze || buf[buf.length-1].t;
-      } else if (w.opts.paused && w.opts.tFreeze !== null && w.opts.tFreeze !== undefined) {
-        t1 = w.opts.tFreeze;
-      } else {
+    if (!buf.length) {
+      const rafState = chartRAFHandles.get(w.id) || {isRunning: false};
+      rafState.isRunning = true;
+      rafState.rafId = requestAnimationFrame(draw);
+      chartRAFHandles.set(w.id, rafState);
+      return;
+    }
+
+    // ---- Determine the time window to display ----
+    // viewSpan: how many seconds are shown
+    // t1: the right edge (latest visible time)
+    // t0: the left edge
+    const viewSpan = w.view.paused
+      ? w.view.span
+      : (w.opts.span || window.GLOBAL_BUFFER_SPAN || 10);
+
+    let t1;
+    if (w.view.paused) {
+      // Zoom/pan paused: tFreeze is the right edge, held fixed
+      t1 = w.view.tFreeze;
+      if (!t1) {
         t1 = buf[buf.length-1].t;
+        w.view.tFreeze = t1;
       }
-      const t0 = t1 - viewSpan;
-      const viewBuf = buf.filter(b => b.t >= t0);
-      const dt = Math.max(1e-6, t1 - t0);
+    } else if (w.opts.paused && w.opts.tFreeze != null) {
+      // Manual pause button
+      t1 = w.opts.tFreeze;
+    } else {
+      // Live: right edge always tracks the latest sample
+      t1 = buf[buf.length-1].t;
+    }
+    const t0 = t1 - viewSpan;
 
-      let ymin = Infinity, ymax = -Infinity;
-      for (let si = 0; si < w.opts.series.length; si++){
-        const s = w.opts.series[si];
-        const displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
-        const displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
-        for (const b of viewBuf){
-          const displayValue = (b.v[si] * displayScale) + displayOffset;
-          if (displayValue < ymin) ymin = displayValue;
-          if (displayValue > ymax) ymax = displayValue;
-        }
-      }
-      if (w.opts.scale === 'manual'){ ymin = w.opts.min; ymax = w.opts.max; }
-      if (!(isFinite(ymin) && isFinite(ymax)) || ymin === ymax){ ymin -= 1; ymax += 1; }
+    // ---- Slice visible window from buffer ----
+    // Use binary search for performance on large buffers
+    let lo = 0, hi = buf.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (buf[mid].t < t0) lo = mid + 1; else hi = mid;
+    }
+    // lo is now the first index with t >= t0
+    // Find last index with t <= t1
+    let hi2 = buf.length - 1;
+    let lo2 = lo;
+    while (lo2 < hi2) {
+      const mid = (lo2 + hi2 + 1) >> 1;
+      if (buf[mid].t > t1) hi2 = mid - 1; else lo2 = mid;
+    }
+    const viewBufRaw = buf.slice(lo, lo2 + 1);
 
-      const yscale = (plotB - plotT)/(ymax - ymin);
-      const xscale = (plotR - plotL)/dt;
+    if (!viewBufRaw.length) {
+      const rafState = chartRAFHandles.get(w.id) || {isRunning: false};
+      rafState.isRunning = true;
+      rafState.rafId = requestAnimationFrame(draw);
+      chartRAFHandles.set(w.id, rafState);
+      return;
+    }
 
-      // X grid (vertical lines for time)
-      const xDivs = 10; const gridDt = viewSpan/xDivs;
-      const firstGrid = Math.ceil(t0 / gridDt)*gridDt;
-      ctx.strokeStyle=(getComputedStyle(document.documentElement).getPropertyValue('--grid') || '#2a2f44').trim();
-      ctx.lineWidth=1;
-      for (let gx = firstGrid; gx <= t1 + 1e-6; gx += gridDt){
-        const x = plotL + (gx - t0) * xscale;
-        ctx.beginPath(); ctx.moveTo(x, plotT); ctx.lineTo(x, plotB); ctx.stroke();
-      }
+    // ---- LTTB decimation on the visible slice ----
+    // zoomRatio > 1 means zoomed in (viewSpan < fullSpan), so provide more pts per pixel
+    const fullSpan = w.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
+    const zoomRatio = fullSpan / Math.max(0.001, viewSpan); // >1 when zoomed in
+    const targetPts = decimTargetForZoom(zoomRatio);
+    const viewBuf = lttbDecimate(viewBufRaw, targetPts);
 
-      // Y grid (horizontal lines with labels)
-      const yGridLines = Math.max(2, Math.min(20, w.opts.yGridLines || 5));
-      ctx.strokeStyle=(getComputedStyle(document.documentElement).getPropertyValue('--grid') || '#2a2f44').trim();
-      ctx.lineWidth=1;
-      ctx.fillStyle='#7a8199';
-      ctx.font='11px system-ui';
-      ctx.textAlign='right';
-      ctx.textBaseline='middle';
+    const dt = Math.max(1e-6, t1 - t0);
 
-      for (let i = 0; i <= yGridLines; i++) {
-        const frac = i / yGridLines;
-        const y = plotB - frac * (plotB - plotT);
-        const val = ymin + frac * (ymax - ymin);
-
-        ctx.beginPath();
-        ctx.moveTo(plotL, y);
-        ctx.lineTo(plotR, y);
-        ctx.stroke();
-
-        ctx.fillText(val.toFixed(2), plotL - 5, y);
-
-        ctx.textAlign='center';
-        ctx.fillStyle='rgba(122, 129, 153, 0.6)';
-        ctx.fillText(val.toFixed(2), (plotL + plotR) / 2, y - 2);
-        ctx.fillStyle='#7a8199';
-        ctx.textAlign='right';
-      }
-
-      // Draw series
-      legend.innerHTML='';
-      (w.opts.series||[]).forEach((s, si)=>{
-        const displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
-        const displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
-        
-        ctx.beginPath();
-        let first = true;
-        for (const b of viewBuf){
-          const displayValue = (b.v[si] * displayScale) + displayOffset;
-          const x = plotL + (b.t - t0) * xscale;
-          const y = plotB - (displayValue - ymin) * yscale;
-          if (first){ ctx.moveTo(x,y); first=false; } else ctx.lineTo(x,y);
-        }
-        const customColors = (w.opts.series || []).map(s => s.color);
-        ctx.strokeStyle = colorFor(si, customColors); ctx.lineWidth = 2; ctx.stroke();
-        const lab = (s.name && s.name.length) ? s.name : labelFor(s);
-        legend.append(el('div',{className:'item'},[
-          el('span',{className:'swatch', style:`background:${colorFor(si, customColors)}`},''), lab
-        ]));
-      });
-
-      // Cursor & popup
-      const cur = chartCursor.get(w.id);
-      if (cur && cur.x !== null && cur.x >= plotL && cur.x <= plotR){
-        ctx.strokeStyle=(getComputedStyle(document.documentElement).getPropertyValue('--cursor')||'#ff4d4d').trim();
-        ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(cur.x,plotT); ctx.lineTo(cur.x,plotB); ctx.stroke();
-        if (cur.ctxEl && cur.ctxEl.parentNode){
-          updateChartPopupValues(w, cur.ctxEl, viewBuf, t0, xscale, plotL, ymin, ymax, (plotB-plotT)/(ymax-ymin), cur.x);
-        }
-      } else if (cur && cur.ctxEl && cur.ctxEl.parentNode && getPopupMode(cur.ctxEl)==='current'){
-        updateChartPopupValues(w, cur.ctxEl, viewBuf, t0, xscale, plotL, ymin, ymax, (plotB-plotT)/(ymax-ymin), null);
+    // ---- Y range ----
+    let ymin = Infinity, ymax = -Infinity;
+    for (let si = 0; si < w.opts.series.length; si++){
+      const s = w.opts.series[si];
+      const dScale  = s.displayScale  !== undefined ? s.displayScale  : 1.0;
+      const dOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
+      for (const b of viewBuf){
+        const dv = (b.v[si] * dScale) + dOffset;
+        if (dv < ymin) ymin = dv;
+        if (dv > ymax) ymax = dv;
       }
     }
-    
-    // Track RAF state
+    if (w.opts.scale === 'manual') { ymin = w.opts.min; ymax = w.opts.max; }
+    if (!isFinite(ymin) || !isFinite(ymax) || ymin === ymax) { ymin -= 1; ymax += 1; }
+
+    const yscale = (plotB - plotT) / (ymax - ymin);
+    const xscale = (plotR - plotL) / dt;
+
+    // ---- X grid ----
+    const gridDt = viewSpan / 10;
+    const firstGrid = Math.ceil(t0 / gridDt) * gridDt;
+    ctx.strokeStyle = (getComputedStyle(document.documentElement).getPropertyValue('--grid') || '#2a2f44').trim();
+    ctx.lineWidth = 1;
+    for (let gx = firstGrid; gx <= t1 + 1e-6; gx += gridDt){
+      const x = plotL + (gx - t0) * xscale;
+      ctx.beginPath(); ctx.moveTo(x, plotT); ctx.lineTo(x, plotB); ctx.stroke();
+    }
+
+    // ---- Y grid ----
+    const yGridLines = Math.max(2, Math.min(20, w.opts.yGridLines || 5));
+    ctx.strokeStyle = (getComputedStyle(document.documentElement).getPropertyValue('--grid') || '#2a2f44').trim();
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#7a8199';
+    ctx.font = '11px system-ui';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i <= yGridLines; i++){
+      const frac = i / yGridLines;
+      const y = plotB - frac * (plotB - plotT);
+      const val = ymin + frac * (ymax - ymin);
+      ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
+      ctx.fillText(val.toFixed(2), plotL - 5, y);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(122, 129, 153, 0.6)';
+      ctx.fillText(val.toFixed(2), (plotL + plotR) / 2, y - 2);
+      ctx.fillStyle = '#7a8199';
+      ctx.textAlign = 'right';
+    }
+
+    // ---- Draw series ----
+    legend.innerHTML = '';
+    const customColors = (w.opts.series || []).map(s => s.color);
+    (w.opts.series || []).forEach((s, si) => {
+      const dScale  = s.displayScale  !== undefined ? s.displayScale  : 1.0;
+      const dOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
+      ctx.beginPath();
+      let first = true;
+      for (const b of viewBuf){
+        const dv = (b.v[si] * dScale) + dOffset;
+        const x = plotL + (b.t - t0) * xscale;
+        const y = plotB - (dv - ymin) * yscale;
+        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = colorFor(si, customColors);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      const lab = (s.name && s.name.length) ? s.name : labelFor(s);
+      legend.append(el('div', {className:'item'}, [
+        el('span', {className:'swatch', style:`background:${colorFor(si, customColors)}`}, ''),
+        lab
+      ]));
+    });
+
+    // ---- Cursor & popup ----
+    const cur = chartCursor.get(w.id);
+    if (cur && cur.x !== null && cur.x >= plotL && cur.x <= plotR){
+      ctx.strokeStyle = (getComputedStyle(document.documentElement).getPropertyValue('--cursor') || '#ff4d4d').trim();
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cur.x, plotT); ctx.lineTo(cur.x, plotB); ctx.stroke();
+      if (cur.ctxEl && cur.ctxEl.parentNode){
+        updateChartPopupValues(w, cur.ctxEl, viewBuf, t0, xscale, plotL, ymin, ymax,
+          (plotB - plotT) / (ymax - ymin), cur.x);
+      }
+    } else if (cur && cur.ctxEl && cur.ctxEl.parentNode && getPopupMode(cur.ctxEl) === 'current'){
+      updateChartPopupValues(w, cur.ctxEl, viewBuf, t0, xscale, plotL, ymin, ymax,
+        (plotB - plotT) / (ymax - ymin), null);
+    }
+
+    // ---- Hint when paused ----
+    const _pan = chartPan.get(w.id);
+    if (w.view.paused && !(_pan && _pan.dragging)){
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.font = '10px system-ui';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillText('drag to pan  •  dbl-click to reset', plotR - 4, plotT + 2);
+    }
+
     const rafState = chartRAFHandles.get(w.id) || {isRunning: false};
     rafState.isRunning = true;
     rafState.rafId = requestAnimationFrame(draw);
     chartRAFHandles.set(w.id, rafState);
   }
-  
-  // Check if this widget had a running RAF before (e.g., after renderPage)
-  const existingRAF = chartRAFHandles.get(w.id);
-  if (existingRAF && existingRAF.isRunning) {
-    // Widget was recreated but RAF was running - restart it
-    draw();
-  } else {
-    // First time mount
-    draw();
-  }
+
+  draw();
 }
 
-// And update the widgetOptions to NOT update view.span directly:
-
-function widgetOptions(w){
-  const opts=[];
-  if (w.type==='chart'||w.type==='gauge'||w.type==='bars'){
-    const sel=el('select',{},[
-      el('option',{value:'auto'}, 'Auto'),
-      el('option',{value:'manual'}, 'Manual')
-    ]);
-    sel.value = w.opts.scale || 'auto';  // Set value AFTER options are added
-    sel.onchange=e=>{ w.opts.scale=e.target.value; };
-    const min=el('input',{type:'number',value:w.opts.min, step:'any', style:'width:90px'});
-    const max=el('input',{type:'number',value:w.opts.max, step:'any', style:'width:90px'});
-    const sync=()=>{ w.opts.min=parseFloat(min.value)||0; w.opts.max=parseFloat(max.value)||0; };
-    min.oninput=sync; max.oninput=sync;
-    opts.push(el('span',{},'Scale:'), sel, el('span',{},'Min:'), min, el('span',{},'Max:'), max);
-  }
-  if (w.type==='chart'){
-    const span=el('input',{type:'number', value:w.opts.span, min:1, step:1, style:'width:70px'});
-    span.oninput=()=>{
-      w.opts.span=parseFloat(span.value)||10;
-      // If NOT zoom-paused, this will take effect immediately via draw()
-      // If zoom-paused, it will take effect when user double-clicks to reset
-    };
-
-    const filt=el('input',{type:'number', value:w.opts.filterHz||0, min:0, step:'any', style:'width:80px'});
-    filt.oninput =()=>{ w.opts.filterHz=parseFloat(filt.value)||0; };
-
-    const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
-    yGrid.oninput=()=>{ w.opts.yGridLines=parseInt(yGrid.value)||5; };
-
-    const pause=el('button',{className:'btn', onclick:()=>{
-      w.opts.paused=!w.opts.paused;
-      if (w.opts.paused) {
-        // Freeze current time when pausing
-        const buf = chartBuffers.get(w.id) || [];
-        if (buf.length) {
-          w.opts.tFreeze = buf[buf.length - 1].t;
-        }
-      } else {
-        // Clear freeze time when resuming
-        w.opts.tFreeze = null;
-      }
-      pause.textContent=w.opts.paused?'Resume':'Pause';
-    }}, w.opts.paused?'Resume':'Pause');
-
-    opts.push(el('span',{},'Span[s]:'), span, el('span',{},'Filter[Hz]:'), filt, el('span',{},'Y Grid:'), yGrid, pause);
-  }
-  if (w.type==='bars'){
-    const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
-    yGrid.oninput=()=>{ w.opts.yGridLines=parseInt(yGrid.value)||5; };
-    opts.push(el('span',{},'Y Grid:'), yGrid);
-  }
-  return opts;
-}
 
 function buildChartContextMenu(w, canvas, legend){
   const menu=el('div',{className:'ctx persistent'});
@@ -3255,38 +3535,50 @@ function findNearestIndex(buf, t){
 }
 
 function updateChartBuffers(){
+  // Don't push live data during replay
+  if (replayMode !== null) return;
+
   for (const p of state.pages){
     for (const w of p.widgets){
-      if (w.type!=='chart') continue;
-      const buf=chartBuffers.get(w.id)||[];
-      const t=performance.now()/1000;
-      const raw=(w.opts.series||[]).map(sel=>readSelection(sel));
-      let filtered=raw;
-      const fc = w.opts.filterHz||0;
-      if (fc>0){
-        const RC = 1/(2*Math.PI*fc);
+      if (w.type !== 'chart') continue;
+      const buf = chartBuffers.get(w.id) || [];
+      const t = performance.now() / 1000;
+      const raw = (w.opts.series || []).map(sel => readSelection(sel));
+      let filtered = raw;
+      const fc = w.opts.filterHz || 0;
+      if (fc > 0){
+        const RC = 1 / (2 * Math.PI * fc);
         const cf = chartFilters.get(w.id) || { _t: t };
-        const dt = Math.max(1e-6, t - (cf._t||t));
-        const alpha = dt/(RC+dt);
-        filtered = raw.map((v,si)=>{
-          const prev = (cf[si]===undefined)? v : cf[si];
-          const y = prev + alpha*(v - prev);
-          cf[si]=y; return y;
+        const dt = Math.max(1e-6, t - (cf._t || t));
+        const alpha = dt / (RC + dt);
+        filtered = raw.map((v, si) => {
+          const prev = (cf[si] === undefined) ? v : cf[si];
+          const y = prev + alpha * (v - prev);
+          cf[si] = y; return y;
         });
-        cf._t=t;
+        cf._t = t;
         chartFilters.set(w.id, cf);
       }
       buf.push({t, v: filtered});
 
-      // KEY FIX: Use the chart's own span setting (with some buffer margin)
+      // Buffer depth: keep enough for full span PLUS room to pan while paused.
+      // When zoom-paused, tFreeze is the right edge — we must not trim anything
+      // that the user might pan back to.  Keep the larger of:
+      //   (a) opts.span * 2   (generous live buffer, handles any zoom-out)
+      //   (b) distance from buf[0] to now, capped at 3600s
       const chartSpan = Math.max(1, w.opts.span || 10);
-      const bufferDepth = chartSpan * 1.2; // Keep 20% extra for smooth scrolling
+      const maxDepth = Math.min(3600, chartSpan * 2);
 
-      // Remove old data beyond the buffer depth
-      while (buf.length && (t - buf[0].t) > bufferDepth) {
-        buf.shift();
+      // Only trim when NOT zoom-paused (live scrolling mode)
+      if (!w.view || !w.view.paused) {
+        while (buf.length > 1 && (t - buf[0].t) > maxDepth) {
+          buf.shift();
+        }
       }
-      chartBuffers.set(w.id,buf);
+      // When paused, never trim — the buffer is finite and bounded by maxDepth
+      // The next time the user unpauses, trimming resumes naturally.
+
+      chartBuffers.set(w.id, buf);
     }
   }
 }
