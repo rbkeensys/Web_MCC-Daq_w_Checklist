@@ -186,7 +186,62 @@ function lttbDecimate(pts, threshold) {
   return result;
 }
 
-/* How many render points to target based on zoom level (more zoom = more detail) */
+/* Pixel-stride decimation for live scrolling data.
+   Divides the time range into `pixelW` buckets (one per canvas pixel column).
+   For each bucket keeps the min-value and max-value point so noise peaks are
+   preserved. Output order is strictly time-ascending.
+   Returns pts unchanged if no reduction is needed. */
+function pixelStride(pts, pixelW) {
+  if (!pts || pts.length === 0) return pts;
+  const maxOut = pixelW * 2; // min+max per pixel = 2 pts per column at most
+  if (pts.length <= maxOut) return pts;
+
+  const tMin = pts[0].t;
+  const tMax = pts[pts.length - 1].t;
+  const tSpan = tMax - tMin || 1;
+  const bucketDt = tSpan / pixelW;
+
+  const result = [];
+  let bucketStart = 0;
+
+  for (let bx = 0; bx < pixelW; bx++) {
+    const bEnd = tMin + (bx + 1) * bucketDt;
+    let bucketEnd = bucketStart;
+    while (bucketEnd < pts.length - 1 && pts[bucketEnd + 1].t <= bEnd) bucketEnd++;
+
+    if (bucketEnd < bucketStart) continue;
+    if (bucketStart === bucketEnd) {
+      result.push(pts[bucketStart]);
+    } else {
+      // Find min and max by first series value (good enough for stroke shape)
+      let minIdx = bucketStart, maxIdx = bucketStart;
+      for (let i = bucketStart + 1; i <= bucketEnd; i++) {
+        if ((pts[i].v[0] ?? 0) < (pts[minIdx].v[0] ?? 0)) minIdx = i;
+        if ((pts[i].v[0] ?? 0) > (pts[maxIdx].v[0] ?? 0)) maxIdx = i;
+      }
+      // Push in time order
+      if (minIdx <= maxIdx) {
+        if (minIdx !== bucketStart) result.push(pts[bucketStart]);
+        result.push(pts[minIdx]);
+        if (maxIdx !== minIdx) result.push(pts[maxIdx]);
+      } else {
+        if (maxIdx !== bucketStart) result.push(pts[bucketStart]);
+        result.push(pts[maxIdx]);
+        if (minIdx !== maxIdx) result.push(pts[minIdx]);
+      }
+    }
+    bucketStart = bucketEnd + 1;
+    if (bucketStart >= pts.length) break;
+  }
+
+  // Always include the last point so the line reaches the right edge
+  if (result.length && result[result.length - 1] !== pts[pts.length - 1]) {
+    result.push(pts[pts.length - 1]);
+  }
+  return result;
+}
+
+/* How many render points to target based on zoom level (for LTTB replay) */
 function decimTargetForZoom(zoomRatio) {
   // zoomRatio = viewSpan / opts.span  (1.0 = full span, <1 = zoomed in)
   // Zoomed in sees fewer raw pts, so we can afford more detail per pixel.
@@ -3351,12 +3406,24 @@ function mountChart(w, body){
       return;
     }
 
-    // ---- LTTB decimation on the visible slice ----
-    // zoomRatio > 1 means zoomed in (viewSpan < fullSpan), so provide more pts per pixel
-    const fullSpan = w.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
-    const zoomRatio = fullSpan / Math.max(0.001, viewSpan); // >1 when zoomed in
-    const targetPts = decimTargetForZoom(zoomRatio);
-    const viewBuf = lttbDecimate(viewBufRaw, targetPts);
+    // ---- Decimation on the visible slice ----
+    // For LIVE / paused-live data: use pixel-stride min+max per bucket.
+    // This is frame-stable — buckets don't shift as new points arrive —
+    // so there is no flicker. It also faithfully preserves noise peaks.
+    // For REPLAY (static buffer): use LTTB which gives better visual shape
+    // fidelity on very large logs where re-decimation has already run.
+    const plotW = Math.max(1, plotR - plotL);
+    let viewBuf;
+    if (replayMode !== null) {
+      // Replay: LTTB as before
+      const fullSpan = w.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
+      const zoomRatio = fullSpan / Math.max(0.001, viewSpan);
+      const targetPts = decimTargetForZoom(zoomRatio);
+      viewBuf = lttbDecimate(viewBufRaw, targetPts);
+    } else {
+      // Live: pixel-stride decimation — stable, flicker-free
+      viewBuf = pixelStride(viewBufRaw, plotW);
+    }
 
     const dt = Math.max(1e-6, t1 - t0);
 
