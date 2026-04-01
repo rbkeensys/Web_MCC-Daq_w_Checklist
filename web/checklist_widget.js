@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.10.0';  // 2026-03-27: Position/size persistence via localStorage
+window.CHECKLIST_VERSION = '1.11.4';  // 2026-03-31: Backspace cancels GoTo correctly; move activeRow before zeroing
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -227,6 +227,12 @@ function clCheck() {
   window.checkEvents.push(ev);
   window.dispatchEvent(new CustomEvent('checklist-check', { detail: ev }));
 
+  fetch('/api/check_events', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ events: [ev] })
+  }).catch(() => {});
+
   items[active].checked = true;
   items[active].timeOut = _nowStr();
 
@@ -250,24 +256,68 @@ function clUncheck() {
   const active = window.checklistActiveRow;
   if (!window.checklistLoaded || active >= items.length) return;
 
-  // Find the last checked item at or before active
+  // If a GoTo is in effect (returnRow is set), Backspace cancels the goto:
+  // zero the current item and return to the saved return row, same as clReturn()
+  // but also zeroing times/duration on the current item.
+  if (window.checklistReturnRow) {
+    const ret = window.checklistReturnRow;
+
+    // Move active row first so _clTickDuration stops on the old row
+    window.checklistActiveRow = ret;
+    window.checklistShowRow   = ret;
+
+    // Zero the jumped-to item (was counting but never checked)
+    items[active].timeIn   = '';
+    items[active].timeOut  = '';
+    items[active].duration = 0;
+
+    // Clear the return mark from the return row and restore its timeIn
+    const retItem = items[ret];
+    if (retItem?.itemText.startsWith('>< ')) retItem.itemText = retItem.itemText.slice(3);
+    retItem.timeIn  = _nowStr();
+    retItem.timeOut = '';
+    window.checklistReturnRow = 0;
+
+    _renderTable();
+    return;
+  }
+
+  // Normal backspace: find the last checked item strictly before active
   let target = -1;
-  for (let i=active; i>=0; i--) {
+  for (let i = active - 1; i >= 0; i--) {
     if (items[i].type === CL_LINE_CHECKLISTITEM && items[i].checked) { target = i; break; }
   }
-  if (target < 0) return;  // nothing to uncheck
+  // If active itself is checked, uncheck it
+  if (target < 0 && items[active].type === CL_LINE_CHECKLISTITEM && items[active].checked) {
+    target = active;
+  }
+  if (target < 0) return;
 
   // Remove the matching chart event
   const removedNum = items[target].itemNum;
-  const idx = window.checkEvents.map(e=>e.itemNum).lastIndexOf(removedNum);
+  const idx = window.checkEvents.map(e => e.itemNum).lastIndexOf(removedNum);
   if (idx >= 0) window.checkEvents.splice(idx, 1);
 
-  items[target].checked  = false;
-  items[target].duration = 0;
-  items[target].timeIn   = _nowStr();
-  items[target].timeOut  = '';
+  // Dispatch event so app.js removes the chart mark
+  window.dispatchEvent(new CustomEvent('checklist-uncheck', { detail: { itemNum: removedNum } }));
+
+  // Move active row FIRST so _clTickDuration immediately stops on old active row
   window.checklistActiveRow = target;
   window.checklistShowRow   = target;
+
+  // NOW zero old active row (timer no longer touches it)
+  if (active !== target) {
+    items[active].timeIn   = '';
+    items[active].timeOut  = '';
+    items[active].duration = 0;
+  }
+
+  // Zero the target item (being unchecked)
+  items[target].checked  = false;
+  items[target].timeIn   = '';
+  items[target].timeOut  = '';
+  items[target].duration = 0;
+
   _renderTable();
 }
 

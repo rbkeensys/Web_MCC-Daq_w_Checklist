@@ -1,4 +1,4 @@
-const UI_VERSION = "1.9.3";  // 2026-03-30: Fix opts wrap (no max-width), clip reset after save, full span on log open
+const UI_VERSION = "2.0.0";  // 2026-03-31: Session name derived from log start time (first row t value)
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -326,32 +326,259 @@ let replayMode = null; // null = live, 'paused' = showing full log, 'playing' = 
 
 function parseCSV(text){
   const lines = text.split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) return {cols:[], rows:[]};
-  const cols = lines[0].split(',').map(s=>s.trim());
-  const rows = lines.slice(1).map(line => line.split(',').map(v=>Number(v)));
-  return { cols, rows };
+  if (lines.length < 2) return {cols:[], rows:[], checkEvents:null};
+  // Auto-detect delimiter: tab-separated files are common from the server logger
+  const firstLine = lines[0];
+  const delim = firstLine.includes('\t') ? '\t' : ',';
+
+  // Split a CSV line respecting quoted fields (handles embedded delimiters and "" escapes)
+  function splitLine(line) {
+    const fields = [];
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] === '"') {
+        // Quoted field
+        let val = '';
+        i++; // skip opening quote
+        while (i < line.length) {
+          if (line[i] === '"' && line[i+1] === '"') { val += '"'; i += 2; }
+          else if (line[i] === '"') { i++; break; } // closing quote
+          else { val += line[i++]; }
+        }
+        fields.push(val);
+        if (line[i] === delim) i++; // skip delimiter after closing quote
+      } else {
+        // Unquoted field — read until delimiter
+        const end = line.indexOf(delim, i);
+        if (end === -1) { fields.push(line.slice(i)); i = line.length; }
+        else { fields.push(line.slice(i, end)); i = end + 1; }
+      }
+    }
+    return fields;
+  }
+
+  const cols = splitLine(firstLine).map(s => s.trim());
+
+  // Find chk_events column — logger.py embeds JSON array in row 0 of this column
+  const chkCol = cols.indexOf('chk_events');
+  let checkEvents = null;
+  console.log('[parseCSV] cols count:', cols.length, 'chk_events col index:', chkCol, 'first col:', cols[0], 'last col:', cols[cols.length-1]);
+
+  const rows = lines.slice(1).map((line, rowIdx) => {
+    const parts = splitLine(line);
+    return parts.map((s, ci) => {
+      if (ci === chkCol) {
+        if (rowIdx === 0) {
+          console.log('[parseCSV] chk_events row0 (first 80):', s.slice(0,80));
+          if (s.startsWith('[')) {
+            try { checkEvents = JSON.parse(s); }
+            catch(e) { console.warn('[parseCSV] chk_events parse failed:', e.message); }
+          }
+        }
+        return 0;
+      }
+      const t = s.trim();
+      return t === '' ? 0 : Number(t);
+    });
+  });
+
+  // Strip chk_events from cols and rows so it doesn't corrupt channel data
+  if (chkCol >= 0) {
+    cols.splice(chkCol, 1);
+    rows.forEach(r => r.splice(chkCol, 1));
+  }
+
+  return { cols, rows, checkEvents };
 }
 
-function makeTickFromRow(cols, row){
+/* Remap raw CSV column headers to friendly configured names.
+   e.g. "ai0" -> "LOX P", "expr7" -> "Test Sequencer", "do3" -> "LOX Vent"
+   Fetches any missing caches on demand so names are always available.        */
+async function friendlyColNames(cols) {
+  // Always fetch fresh — log may be opened before or independently of layout load
+  try { const r = await fetch('/api/config');         if (r.ok) configCache        = await r.json(); } catch {}
+  try { const r = await fetch('/api/pid');             if (r.ok) window.pidCache    = await r.json(); } catch {}
+  try { const r = await fetch('/api/math_operators');  if (r.ok) window.mathCache   = await r.json(); } catch {}
+  try { const r = await fetch('/api/expressions');     if (r.ok) window.exprCache   = await r.json(); } catch {}
+
+  const cfg = configCache || {};
+  const aiNames   = getAllAnalogs(cfg).map((a,i)       => (a&&a.name) || null);
+  const aoNames   = getAllAnalogOutputs(cfg).map((a,i)  => (a&&a.name) || null);
+  const doNames   = getAllDigitalOutputs(cfg).map((d,i) => (d&&d.name) || null);
+  const tcNames   = getAllThermocouples(cfg).map((t,i)  => (t&&t.name) || null);
+  const exprNames = (window.exprCache?.expressions || []).map((e,i) => (e&&e.name) || null);
+  const mathNames = (window.mathCache?.operators   || []).map((m,i) => (m&&m.name) || null);
+  const pidNames  = (window.pidCache?.loops        || []).map((p,i) => (p&&p.name) || null);
+
+  console.log('[friendlyColNames] loaded — ai[0]:', aiNames[0], 'expr[0]:', exprNames[0], 'do[0]:', doNames[0]);
+
+  const result = cols.map(col => {
+    const low = col.toLowerCase().trim();
+    if (low === 't' || low === 'time' || low === 'timestamp') return col;
+    let m;
+    m = low.match(/^ai(\d+)$/);   if (m) return aiNames[+m[1]]   || col;
+    m = low.match(/^ao(\d+)$/);   if (m) return aoNames[+m[1]]   || col;
+    m = low.match(/^do(\d+)$/);   if (m) return doNames[+m[1]]   || col;
+    m = low.match(/^tc(\d+)$/);   if (m) return tcNames[+m[1]]   || col;
+    m = low.match(/^expr(\d+)$/); if (m) return exprNames[+m[1]] || col;
+    m = low.match(/^math(\d+)$/); if (m) return mathNames[+m[1]] || col;
+    m = low.match(/^pid(\d+)_(.+)$/);
+    if (m) {
+      const pname = pidNames[+m[1]] || `PID${m[1]}`;
+      return `${pname}_${m[2]}`;
+    }
+    m = low.match(/^pid(\d+)$/);  if (m) return pidNames[+m[1]]  || col;
+    if (col.startsWith('sv_'))   return col.slice(3);   // our format
+    if (col.startsWith('gvar_')) return col.slice(5);   // server logger format
+    if (col === 'chk_events')   return col;             // stripped by parseCSV anyway
+    return col;
+  });
+  console.log('[friendlyColNames] first 8 cols:', result.slice(0,8));
+  return result;
+}
+
+/* Build a reverse lookup: friendly channel name -> {kind, index}  */
+function buildNameMap(){
+  const map = {}; // name.toLowerCase() -> {kind, index}
+  const cfg = configCache || {};
+
+  // AI channels
+  getAllAnalogs(cfg).forEach((a, i) => {
+    map[`ai${i}`] = {kind:'ai', index:i};
+    if (a && a.name) map[a.name.toLowerCase()] = {kind:'ai', index:i};
+  });
+  // AO channels
+  getAllAnalogOutputs(cfg).forEach((a, i) => {
+    map[`ao${i}`] = {kind:'ao', index:i};
+    if (a && a.name) map[a.name.toLowerCase()] = {kind:'ao', index:i};
+  });
+  // DO channels
+  getAllDigitalOutputs(cfg).forEach((d, i) => {
+    map[`do${i}`] = {kind:'do', index:i};
+    if (d && d.name) map[d.name.toLowerCase()] = {kind:'do', index:i};
+  });
+  // TC channels
+  getAllThermocouples(cfg).forEach((t, i) => {
+    map[`tc${i}`] = {kind:'tc', index:i};
+    if (t && t.name) map[t.name.toLowerCase()] = {kind:'tc', index:i};
+  });
+  // Expressions — keyed by name AND by expr0/expr1 index
+  const exprs = window.exprCache?.expressions || [];
+  exprs.forEach((e, i) => {
+    map[`expr${i}`] = {kind:'expr', index:i};
+    if (e && e.name) map[e.name.toLowerCase()] = {kind:'expr', index:i};
+  });
+  // Math operators
+  const maths = window.mathCache?.operators || [];
+  maths.forEach((m, i) => {
+    map[`math${i}`] = {kind:'math', index:i};
+    if (m && m.name) map[m.name.toLowerCase()] = {kind:'math', index:i};
+  });
+  // PID loops
+  const pids = window.pidCache?.loops || [];
+  pids.forEach((p, i) => {
+    map[`pid${i}`] = {kind:'pid', index:i};
+    if (p && p.name) map[p.name.toLowerCase()] = {kind:'pid', index:i};
+  });
+
+  return map;
+}
+
+function makeTickFromRow(cols, row, nameMap){
   const obj = { type:'tick' };
   const ai=[], ao=[], dob=[], tc=[];
+  const sv={};
   for(let c=0;c<cols.length;c++){
-    const name = cols[c].toLowerCase();
+    const col = cols[c];
+    const colLow = col.toLowerCase();
     const v = row[c];
-    if (name === 't' || name === 'time' || name === 'timestamp') obj.t = v;
-    else if (name.startsWith('ai')) ai[Number(name.slice(2))] = v;
-    else if (name.startsWith('ao')) ao[Number(name.slice(2))] = v;
-    else if (name.startsWith('do')) dob[Number(name.slice(2))] = v;
-    else if (name.startsWith('tc')) tc[Number(name.slice(2))] = v;
+
+    if (colLow === 't' || colLow === 'time' || colLow === 'timestamp') {
+      obj.t = v;
+    } else if (col.startsWith('sv_')) {
+      // Static var: sv_Name (our clip/save format)
+      sv[col.slice(3)] = v;
+    } else if (col.startsWith('gvar_')) {
+      // Global/static var: gvar_Name (server logger format)
+      sv[col.slice(5)] = v;
+    } else if (colLow.startsWith('ai') && !isNaN(col.slice(2))) {
+      ai[Number(col.slice(2))] = v;
+    } else if (colLow.startsWith('ao') && !isNaN(col.slice(2))) {
+      ao[Number(col.slice(2))] = v;
+    } else if (colLow.startsWith('do') && !isNaN(col.slice(2))) {
+      dob[Number(col.slice(2))] = v;
+    } else if (colLow.startsWith('tc') && !isNaN(col.slice(2))) {
+      tc[Number(col.slice(2))] = v;
+    } else if (/^pid\d+_/.test(colLow)) {
+      // pid0_pv, pid0_sp, pid0_out, pid0_u, pid0_err, pid0_p, pid0_i, pid0_d, pid0_enabled
+      const pm = colLow.match(/^pid(\d+)_(.+)$/);
+      if (pm) {
+        const idx = Number(pm[1]);
+        const field = pm[2];
+        if (!obj.pid) obj.pid = [];
+        if (!obj.pid[idx]) obj.pid[idx] = {};
+        if (field === 'pv') obj.pid[idx].pv = v;
+        else if (field === 'sp') obj.pid[idx].sp = v;
+        else if (field === 'out') obj.pid[idx].out = v;
+        else if (field === 'u') obj.pid[idx].u = v;
+        else if (field === 'err') obj.pid[idx].err = v;
+        else if (field === 'p') obj.pid[idx].p = v;
+        else if (field === 'i') obj.pid[idx].i = v;
+        else if (field === 'd') obj.pid[idx].d = v;
+        else if (field === 'enabled') obj.pid[idx].enabled = !!v;
+      }
+    } else if (/^expr\d+$/.test(colLow)) {
+      const idx = Number(colLow.slice(4));
+      if (!obj.expr) obj.expr = [];
+      obj.expr[idx] = { output: v };
+    } else if (/^math\d+$/.test(colLow)) {
+      const idx = Number(colLow.slice(4));
+      if (!obj.math) obj.math = [];
+      obj.math[idx] = { output: v };
+    } else if (colLow.startsWith('bvar_')) {
+      // Button variables: bvar_Name
+      if (!obj.button_vars) obj.button_vars = {};
+      obj.button_vars[col.slice(5)] = v;
+    } else if (nameMap) {
+      // Try resolving friendly name via the reverse lookup
+      const ch = nameMap[colLow];
+      if (ch) {
+        if      (ch.kind === 'ai')   ai[ch.index]  = v;
+        else if (ch.kind === 'ao')   ao[ch.index]  = v;
+        else if (ch.kind === 'do')   dob[ch.index] = v;
+        else if (ch.kind === 'tc')   tc[ch.index]  = v;
+        else if (ch.kind === 'expr') {
+          if (!obj.expr) obj.expr = [];
+          obj.expr[ch.index] = { output: v };
+        }
+        else if (ch.kind === 'math') {
+          if (!obj.math) obj.math = [];
+          obj.math[ch.index] = { output: v };
+        }
+        else if (ch.kind === 'pid') {
+          if (!obj.pid) obj.pid = [];
+          obj.pid[ch.index] = { out: v };
+        }
+      } else {
+        // Unrecognised column — store as a static var keyed by the original
+        // column name. This catches server-logged static.* variables (e.g.
+        // "Test Sequencer") and friendly-named expr outputs from the server.
+        sv[col] = v;
+      }
+    } else {
+      // No nameMap at all — still store unknowns as static vars
+      sv[col] = v;
+    }
   }
-  if (ai.length) obj.ai = ai;
-  if (ao.length) obj.ao = ao;
+  if (ai.length)  obj.ai = ai;
+  if (ao.length)  obj.ao = ao;
   if (dob.length) obj.do = dob;
-  if (tc.length) obj.tc = tc;
+  if (tc.length)  obj.tc = tc;
+  if (Object.keys(sv).length) obj.static_vars = sv;
   return obj;
 }
 
-function startReplay(cols, rows){
+function startReplay(cols, rows, friendlyCols){
   // PAUSE live data
   if (ws) {
     try { ws.close(); } catch {}
@@ -360,7 +587,7 @@ function startReplay(cols, rows){
     updateConnectBtn();
   }
 
-  replayData = { cols, rows };
+  replayData = { cols, rows, friendlyCols: friendlyCols || cols, nameMap: buildNameMap() };
   replayIndex = 0;
   replayMode = 'paused';
   replayPaused = false;
@@ -379,8 +606,33 @@ function startReplay(cols, rows){
     }
   }
 
+  // Populate chart marks from any loaded check events (tServer matches log t values)
+  window._chartMarks = [];
+  if (window.checkEvents && window.checkEvents.length) {
+    for (const ev of window.checkEvents) {
+      const t = ev.tServer ?? ev.t;
+      if (t != null) {
+        window._chartMarks.push({ t, label: ev.label || String(ev.itemNum || '') });
+      }
+    }
+    console.log('[ChkMarks] marks t values:', window._chartMarks.map(m=>m.t));
+  }
+
   // Load ALL data into charts (decimated), keeping full-res raw buffers
   loadAllReplayDataIntoCharts();
+
+  // Debug: log first chart buffer t range vs marks
+  for (const p of state.pages){
+    for (const w of p.widgets){
+      if (w.type !== 'chart') continue;
+      const buf = chartBuffers.get(w.id);
+      if (buf && buf.length) {
+        console.log(`[ChkMarks] chart "${w.opts.title}" buf t: ${buf[0].t.toFixed(1)} .. ${buf[buf.length-1].t.toFixed(1)}, marks:`, window._chartMarks.map(m=>m.t.toFixed(1)));
+      }
+      break; // just first chart
+    }
+    break;
+  }
 
   // Set every chart view to show the full log span immediately
   for (const p of state.pages){
@@ -414,14 +666,23 @@ function loadAllReplayDataIntoCharts(){
       const rawBuf = [];
       for (let i = 0; i < replayData.rows.length; i++) {
         const row = replayData.rows[i];
-        const msg = makeTickFromRow(replayData.cols, row);
+        const msg = makeTickFromRow(replayData.cols, row, replayData.nameMap);
         const t = msg.t || (i * 0.01);
         const raw = (w.opts.series||[]).map(sel => {
-          if (sel.kind === 'ai') return msg.ai?.[sel.index] ?? 0;
-          if (sel.kind === 'ao') return msg.ao?.[sel.index] ?? 0;
-          if (sel.kind === 'do') return msg.do?.[sel.index] ?? 0;
-          if (sel.kind === 'tc') return msg.tc?.[sel.index] ?? 0;
-          return 0;
+          switch (sel.kind) {
+            case 'ai':  return msg.ai?.[sel.index] ?? 0;
+            case 'ao':  return msg.ao?.[sel.index] ?? 0;
+            case 'do':  return msg.do?.[sel.index] ? 1 : 0;
+            case 'tc':  return msg.tc?.[sel.index] ?? 0;
+            case 'expr': return msg.expr?.[sel.index]?.output ?? 0;
+            case 'math': return msg.math?.[sel.index]?.output ?? 0;
+            case 'pid':  return msg.pid?.[sel.index]?.out ?? 0;
+            case 'pid_u': return msg.pid?.[sel.index]?.u ?? 0;
+            case 'static':
+            case 'global': return msg.static_vars?.[sel.index] ?? 0;
+            case 'button': return msg.button_vars?.[sel.index] ?? 0;
+            default: return 0;
+          }
         });
         rawBuf.push({t, v: raw});
       }
@@ -459,7 +720,7 @@ function updateGaugesAndBarsFromReplayIndex(){
   if (!replayData || replayIndex >= replayData.rows.length) return;
 
   const row = replayData.rows[replayIndex];
-  const msg = makeTickFromRow(replayData.cols, row);
+  const msg = makeTickFromRow(replayData.cols, row, replayData.nameMap);
 
   // Update state for gauges and bars only
   if (msg.ai) state.ai = msg.ai;
@@ -475,14 +736,42 @@ function updateGaugesAndBarsFromReplayIndex(){
 function playReplay(){
   if (!replayData) return;
 
+  // If paused mid-playback, resume from current position
+  const resuming = (replayMode === 'paused' && replayIndex > 0 && replayIndex < replayData.rows.length);
+
   replayMode = 'playing';
   replayPaused = false;
-  replayIndex = 0;
 
-  // Clear charts for animated playback
-  chartBuffers.clear();
-  chartRawBuffers.clear();
-  chartFilters.clear();
+  if (!resuming) {
+    // Fresh play from start — clear buffers and reset charts to scrolling mode
+    replayIndex = 0;
+    chartBuffers.clear();
+    chartRawBuffers.clear();
+    chartFilters.clear();
+
+    for (const p of state.pages){
+      for (const w of p.widgets){
+        if (w.type !== 'chart') continue;
+        w.view = w.view || {};
+        w.view.paused = false;
+        w.view.tFreeze = 0;
+        w.view.span = w.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
+      }
+    }
+  } else {
+    // Resuming — just unfreeze chart views so they scroll again
+    for (const p of state.pages){
+      for (const w of p.widgets){
+        if (w.type !== 'chart') continue;
+        if (w.view) {
+          w.view.paused = false;
+          w.view.tFreeze = 0;
+        }
+      }
+    }
+  }
+
+  updateReplayUI();
 
   const stepMs = Math.max(10, 1000 / replayRate);
   replayTimer = setInterval(() => {
@@ -490,13 +779,9 @@ function playReplay(){
       pauseReplay();
       return;
     }
-
     const row = replayData.rows[replayIndex];
-    const msg = makeTickFromRow(replayData.cols, row);
-
-    // Feed one frame at a time
+    const msg = makeTickFromRow(replayData.cols, row, replayData.nameMap);
     window.dispatchEvent(new CustomEvent('tick', { detail: msg }));
-
     replayIndex++;
     updateReplayUI();
   }, stepMs);
@@ -509,6 +794,20 @@ function pauseReplay(){
   }
   replayMode = 'paused';
   replayPaused = true;
+
+  // Freeze all chart views at the current tail so the display stays put
+  for (const p of state.pages){
+    for (const w of p.widgets){
+      if (w.type !== 'chart') continue;
+      const buf = chartBuffers.get(w.id) || [];
+      if (buf.length) {
+        w.view = w.view || {};
+        w.view.paused = true;
+        w.view.tFreeze = buf[buf.length - 1].t;
+      }
+    }
+  }
+
   updateReplayUI();
 }
 
@@ -560,11 +859,16 @@ function closeReplay(){
   replayMode = null;
   replayPaused = false;
 
+  // Clear filename display
+  const fnSpan = document.getElementById('replayFileName');
+  if (fnSpan) fnSpan.textContent = '';
+
   // Clear chart buffers and pan state
   chartBuffers.clear();
   chartRawBuffers.clear();
   chartFilters.clear();
   chartPan.clear();
+  window.clearChartMarks?.();
 
   // Reset all chart views to live (unpaused) mode
   for (const p of state.pages){
@@ -621,7 +925,7 @@ function clipLogToView(w) {
     }
 
     if (!clipped.length) { alert('No data in the current view window.'); return; }
-    w._clippedData = { cols: replayData.cols, rows: clipped };
+    w._clippedData = { cols: replayData.friendlyCols || replayData.cols, rows: clipped };
 
   } else {
     // --- Live mode: slice the chart's own display buffer ---
@@ -632,18 +936,8 @@ function clipLogToView(w) {
     // Use ai0/ao0/do0/tc0 column names so the file round-trips correctly
     // when reopened in the viewer (makeTickFromRow expects this format).
     const series = w.opts.series || [];
-    const cols = ['t', ...series.map(s => {
-      const k = s.kind || 'ai';
-      const i = s.index ?? 0;
-      // map kind names to the prefix makeTickFromRow recognises
-      if (k === 'ai')  return `ai${i}`;
-      if (k === 'ao')  return `ao${i}`;
-      if (k === 'do')  return `do${i}`;
-      if (k === 'tc')  return `tc${i}`;
-      // For other kinds (pid, math, expr, button) use a generic ai-style name
-      // so the data still loads; label with kind+index
-      return `ai_${k}${i}`;
-    })];
+    console.log('[Clip] series:', series.map(s => ({kind:s.kind, index:s.index, name:s.name})));
+    const cols = ['t', ...series.map(s => labelFor(s))];
     const rows = slice.map(b => [b.t, ...b.v]);
     w._clippedData = { cols, rows };
   }
@@ -662,22 +956,14 @@ function saveClippedLog(w) {
     cols = w._clippedData.cols;
     rows = w._clippedData.rows;
   } else if (replayMode !== null && replayData) {
-    cols = replayData.cols;
+    cols = replayData.friendlyCols || replayData.cols;
     rows = replayData.rows;
   } else {
     // Live fallback: save the entire current buffer for this chart
     const buf = chartBuffers.get(w.id) || [];
     if (!buf.length) { alert('No data to save.'); return; }
     const series = w.opts.series || [];
-    cols = ['t', ...series.map(s => {
-      const k = s.kind || 'ai';
-      const i = s.index ?? 0;
-      if (k === 'ai')  return `ai${i}`;
-      if (k === 'ao')  return `ao${i}`;
-      if (k === 'do')  return `do${i}`;
-      if (k === 'tc')  return `tc${i}`;
-      return `ai_${k}${i}`;
-    })];
+    cols = ['t', ...series.map(s => labelFor(s))];
     rows = buf.map(b => [b.t, ...b.v]);
   }
 
@@ -734,7 +1020,7 @@ function setReplayRate(newRate){
       }
 
       const row = replayData.rows[replayIndex];
-      const msg = makeTickFromRow(replayData.cols, row);
+      const msg = makeTickFromRow(replayData.cols, row, replayData.nameMap);
       window.dispatchEvent(new CustomEvent('tick', { detail: msg }));
 
       replayIndex++;
@@ -752,7 +1038,7 @@ function updateReplayUI(){
 
     const progress = document.getElementById('replayProgress');
     const position = document.getElementById('replayPosition');
-    const playBtn = document.getElementById('replayPlayBtn');
+    const playBtn  = document.getElementById('replayPlayBtn');
     const pauseBtn = document.getElementById('replayPauseBtn');
     const showFullBtn = document.getElementById('replayShowFullBtn');
     const closeBtn = document.getElementById('replayCloseBtn');
@@ -766,20 +1052,17 @@ function updateReplayUI(){
       position.textContent = `${replayIndex + 1} / ${replayData.rows.length}`;
     }
     if (playBtn){
+      // Show "Resume" when paused mid-playback, "Play" otherwise
+      const isPausedMid = (replayMode === 'paused' && replayIndex > 0 && replayIndex < replayData.rows.length);
+      playBtn.textContent = isPausedMid ? '▶ Resume' : '▶ Play';
       playBtn.disabled = (replayMode === 'playing');
     }
     if (pauseBtn){
       pauseBtn.disabled = (replayMode !== 'playing');
     }
-    if (showFullBtn){
-      showFullBtn.disabled = false;
-    }
-    if (closeBtn){
-      closeBtn.disabled = false;
-    }
-    if (rateInput){
-      rateInput.value = replayRate;
-    }
+    if (showFullBtn) showFullBtn.disabled = false;
+    if (closeBtn)    closeBtn.disabled = false;
+    if (rateInput)   rateInput.value = replayRate;
   } else {
     controls.style.display = 'none';
   }
@@ -797,13 +1080,40 @@ function hookLogButtons(){
         if (!f) return;
         const rd = new FileReader();
         rd.onload = ()=>{
-          try{
-            const {cols, rows} = parseCSV(rd.result);
-            if (!cols.length || !rows.length) throw new Error('No data');
-            startReplay(cols, rows);
-          }catch(e){
-            alert('Load failed: '+e.message);
-          }
+          (async ()=>{
+            try{
+              const {cols, rows, checkEvents} = parseCSV(rd.result);
+              if (!cols.length || !rows.length) throw new Error('No data');
+              // Keep original column names for reliable parsing (ai0, expr7 etc.)
+              // Compute friendly names separately for display only
+              const friendlyCols = await friendlyColNames(cols);
+
+              // Load check events embedded in the CSV by logger.py (chk_events column)
+              if (checkEvents && checkEvents.length) {
+                window.loadCheckEventsFromLog?.(JSON.stringify(checkEvents));
+                console.log(`[Log] Loaded ${checkEvents.length} check events from CSV`);
+              }
+
+              // Derive session name from the first row's t value (Unix epoch).
+              // The server names sessions as YYYYmmdd_HHMMSS from the start time,
+              // so formatting row[0][0] gives the exact session directory name.
+              const fnSpan = document.getElementById('replayFileName');
+              if (fnSpan) {
+                let displayName = '';
+                if (rows.length && rows[0].length && rows[0][0] > 1e9) {
+                  const d = new Date(rows[0][0] * 1000);
+                  const pad = n => String(n).padStart(2,'0');
+                  displayName = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+                }
+                fnSpan.textContent = displayName ? '📂 ' + displayName : '';
+                fnSpan.title = displayName;
+              }
+
+              startReplay(cols, rows, friendlyCols);
+            }catch(e){
+              alert('Load failed: '+e.message);
+            }
+          })();
         };
         rd.readAsText(f);
       };
@@ -841,10 +1151,21 @@ function hookLogButtons(){
     closeLogBtn.addEventListener('click', async ()=>{
       if (!confirm('Close current log and start a new one?')) return;
       try {
+        // POST any accumulated check events BEFORE closing so write_check_events
+        // embeds them into the CSV via the chk_events column
+        const evts = window.checkEvents || [];
+        if (evts.length > 0) {
+          await fetch('/api/check_events', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ events: evts })
+          }).catch(()=>{});
+        }
         const response = await fetch('/api/logs/close', { method: 'POST' });
         const result = await response.json();
         if (result.ok) {
           alert(result.message || 'Log closed and new session started');
+          window.checkEvents = [];
         } else {
           alert(result.message || 'Failed to close log');
         }
@@ -1405,10 +1726,11 @@ function feedTick(msg){
   if (msg.tc)  state.tc  = msg.tc;
   if (msg.pid) state.pid = msg.pid;
   if (msg.motors) state.motors = msg.motors;
-  if (msg.le) state.le = msg.le;  // Logic Elements
-  if (msg.math) state.math = msg.math;  // Math Operators
-  if (msg.expr) state.expr = msg.expr;  // Expressions
-  // Static variables: prefer static_vars (C++) but fall back to global_vars (Python)
+  if (msg.le) state.le = msg.le;
+  if (msg.math) state.math = msg.math;
+  if (msg.expr) state.expr = msg.expr;
+  if (msg.button_vars) state.buttonVars = {...(state.buttonVars||{}), ...msg.button_vars};
+  if (msg.t != null) state.lastT = msg.t;  // for checklist _currentT() in live mode
   if (msg.static_vars && Object.keys(msg.static_vars).length > 0) {
     state.static_vars = msg.static_vars;
   } else if (msg.global_vars) {
@@ -1418,6 +1740,41 @@ function feedTick(msg){
 }
 
 window.GLOBAL_BUFFER_SPAN = window.GLOBAL_BUFFER_SPAN || 10;
+
+/* ---- Chart check-mark overlay ----
+   Listens for 'checklist-check' events from checklist_widget.js.
+   In live mode: records performance.now()/1000 (matches chartBuffers.t).
+   In replay mode: records the tServer from the event (matches replayData row t values).
+   Marks are cleared when replay closes / live mode resumes.               */
+window._chartMarks = window._chartMarks || [];
+window.chartMarkTime = function(label) {
+  // Called directly (legacy) — use performance.now()
+  window._chartMarks.push({ t: performance.now() / 1000, label: label || '' });
+};
+window.clearChartMarks = function() {
+  window._chartMarks = [];
+};
+
+window.addEventListener('checklist-check', (ev) => {
+  const detail = ev.detail || {};
+  let t;
+  if (replayMode !== null && detail.tServer != null) {
+    // Replay: tServer matches the log's t column directly
+    t = detail.tServer;
+  } else {
+    // Live: use performance.now() which matches chartBuffers timestamps
+    t = performance.now() / 1000;
+  }
+  const label = detail.label || String(detail.itemNum || '');
+  window._chartMarks.push({ t, label });
+});
+
+window.addEventListener('checklist-uncheck', (ev) => {
+  const detail = ev.detail || {};
+  const itemNum = String(detail.itemNum || '');
+  // Remove all chart marks for this item number
+  window._chartMarks = (window._chartMarks || []).filter(m => m.label !== itemNum);
+});
 
 window.addEventListener('tick', (ev)=>{
   if (ev && ev.detail) feedTick(ev.detail);
@@ -1547,8 +1904,6 @@ async function loadConfigCache(){
     const r=await fetch('/api/config'); 
     if (r.ok) {
       configCache = await r.json();
-      
-      // Update rate input from config
       const rateInput = $('#rate');
       if (rateInput && configCache && configCache.boards1608) {
         for (let board of configCache.boards1608) {
@@ -1561,7 +1916,9 @@ async function loadConfigCache(){
       }
     }
   } catch {}
-  try { const r=await fetch('/api/pid'); if (r.ok) window.pidCache = await r.json(); } catch {}
+  try { const r=await fetch('/api/pid');             if (r.ok) window.pidCache  = await r.json(); } catch {}
+  try { const r=await fetch('/api/math_operators');  if (r.ok) window.mathCache = await r.json(); } catch {}
+  try { const r=await fetch('/api/expressions');     if (r.ok) window.exprCache = await r.json(); } catch {}
 }
 
 async function setRate(){
@@ -2226,21 +2583,14 @@ async function createSignalSelector(kind, currentIndex, onChange) {
       
       return select;
     } else if (kind === 'button') {
-      console.log('========================================');
-      console.log('BUTTON CASE HIT! Looking for button vars...');
-      console.log('state.pages:', state.pages);
       // Button variables - scan all DO button widgets for varNames
       const varNames = new Set();
       
       // Scan all pages for DO buttons with outputType='var'
-      let buttonCount = 0;
       state.pages?.forEach(page => {
         page.widgets?.forEach(w => {
-          if (w.type === 'dobutton') {
-            buttonCount++;
-            if (w.opts?.outputType === 'var' && w.opts?.varName) {
-                    varNames.add(w.opts.varName);
-            }
+          if (w.type === 'dobutton' && w.opts?.outputType === 'var' && w.opts?.varName) {
+            varNames.add(w.opts.varName);
           }
         });
       });
@@ -2434,7 +2784,7 @@ function openWidgetSettings(w) {
         s.displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
         s.displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
 
-        const kindSel = selectEnum(['ai', 'ao', 'do', 'tc', 'pid', 'math', 'expr', 'button'], s.kind || 'ai', async v => {
+        const kindSel = selectEnum(['ai', 'ao', 'do', 'tc', 'pid', 'math', 'expr', 'button', 'static'], s.kind || 'ai', async v => {
           s.kind = v;
           s.name = s.name || labelFor(s);
           // Rebuild selector when kind changes
@@ -3019,15 +3369,28 @@ function widgetOptions(w){
     yGrid.oninput=()=>{ w.opts.yGridLines=parseInt(yGrid.value)||5; };
 
     const pause=el('button',{className:'btn', onclick:()=>{
-      w.opts.paused=!w.opts.paused;
-      if (w.opts.paused) {
-        const buf = chartBuffers.get(w.id) || [];
-        if (buf.length) w.opts.tFreeze = buf[buf.length - 1].t;
+      if (replayMode === 'playing') {
+        // In replay playback: pause the whole playback
+        pauseReplay();
+        pause.textContent = '▶ Resume';
+      } else if (replayMode === 'paused' && replayIndex > 0 && replayIndex < (replayData?.rows?.length ?? 0)) {
+        // Mid-playback pause: resume
+        playReplay();
+        pause.textContent = '⏸ Pause';
       } else {
-        w.opts.tFreeze = null;
+        // Live mode: freeze/unfreeze just this chart's view
+        w.opts.paused = !w.opts.paused;
+        if (w.opts.paused) {
+          const buf = chartBuffers.get(w.id) || [];
+          if (buf.length) w.opts.tFreeze = buf[buf.length - 1].t;
+        } else {
+          w.opts.tFreeze = null;
+        }
+        pause.textContent = w.opts.paused ? '▶ Resume' : '⏸ Pause';
       }
-      pause.textContent=w.opts.paused?'Resume':'Pause';
-    }}, w.opts.paused?'Resume':'Pause');
+    }}, w.opts.paused ? '▶ Resume' : '⏸ Pause');
+    // Store ref so draw() can keep button text in sync with replay state
+    w._pauseBtn = pause;
 
     // Zoom level badge — mountChart stores a ref to update it each frame
     const zoomBadge = el('span', {
@@ -3336,6 +3699,15 @@ function mountChart(w, body){
       w._zoomBadgeEl.style.color = (zr > 1.02) ? '#f7768e' : '#a8b3cf';
     }
     // Update clip/save button enabled state
+    if (w._pauseBtn) {
+      if (replayMode === 'playing') {
+        w._pauseBtn.textContent = '⏸ Pause';
+      } else if (replayMode === 'paused' && replayIndex > 0 && replayIndex < (replayData?.rows?.length ?? 0)) {
+        w._pauseBtn.textContent = '▶ Resume';
+      } else if (replayMode === null) {
+        w._pauseBtn.textContent = w.opts.paused ? '▶ Resume' : '⏸ Pause';
+      }
+    }
     if (w._clipBtn) {
       const canClip = w.view && w.view.paused;
       w._clipBtn.disabled = !canClip;
@@ -3407,21 +3779,18 @@ function mountChart(w, body){
     }
 
     // ---- Decimation on the visible slice ----
-    // For LIVE / paused-live data: use pixel-stride min+max per bucket.
-    // This is frame-stable — buckets don't shift as new points arrive —
-    // so there is no flicker. It also faithfully preserves noise peaks.
-    // For REPLAY (static buffer): use LTTB which gives better visual shape
-    // fidelity on very large logs where re-decimation has already run.
+    // Pixel-stride (stable, flicker-free) for live scrolling and replay playback.
+    // LTTB (best visual shape) only for paused replay where the buffer is static.
     const plotW = Math.max(1, plotR - plotL);
     let viewBuf;
-    if (replayMode !== null) {
-      // Replay: LTTB as before
+    if (replayMode === 'paused') {
+      // Static full-log view: LTTB for best shape fidelity
       const fullSpan = w.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
       const zoomRatio = fullSpan / Math.max(0.001, viewSpan);
       const targetPts = decimTargetForZoom(zoomRatio);
       viewBuf = lttbDecimate(viewBufRaw, targetPts);
     } else {
-      // Live: pixel-stride decimation — stable, flicker-free
+      // Live scrolling or animated replay playback: pixel-stride, no flicker
       viewBuf = pixelStride(viewBufRaw, plotW);
     }
 
@@ -3499,6 +3868,30 @@ function mountChart(w, body){
         lab
       ]));
     });
+
+    // ---- Checklist check-mark overlay ----
+    // Draw a vertical dashed amber line for each checklist mark in the view window
+    const marks = window._chartMarks || [];
+    if (marks.length) {
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#e8a030'; // amber/orange-yellow
+      ctx.fillStyle = '#e8a030';
+      ctx.font = '9px system-ui';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      for (const mark of marks) {
+        if (mark.t < t0 || mark.t > t1) continue;
+        const mx = plotL + (mark.t - t0) * xscale;
+        ctx.beginPath(); ctx.moveTo(mx, plotT); ctx.lineTo(mx, plotB); ctx.stroke();
+        if (mark.label) {
+          ctx.fillText(mark.label.slice(0, 20), mx + 2, plotT + 2);
+        }
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
 
     // ---- Cursor & popup ----
     const cur = chartCursor.get(w.id);
@@ -3805,8 +4198,9 @@ function findNearestIndex(buf, t){
 }
 
 function updateChartBuffers(){
-  // Don't push live data during replay
-  if (replayMode !== null) return;
+  // Block during paused replay — chart buffers are pre-loaded from the full log.
+  // Allow during 'playing' replay so animated playback feeds charts frame by frame.
+  if (replayMode === 'paused') return;
 
   for (const p of state.pages){
     for (const w of p.widgets){
@@ -3882,6 +4276,10 @@ function labelFor(sel){
     if(sel.kind==='button'){
       // For button vars, sel.index is the variable name
       return `btn:${sel.index}`;
+    }
+    if(sel.kind==='static' || sel.kind==='global'){
+      // sel.index is the variable name string
+      return String(sel.index);
     }
   }catch{}
   return `${sel.kind.toUpperCase()}${sel.index}`;
@@ -5597,6 +5995,10 @@ function readSelection(sel){
     case 'button':
       // For button vars, sel.index is the variable name (string)
       return state.buttonVars?.[sel.index] ?? 0;
+    case 'static':
+    case 'global':
+      // sel.index is the variable name (string)
+      return state.static_vars?.[sel.index] ?? 0;
   }
   return 0;
 }
@@ -7014,15 +7416,14 @@ async function openMathEditor(){
     const kindSelect = el('select', {
       onchange: async e => {
         input.kind = e.target.value;
-        // Show/hide value input based on kind
         if (e.target.value === 'value') {
           signalSelect.style.display = 'none';
           signalLabel.style.display = 'none';
           valueInput.style.display = 'block';
           valueLabel.style.display = 'flex';
         } else {
-          // Rebuild signal selector for new kind
-          const newSel = await createSignalSelector(e.target.value, input.index || 0, idx => input.index = idx);
+          const defaultIndex = (e.target.value === 'static' || e.target.value === 'button') ? (input.index || '') : (input.index || 0);
+          const newSel = await createSignalSelector(e.target.value, defaultIndex, idx => input.index = idx);
           signalSelect.replaceWith(newSel);
           signalSelect = newSel;
           signalSelect.style.display = 'block';
@@ -7033,16 +7434,18 @@ async function openMathEditor(){
       },
       style: 'flex:1'
     });
-    ['ai', 'ao', 'tc', 'pid_u', 'math', 'le', 'expr', 'value'].forEach(k => {
+    ['ai', 'ao', 'tc', 'pid_u', 'math', 'le', 'expr', 'static', 'value'].forEach(k => {
       kindSelect.append(el('option', {value: k}, k.toUpperCase()));
     });
     kindSelect.value = input.kind || 'ai';
-    
+
     // Create signal selector (async)
     let signalSelect = el('select', {style: 'flex:1'});
     signalSelect.append(el('option', {}, 'Loading...'));
     (async () => {
-      const newSel = await createSignalSelector(input.kind || 'ai', input.index || 0, idx => input.index = idx);
+      const kind = input.kind || 'ai';
+      const defaultIndex = (kind === 'static' || kind === 'button') ? (input.index || '') : (input.index || 0);
+      const newSel = await createSignalSelector(kind, defaultIndex, idx => input.index = idx);
       signalSelect.replaceWith(newSel);
       signalSelect = newSel;
     })();

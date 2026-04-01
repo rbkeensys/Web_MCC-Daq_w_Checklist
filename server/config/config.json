@@ -24,7 +24,7 @@
           "include": true
         },
         {
-          "name": "DP Level 1",
+          "name": "Unused1",
           "slope": 50.0,
           "offset": -25.17803955078125,
           "cutoffHz": 0.1,
@@ -32,7 +32,7 @@
           "include": true
         },
         {
-          "name": "DP Level 2",
+          "name": "Unused2",
           "slope": 50.0,
           "offset": -25.121612548828125,
           "cutoffHz": 0.1,
@@ -41,8 +41,8 @@
         },
         {
           "name": "Ch P",
-          "slope": 50.0,
-          "offset": -27.203521728515625,
+          "slope": 50.17183999499474,
+          "offset": -35.028497063390176,
           "cutoffHz": 1.0,
           "units": "",
           "include": false

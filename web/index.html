@@ -35,7 +35,7 @@
       <button id="saveLayout" class="btn">Save Layout</button>
       <button id="loadLayout" class="btn">Load Layout</button>
       <button id="openLogBtn" type="button" class="btn">Open Log</button>
-      <button id="closeLogBtn" type="button" class="btn">Close Log</button>
+      <button id="closeLogBtn" type="button" class="btn">Start New Log</button>
     </div>
   </header>
 
@@ -47,6 +47,7 @@
     <button id="replayShowFullBtn" class="btn" title="Show Full Log">📊 Full Log</button>
     <button id="replayCloseBtn" class="btn danger" title="Close Log">✕ Close Log</button>
     <span id="replayPosition" class="badge">0 / 0</span>
+    <span id="replayFileName" style="font-size:11px;color:#79c0ff;margin:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;" title="Loaded log file"></span>
     <input
       id="replayProgress"
       type="range"
