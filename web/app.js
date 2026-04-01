@@ -1,4 +1,4 @@
-const UI_VERSION = "2.0.0";  // 2026-03-31: Session name derived from log start time (first row t value)
+const UI_VERSION = "2.0.3";  // 2026-04-01: Print chart via hidden iframe — no popup required
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -326,69 +326,13 @@ let replayMode = null; // null = live, 'paused' = showing full log, 'playing' = 
 
 function parseCSV(text){
   const lines = text.split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) return {cols:[], rows:[], checkEvents:null};
+  if (lines.length < 2) return {cols:[], rows:[]};
   // Auto-detect delimiter: tab-separated files are common from the server logger
   const firstLine = lines[0];
   const delim = firstLine.includes('\t') ? '\t' : ',';
-
-  // Split a CSV line respecting quoted fields (handles embedded delimiters and "" escapes)
-  function splitLine(line) {
-    const fields = [];
-    let i = 0;
-    while (i < line.length) {
-      if (line[i] === '"') {
-        // Quoted field
-        let val = '';
-        i++; // skip opening quote
-        while (i < line.length) {
-          if (line[i] === '"' && line[i+1] === '"') { val += '"'; i += 2; }
-          else if (line[i] === '"') { i++; break; } // closing quote
-          else { val += line[i++]; }
-        }
-        fields.push(val);
-        if (line[i] === delim) i++; // skip delimiter after closing quote
-      } else {
-        // Unquoted field — read until delimiter
-        const end = line.indexOf(delim, i);
-        if (end === -1) { fields.push(line.slice(i)); i = line.length; }
-        else { fields.push(line.slice(i, end)); i = end + 1; }
-      }
-    }
-    return fields;
-  }
-
-  const cols = splitLine(firstLine).map(s => s.trim());
-
-  // Find chk_events column — logger.py embeds JSON array in row 0 of this column
-  const chkCol = cols.indexOf('chk_events');
-  let checkEvents = null;
-  console.log('[parseCSV] cols count:', cols.length, 'chk_events col index:', chkCol, 'first col:', cols[0], 'last col:', cols[cols.length-1]);
-
-  const rows = lines.slice(1).map((line, rowIdx) => {
-    const parts = splitLine(line);
-    return parts.map((s, ci) => {
-      if (ci === chkCol) {
-        if (rowIdx === 0) {
-          console.log('[parseCSV] chk_events row0 (first 80):', s.slice(0,80));
-          if (s.startsWith('[')) {
-            try { checkEvents = JSON.parse(s); }
-            catch(e) { console.warn('[parseCSV] chk_events parse failed:', e.message); }
-          }
-        }
-        return 0;
-      }
-      const t = s.trim();
-      return t === '' ? 0 : Number(t);
-    });
-  });
-
-  // Strip chk_events from cols and rows so it doesn't corrupt channel data
-  if (chkCol >= 0) {
-    cols.splice(chkCol, 1);
-    rows.forEach(r => r.splice(chkCol, 1));
-  }
-
-  return { cols, rows, checkEvents };
+  const cols = firstLine.split(delim).map(s=>s.trim());
+  const rows = lines.slice(1).map(line => line.split(delim).map(v=>Number(v.trim())));
+  return { cols, rows };
 }
 
 /* Remap raw CSV column headers to friendly configured names.
@@ -428,9 +372,7 @@ async function friendlyColNames(cols) {
       return `${pname}_${m[2]}`;
     }
     m = low.match(/^pid(\d+)$/);  if (m) return pidNames[+m[1]]  || col;
-    if (col.startsWith('sv_'))   return col.slice(3);   // our format
-    if (col.startsWith('gvar_')) return col.slice(5);   // server logger format
-    if (col === 'chk_events')   return col;             // stripped by parseCSV anyway
+    if (col.startsWith('sv_')) return col.slice(3);
     return col;
   });
   console.log('[friendlyColNames] first 8 cols:', result.slice(0,8));
@@ -496,11 +438,8 @@ function makeTickFromRow(cols, row, nameMap){
     if (colLow === 't' || colLow === 'time' || colLow === 'timestamp') {
       obj.t = v;
     } else if (col.startsWith('sv_')) {
-      // Static var: sv_Name (our clip/save format)
+      // Static var: sv_Name
       sv[col.slice(3)] = v;
-    } else if (col.startsWith('gvar_')) {
-      // Global/static var: gvar_Name (server logger format)
-      sv[col.slice(5)] = v;
     } else if (colLow.startsWith('ai') && !isNaN(col.slice(2))) {
       ai[Number(col.slice(2))] = v;
     } else if (colLow.startsWith('ao') && !isNaN(col.slice(2))) {
@@ -615,24 +554,10 @@ function startReplay(cols, rows, friendlyCols){
         window._chartMarks.push({ t, label: ev.label || String(ev.itemNum || '') });
       }
     }
-    console.log('[ChkMarks] marks t values:', window._chartMarks.map(m=>m.t));
   }
 
   // Load ALL data into charts (decimated), keeping full-res raw buffers
   loadAllReplayDataIntoCharts();
-
-  // Debug: log first chart buffer t range vs marks
-  for (const p of state.pages){
-    for (const w of p.widgets){
-      if (w.type !== 'chart') continue;
-      const buf = chartBuffers.get(w.id);
-      if (buf && buf.length) {
-        console.log(`[ChkMarks] chart "${w.opts.title}" buf t: ${buf[0].t.toFixed(1)} .. ${buf[buf.length-1].t.toFixed(1)}, marks:`, window._chartMarks.map(m=>m.t.toFixed(1)));
-      }
-      break; // just first chart
-    }
-    break;
-  }
 
   // Set every chart view to show the full log span immediately
   for (const p of state.pages){
@@ -859,10 +784,6 @@ function closeReplay(){
   replayMode = null;
   replayPaused = false;
 
-  // Clear filename display
-  const fnSpan = document.getElementById('replayFileName');
-  if (fnSpan) fnSpan.textContent = '';
-
   // Clear chart buffers and pan state
   chartBuffers.clear();
   chartRawBuffers.clear();
@@ -1082,33 +1003,11 @@ function hookLogButtons(){
         rd.onload = ()=>{
           (async ()=>{
             try{
-              const {cols, rows, checkEvents} = parseCSV(rd.result);
+              const {cols, rows} = parseCSV(rd.result);
               if (!cols.length || !rows.length) throw new Error('No data');
               // Keep original column names for reliable parsing (ai0, expr7 etc.)
               // Compute friendly names separately for display only
               const friendlyCols = await friendlyColNames(cols);
-
-              // Load check events embedded in the CSV by logger.py (chk_events column)
-              if (checkEvents && checkEvents.length) {
-                window.loadCheckEventsFromLog?.(JSON.stringify(checkEvents));
-                console.log(`[Log] Loaded ${checkEvents.length} check events from CSV`);
-              }
-
-              // Derive session name from the first row's t value (Unix epoch).
-              // The server names sessions as YYYYmmdd_HHMMSS from the start time,
-              // so formatting row[0][0] gives the exact session directory name.
-              const fnSpan = document.getElementById('replayFileName');
-              if (fnSpan) {
-                let displayName = '';
-                if (rows.length && rows[0].length && rows[0][0] > 1e9) {
-                  const d = new Date(rows[0][0] * 1000);
-                  const pad = n => String(n).padStart(2,'0');
-                  displayName = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-                }
-                fnSpan.textContent = displayName ? '📂 ' + displayName : '';
-                fnSpan.title = displayName;
-              }
-
               startReplay(cols, rows, friendlyCols);
             }catch(e){
               alert('Load failed: '+e.message);
@@ -1151,21 +1050,10 @@ function hookLogButtons(){
     closeLogBtn.addEventListener('click', async ()=>{
       if (!confirm('Close current log and start a new one?')) return;
       try {
-        // POST any accumulated check events BEFORE closing so write_check_events
-        // embeds them into the CSV via the chk_events column
-        const evts = window.checkEvents || [];
-        if (evts.length > 0) {
-          await fetch('/api/check_events', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ events: evts })
-          }).catch(()=>{});
-        }
         const response = await fetch('/api/logs/close', { method: 'POST' });
         const result = await response.json();
         if (result.ok) {
           alert(result.message || 'Log closed and new session started');
-          window.checkEvents = [];
         } else {
           alert(result.message || 'Failed to close log');
         }
@@ -1767,13 +1655,6 @@ window.addEventListener('checklist-check', (ev) => {
   }
   const label = detail.label || String(detail.itemNum || '');
   window._chartMarks.push({ t, label });
-});
-
-window.addEventListener('checklist-uncheck', (ev) => {
-  const detail = ev.detail || {};
-  const itemNum = String(detail.itemNum || '');
-  // Remove all chart marks for this item number
-  window._chartMarks = (window._chartMarks || []).filter(m => m.label !== itemNum);
 });
 
 window.addEventListener('tick', (ev)=>{
@@ -3432,6 +3313,13 @@ function widgetOptions(w){
       onclick: () => saveClippedLog(w)
     }, '💾 Save');
 
+    const printBtn = el('button', {
+      className: 'btn',
+      title: 'Print current chart view',
+      style: 'padding:3px 7px;font-size:11px',
+      onclick: () => printChart(w)
+    }, '🖨 Print');
+
     // Store refs so we can update enabled state from draw()
     w._clipBtn = clipBtn;
     w._saveBtn = saveBtn;
@@ -3442,7 +3330,7 @@ function widgetOptions(w){
     saveBtn.disabled = false; // always available; saveClippedLog handles empty case gracefully
     if (!isPaused) { clipBtn.style.opacity='0.4'; }
 
-    opts.push(clipBtn, saveBtn);
+    opts.push(clipBtn, saveBtn, printBtn);
   }
   if (w.type==='bars'){
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
@@ -3459,6 +3347,61 @@ const chartRAFHandles=new Map(); // w.id -> {rafId: number, isRunning: boolean}
 // Pan state stored per widget-id so it survives mountChart re-renders
 const chartPan=new Map(); // w.id -> {dragging,startX,startTFreeze,reDecimateTimer}
 
+
+function printChart(w) {
+  // Find the canvas inside this widget's body at click time
+  const widgetEl = document.getElementById('w_' + w.id);
+  const canvas = widgetEl?.querySelector('canvas');
+  if (!canvas) { alert('Chart canvas not found.'); return; }
+  const title  = w.opts.title || 'Chart';
+  const series = (w.opts.series || []).map(s => labelFor(s)).join('  |  ');
+  const ts     = new Date().toLocaleString();
+  const imgData = canvas.toDataURL('image/png');
+
+  // Remove any previous print frame
+  const old = document.getElementById('_chartPrintFrame');
+  if (old) old.remove();
+
+  const html = `<!DOCTYPE html><html><head>
+    <title>${title}</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family:system-ui,sans-serif; background:#fff; color:#111; padding:12px; }
+      h2  { font-size:15px; margin-bottom:3px; }
+      .meta { font-size:10px; color:#555; margin-bottom:8px; }
+      img { width:100%; height:auto; display:block; }
+    </style>
+  </head><body>
+    <h2>${title}</h2>
+    <div class="meta">${series ? 'Series: ' + series + '&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}${ts}</div>
+    <img src="${imgData}"/>
+  </body></html>`;
+
+  const iframe = document.createElement('iframe');
+  iframe.id = '_chartPrintFrame';
+  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1200px;height:800px;border:none;';
+  document.body.appendChild(iframe);
+
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(html);
+  iframe.contentDocument.close();
+
+  // Give the image a moment to decode then print the iframe
+  iframe.contentWindow.onload = () => {
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    }, 150);
+  };
+
+  // Fallback if onload already fired
+  setTimeout(() => {
+    if (iframe.contentDocument.readyState === 'complete') {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    }
+  }, 400);
+}
 
 function mountChart(w, body){
   const legend=el('div',{className:'legend'}); body.append(legend);
@@ -4687,35 +4630,37 @@ function mountDOButton(w, body){
   b.addEventListener('click', async ()=>{
     if(!connected) return;
     if(w.opts.mode!=='toggle') return;
+
+    // Always cancel any running actuation timer first.
+    // If the user clicks again during the countdown they are manually
+    // overriding — we must NOT let the old timer fire afterwards.
     clearActTimer();
-    
-    // Get current state
-    let bit;
+
+    // Get current logical state and toggle it
+    let desiredLogicalState;
     if (w.opts.outputType === 'var') {
-      bit = state.buttonVars?.[w.opts.varName] || 0;
-      const want = !bit;
-      await setOutput(want);
+      const bit = state.buttonVars?.[w.opts.varName] || 0;
+      desiredLogicalState = !bit;
+      await setOutput(desiredLogicalState);
     } else {
-      // Hardware DO: Toggle the LOGICAL state (what user sees)
-      bit = state.do[w.opts.doIndex]|0;
+      const bit = state.do[w.opts.doIndex]|0;
       const currentLogicalState = logicalActive(bit, w.opts.activeHigh);
-      const desiredLogicalState = !currentLogicalState;
-      
+      desiredLogicalState = !currentLogicalState;
+
       console.log(`[DO Click] DO${w.opts.doIndex}: bit=${bit}, activeHigh=${w.opts.activeHigh}, currentLogical=${currentLogicalState}, want=${desiredLogicalState}`);
-      
-      // Convert desired logical state back to physical bit
-      // If activeHigh=true:  logical true  = bit 1, logical false = bit 0
-      // If activeHigh=false: logical true  = bit 0, logical false = bit 1
+
       const physicalBit = w.opts.activeHigh ? (desiredLogicalState ? 1 : 0) : (desiredLogicalState ? 0 : 1);
-      
       console.log(`[DO Click] Sending physical bit=${physicalBit} (number) to server`);
       await setOutput(physicalBit);
     }
-    
-    const ms = Math.max(0, (w.opts.actuationTime||0)*1000);
-    if (ms>0){
-      const original=bit;
-      actTimer=setTimeout(()=>{ setOutput(original); }, ms);
+
+    // Only start the auto-revert timer when turning ON.
+    // If the user clicked to turn it OFF, the timer was already cleared above
+    // and must NOT restart — they are manually stopping early.
+    const ms = Math.max(0, (w.opts.actuationTime||0) * 1000);
+    if (ms > 0 && desiredLogicalState) {
+      // Revert to OFF (logical false) after the actuation time
+      actTimer = setTimeout(() => { setOutput(0); }, ms);
     }
   });
 

@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.11.4';  // 2026-03-31: Backspace cancels GoTo correctly; move activeRow before zeroing
+window.CHECKLIST_VERSION = '1.11.5';  // 2026-04-01: Defer check_events POST to prevent chart stall
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -227,11 +227,14 @@ function clCheck() {
   window.checkEvents.push(ev);
   window.dispatchEvent(new CustomEvent('checklist-check', { detail: ev }));
 
-  fetch('/api/check_events', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ events: [ev] })
-  }).catch(() => {});
+  // Persist to server — deferred so it doesn't block the chart/WebSocket event loop
+  setTimeout(() => {
+    fetch('/api/check_events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: [ev] })
+    }).catch(() => {});
+  }, 0);
 
   items[active].checked = true;
   items[active].timeOut = _nowStr();
