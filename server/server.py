@@ -1712,6 +1712,33 @@ async def post_check_events(req: Request):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+@app.post("/api/check_events/save")
+async def save_check_events(req: Request):
+    """Save full checklist snapshot as chk.json in the current session directory."""
+    global session_logger
+    try:
+        import json as _json
+        data = await req.json()
+        if not session_logger:
+            return {"ok": False, "error": "No active session"}
+        chk_path = session_logger.path.parent / "chk.json"
+        chk_path.write_text(_json.dumps(data, indent=2))
+        return {"ok": True, "path": str(chk_path)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/api/logs/{session}/chk")
+def get_session_chk(session: str):
+    """Return chk.json for a session, or null if none."""
+    chk_path = LOGS_DIR / session / "chk.json"
+    if chk_path.exists():
+        try:
+            import json as _json
+            return _json.loads(chk_path.read_text())
+        except Exception:
+            pass
+    return None
+
 @app.post("/api/logs/close")
 def close_log():
     """Close current log and start a new one"""

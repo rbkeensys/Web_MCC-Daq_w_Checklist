@@ -1,5 +1,5 @@
-const UI_VERSION = "2.0.3";  // 2026-04-01: Print chart via hidden iframe — no popup required
-
+const UI_VERSION = "2.0.5";  // 2026-04-03: chk.json auto-snapshot, restore on checklist load, server-side save
+11111111
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
 const el = (tag, props = {}, children = []) => {
@@ -327,11 +327,36 @@ let replayMode = null; // null = live, 'paused' = showing full log, 'playing' = 
 function parseCSV(text){
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return {cols:[], rows:[]};
-  // Auto-detect delimiter: tab-separated files are common from the server logger
   const firstLine = lines[0];
   const delim = firstLine.includes('\t') ? '\t' : ',';
-  const cols = firstLine.split(delim).map(s=>s.trim());
-  const rows = lines.slice(1).map(line => line.split(delim).map(v=>Number(v.trim())));
+
+  function splitLine(line) {
+    const fields = [];
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] === '"') {
+        let val = ''; i++;
+        while (i < line.length) {
+          if (line[i] === '"' && line[i+1] === '"') { val += '"'; i += 2; }
+          else if (line[i] === '"') { i++; break; }
+          else { val += line[i++]; }
+        }
+        fields.push(val);
+        if (line[i] === delim) i++;
+      } else {
+        const end = line.indexOf(delim, i);
+        if (end === -1) { fields.push(line.slice(i)); i = line.length; }
+        else { fields.push(line.slice(i, end)); i = end + 1; }
+      }
+    }
+    return fields;
+  }
+
+  const cols = splitLine(firstLine).map(s => s.trim());
+  const rows = lines.slice(1).map(line => {
+    const parts = splitLine(line);
+    return parts.map(s => { const t = s.trim(); return t === '' ? 0 : Number(t); });
+  });
   return { cols, rows };
 }
 
@@ -372,7 +397,8 @@ async function friendlyColNames(cols) {
       return `${pname}_${m[2]}`;
     }
     m = low.match(/^pid(\d+)$/);  if (m) return pidNames[+m[1]]  || col;
-    if (col.startsWith('sv_')) return col.slice(3);
+    if (col.startsWith('sv_'))   return col.slice(3);
+    if (col.startsWith('gvar_')) return col.slice(5);
     return col;
   });
   console.log('[friendlyColNames] first 8 cols:', result.slice(0,8));
@@ -438,8 +464,9 @@ function makeTickFromRow(cols, row, nameMap){
     if (colLow === 't' || colLow === 'time' || colLow === 'timestamp') {
       obj.t = v;
     } else if (col.startsWith('sv_')) {
-      // Static var: sv_Name
       sv[col.slice(3)] = v;
+    } else if (col.startsWith('gvar_')) {
+      sv[col.slice(5)] = v;
     } else if (colLow.startsWith('ai') && !isNaN(col.slice(2))) {
       ai[Number(col.slice(2))] = v;
     } else if (colLow.startsWith('ao') && !isNaN(col.slice(2))) {
@@ -784,6 +811,9 @@ function closeReplay(){
   replayMode = null;
   replayPaused = false;
 
+  const fnSpan = document.getElementById('replayFileName');
+  if (fnSpan) fnSpan.textContent = '';
+
   // Clear chart buffers and pan state
   chartBuffers.clear();
   chartRawBuffers.clear();
@@ -1005,9 +1035,34 @@ function hookLogButtons(){
             try{
               const {cols, rows} = parseCSV(rd.result);
               if (!cols.length || !rows.length) throw new Error('No data');
-              // Keep original column names for reliable parsing (ai0, expr7 etc.)
-              // Compute friendly names separately for display only
               const friendlyCols = await friendlyColNames(cols);
+
+              // Derive session name from first row t (Unix epoch → YYYYmmdd_HHMMSS)
+              let sessionName = '';
+              if (rows.length && rows[0][0] > 1e9) {
+                const d = new Date(rows[0][0] * 1000);
+                const p = n => String(n).padStart(2,'0');
+                sessionName = `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+              }
+
+              // Show session name in replay bar
+              const fnSpan = document.getElementById('replayFileName');
+              if (fnSpan) fnSpan.textContent = sessionName ? '📂 ' + sessionName : '';
+
+              // Load check events from server chk.json (primary path)
+              if (sessionName) {
+                try {
+                  const r = await fetch(`/api/logs/${sessionName}/chk`);
+                  if (r.ok) {
+                    const snap = await r.json();
+                    if (snap && Array.isArray(snap.checkEvents) && snap.checkEvents.length) {
+                      window.loadCheckEventsFromLog?.(JSON.stringify(snap.checkEvents));
+                      console.log('[Log] Loaded', snap.checkEvents.length, 'check events from server chk.json');
+                    }
+                  }
+                } catch(e) {}
+              }
+
               startReplay(cols, rows, friendlyCols);
             }catch(e){
               alert('Load failed: '+e.message);
@@ -1050,10 +1105,28 @@ function hookLogButtons(){
     closeLogBtn.addEventListener('click', async ()=>{
       if (!confirm('Close current log and start a new one?')) return;
       try {
+        // Save checklist snapshot to server chk.json before closing
+        const evts = window.checkEvents || [];
+        if (evts.length > 0) {
+          const snapshot = {
+            checklistPath:      window.checklistPath || '',
+            checklistActiveRow: window.checklistActiveRow || 0,
+            checklistReturnRow: window.checklistReturnRow || 0,
+            checklistShowRow:   window.checklistShowRow   || 0,
+            checklistItems:     window.checklistItems || [],
+            checkEvents:        evts
+          };
+          await fetch('/api/check_events/save', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(snapshot)
+          }).catch(()=>{});
+        }
         const response = await fetch('/api/logs/close', { method: 'POST' });
         const result = await response.json();
         if (result.ok) {
           alert(result.message || 'Log closed and new session started');
+          window.checkEvents = [];
+          window.clearChartMarks?.();
         } else {
           alert(result.message || 'Failed to close log');
         }
@@ -1647,14 +1720,29 @@ window.addEventListener('checklist-check', (ev) => {
   const detail = ev.detail || {};
   let t;
   if (replayMode !== null && detail.tServer != null) {
-    // Replay: tServer matches the log's t column directly
     t = detail.tServer;
   } else {
-    // Live: use performance.now() which matches chartBuffers timestamps
     t = performance.now() / 1000;
   }
   const label = detail.label || String(detail.itemNum || '');
   window._chartMarks.push({ t, label });
+});
+
+window.addEventListener('checklist-uncheck', (ev) => {
+  const detail = ev.detail || {};
+  const itemNum = String(detail.itemNum || '');
+  window._chartMarks = (window._chartMarks || []).filter(m => m.label !== itemNum);
+});
+
+window.addEventListener('checklist-snapshot-loaded', (ev) => {
+  // Rebuild chart marks from the restored checkEvents
+  const snap = ev.detail || {};
+  const evts = snap.checkEvents || [];
+  window._chartMarks = [];
+  for (const e of evts) {
+    const t = e.tServer ?? e.t;
+    if (t != null) window._chartMarks.push({ t, label: e.label || String(e.itemNum || '') });
+  }
 });
 
 window.addEventListener('tick', (ev)=>{
@@ -3349,31 +3437,30 @@ const chartPan=new Map(); // w.id -> {dragging,startX,startTFreeze,reDecimateTim
 
 
 function printChart(w) {
-  // Find the canvas inside this widget's body at click time
   const widgetEl = document.getElementById('w_' + w.id);
   const canvas = widgetEl?.querySelector('canvas');
   if (!canvas) { alert('Chart canvas not found.'); return; }
+
   const title  = w.opts.title || 'Chart';
   const series = (w.opts.series || []).map(s => labelFor(s)).join('  |  ');
   const ts     = new Date().toLocaleString();
   const imgData = canvas.toDataURL('image/png');
 
-  // Remove any previous print frame
   const old = document.getElementById('_chartPrintFrame');
   if (old) old.remove();
 
   const html = `<!DOCTYPE html><html><head>
     <title>${title}</title>
     <style>
-      * { margin:0; padding:0; box-sizing:border-box; }
-      body { font-family:system-ui,sans-serif; background:#fff; color:#111; padding:12px; }
-      h2  { font-size:15px; margin-bottom:3px; }
-      .meta { font-size:10px; color:#555; margin-bottom:8px; }
-      img { width:100%; height:auto; display:block; }
+      *{margin:0;padding:0;box-sizing:border-box;}
+      body{font-family:system-ui,sans-serif;background:#fff;color:#111;padding:12px;}
+      h2{font-size:15px;margin-bottom:3px;}
+      .meta{font-size:10px;color:#555;margin-bottom:8px;}
+      img{width:100%;height:auto;display:block;}
     </style>
   </head><body>
     <h2>${title}</h2>
-    <div class="meta">${series ? 'Series: ' + series + '&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}${ts}</div>
+    <div class="meta">${series ? 'Series: '+series+'&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}${ts}</div>
     <img src="${imgData}"/>
   </body></html>`;
 
@@ -3381,26 +3468,11 @@ function printChart(w) {
   iframe.id = '_chartPrintFrame';
   iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1200px;height:800px;border:none;';
   document.body.appendChild(iframe);
-
   iframe.contentDocument.open();
   iframe.contentDocument.write(html);
   iframe.contentDocument.close();
-
-  // Give the image a moment to decode then print the iframe
-  iframe.contentWindow.onload = () => {
-    setTimeout(() => {
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
-    }, 150);
-  };
-
-  // Fallback if onload already fired
-  setTimeout(() => {
-    if (iframe.contentDocument.readyState === 'complete') {
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
-    }
-  }, 400);
+  iframe.contentWindow.onload = () => setTimeout(() => { iframe.contentWindow.focus(); iframe.contentWindow.print(); }, 150);
+  setTimeout(() => { if (iframe.contentDocument.readyState === 'complete') { iframe.contentWindow.focus(); iframe.contentWindow.print(); } }, 400);
 }
 
 function mountChart(w, body){

@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.11.5';  // 2026-04-01: Defer check_events POST to prevent chart stall
+window.CHECKLIST_VERSION = '1.12.0';  // 2026-04-03: Auto-save chk.json snapshot on every change; restore on load
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -62,6 +62,43 @@ function serializeChecklist(items, annotated) {
     }
   }
   return out;
+}
+
+/* ================================================================ snapshot */
+function _clSaveSnapshot() {
+  // Save full state to server's current session chk.json.
+  // Called after every check/uncheck/goto/return/load change.
+  if (!window.checklistLoaded) return;
+  const snapshot = {
+    checklistPath:    window.checklistPath || '',
+    checklistActiveRow: window.checklistActiveRow,
+    checklistReturnRow: window.checklistReturnRow,
+    checklistShowRow:   window.checklistShowRow,
+    checklistItems:   window.checklistItems,
+    checkEvents:      window.checkEvents || []
+  };
+  // Fire-and-forget — defer so it doesn't block the UI
+  setTimeout(() => {
+    fetch('/api/check_events/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(snapshot)
+    }).catch(() => {});
+  }, 0);
+}
+
+function _clApplySnapshot(snap) {
+  // Restore full checklist state from a snapshot object
+  if (!snap || !Array.isArray(snap.checklistItems)) return false;
+  window.checklistItems     = snap.checklistItems;
+  window.checklistActiveRow = snap.checklistActiveRow ?? 0;
+  window.checklistReturnRow = snap.checklistReturnRow ?? 0;
+  window.checklistShowRow   = snap.checklistShowRow   ?? 0;
+  window.checkEvents        = snap.checkEvents || [];
+  window.checklistLoaded    = true;
+  if (snap.checklistPath) window.checklistPath = snap.checklistPath;
+  _renderTable();
+  return true;
 }
 
 /* ================================================================ panel */
@@ -227,14 +264,11 @@ function clCheck() {
   window.checkEvents.push(ev);
   window.dispatchEvent(new CustomEvent('checklist-check', { detail: ev }));
 
-  // Persist to server — deferred so it doesn't block the chart/WebSocket event loop
-  setTimeout(() => {
-    fetch('/api/check_events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ events: [ev] })
-    }).catch(() => {});
-  }, 0);
+  fetch('/api/check_events', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ events: [ev] })
+  }).catch(() => {});
 
   items[active].checked = true;
   items[active].timeOut = _nowStr();
@@ -252,6 +286,7 @@ function clCheck() {
 
   window.checklistShowRow = window.checklistActiveRow;
   _renderTable();
+  _clSaveSnapshot();
 }
 
 function clUncheck() {
@@ -282,6 +317,7 @@ function clUncheck() {
     window.checklistReturnRow = 0;
 
     _renderTable();
+    _clSaveSnapshot();
     return;
   }
 
@@ -322,6 +358,7 @@ function clUncheck() {
   items[target].duration = 0;
 
   _renderTable();
+  _clSaveSnapshot();
 }
 
 /* ================================================================ keyboard */
@@ -385,6 +422,30 @@ function clOpenFile() {
       window.checkEvents = [];
       _renderTable();
       if (_clPanel) _clPanel.focus();
+
+      // Offer to restore a saved snapshot (chk.json) for this checklist
+      if (confirm('Load a saved checkpoint (.chk.json) to restore where you left off?\n(Cancel to start fresh)')) {
+        const ci = document.createElement('input');
+        ci.type = 'file'; ci.accept = '.json';
+        ci.onchange = () => {
+          const cf = ci.files?.[0]; if (!cf) return;
+          const cr = new FileReader();
+          cr.onload = () => {
+            try {
+              const snap = JSON.parse(cr.result);
+              if (_clApplySnapshot(snap)) {
+                // Also restore chart marks from checkEvents
+                window.dispatchEvent(new CustomEvent('checklist-snapshot-loaded', { detail: snap }));
+                console.log('[Checklist] Snapshot restored from', cf.name);
+              } else {
+                alert('Invalid snapshot file.');
+              }
+            } catch(e) { alert('Failed to load snapshot: ' + e.message); }
+          };
+          cr.readAsText(cf);
+        };
+        ci.click();
+      }
     };
     rd.readAsText(f);
   };
@@ -396,6 +457,8 @@ function clSaveFile(annotated) {
   const text = serializeChecklist(window.checklistItems, annotated);
   const base = (window.checklistPath||'checklist').replace(/\.txt$/i,'');
   _downloadText((annotated ? base+'_annotated' : base+'_clean')+'.txt', text);
+  // Also save a snapshot when user explicitly saves the checklist
+  _clSaveSnapshot();
 }
 
 function clGoto() {
@@ -411,6 +474,7 @@ function clGoto() {
   window.checklistShowRow   = idx;
   window.checklistItems[idx].timeIn = _nowStr();
   _renderTable();
+  _clSaveSnapshot();
 }
 
 function clReturn() {
@@ -422,6 +486,7 @@ function clReturn() {
   if (it?.itemText.startsWith('>< ')) { it.itemText = it.itemText.slice(3); window.checklistReturnRow = 0; }
   window.checklistItems[ret].timeIn = _nowStr();
   _renderTable();
+  _clSaveSnapshot();
 }
 
 function clSetReturn() {
@@ -429,6 +494,7 @@ function clSetReturn() {
   window.checklistReturnRow = window.checklistActiveRow;
   _clMarkReturn(window.checklistActiveRow);
   _renderTable();
+  _clSaveSnapshot();
 }
 
 function _clMarkReturn(idx) {
