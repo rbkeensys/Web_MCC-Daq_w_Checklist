@@ -247,9 +247,10 @@ class AOReq(BaseModel):
     volts: float
 
 # ---------- Load config/PID/script ----------
-CFG_PATH = CFG_DIR/"config.json"
-PID_PATH = CFG_DIR/"pid.json"
+CFG_PATH    = CFG_DIR/"config.json"
+PID_PATH    = CFG_DIR/"pid.json"
 SCRIPT_PATH = CFG_DIR/"script.json"
+SCALES_PATH = CFG_DIR/"scales.json"
 
 if not CFG_PATH.exists():
     CFG_DIR.mkdir(parents=True, exist_ok=True)
@@ -258,6 +259,8 @@ if not PID_PATH.exists():
     PID_PATH.write_text(json.dumps({"loops": []}, indent=2))
 if not SCRIPT_PATH.exists():
     SCRIPT_PATH.write_text(json.dumps({"events": []}, indent=2))
+if not SCALES_PATH.exists():
+    SCALES_PATH.write_text(json.dumps({"scales": []}, indent=2))
 
 # ---- Pydantic v2-friendly loader with legacy script.json migration ----
 from typing import Type
@@ -322,6 +325,138 @@ pid_mgr = PIDManager()
 pid_mgr.load(pid_file)
 
 motor_mgr = MotorManager()
+
+# ---------- Serial Scale Manager ----------
+import threading, re
+
+class SerialScaleManager:
+    """
+    Reads weight values from serial scales via COM port (real or virtual,
+    e.g. Moxa NPort in Real COM mode).  Each scale runs a background thread
+    that opens the COM port with pyserial and parses ASCII weight lines.
+
+    Supported formats:
+        "   1234.5 g"           → 1234.5
+        "ST,GS,+001234.5g"      → 1234.5  (Ruishan RD5002 stable/gross)
+        "US,GS,+001234.5g"      → 1234.5  (unstable)
+        "+001234.5"             → 1234.5
+    """
+
+    def __init__(self):
+        self._scales: list[dict] = []
+        self._values: list[float] = []
+        self._threads: list[threading.Thread] = []
+        self._stop_events: list[threading.Event] = []
+
+    def load(self, path: Path):
+        data = json.loads(path.read_text()) if path.exists() else {}
+        self._scales = data.get("scales", [])
+        self._restart_all()
+
+    def save(self, path: Path):
+        path.write_text(json.dumps({"scales": self._scales}, indent=2))
+
+    def get_config(self) -> dict:
+        return {"scales": self._scales}
+
+    def set_config(self, data: dict, path: Path):
+        self._scales = data.get("scales", [])
+        self._restart_all()
+        self.save(path)
+
+    def get_values(self) -> list[float]:
+        return list(self._values)
+
+    def _restart_all(self):
+        for ev in self._stop_events:
+            ev.set()
+        for t in self._threads:
+            t.join(timeout=2)
+        self._threads = []
+        self._stop_events = []
+        self._values = [0.0] * len(self._scales)
+        for i, cfg in enumerate(self._scales):
+            ev = threading.Event()
+            self._stop_events.append(ev)
+            t = threading.Thread(target=self._reader, args=(i, cfg, ev), daemon=True)
+            self._threads.append(t)
+            if cfg.get("enabled", True):
+                t.start()
+
+    def _reader(self, idx: int, cfg: dict, stop: threading.Event):
+        try:
+            import serial
+        except ImportError:
+            print(f"[Scale{idx}] pyserial not installed — run: pip install pyserial")
+            return
+
+        port     = cfg.get("port", "COM1")
+        baud     = int(cfg.get("baud", 9600))
+        bytesize = int(cfg.get("bytesize", 8))
+        parity   = cfg.get("parity", "N")
+        stopbits = float(cfg.get("stopbits", 1))
+        reconnect_delay = 3.0
+
+        print(f"[Scale{idx}] Reader started: {port} {baud} {bytesize}{parity}{int(stopbits)}")
+        while not stop.is_set():
+            ser = None
+            try:
+                # Build Serial object without opening immediately so we can set
+                # exclusive=False before open() — required for Moxa virtual COM ports
+                # On Windows, use \\.\COMx device path to avoid Moxa driver quirks
+                import sys as _sys
+                port_path = port
+                if _sys.platform == 'win32' and re.match(r'^COM\d+$', port, re.I):
+                    port_path = f'\\\\.\\{port}'
+
+                ser = serial.Serial()
+                ser.port     = port_path
+                ser.baudrate = baud
+                ser.bytesize = bytesize
+                ser.parity   = parity
+                ser.stopbits = stopbits
+                ser.timeout  = 1.0
+                ser.rtscts   = False
+                ser.dsrdtr   = False
+                ser.xonxoff  = False
+                ser.open()
+                print(f"[Scale{idx}] Opened {port}")
+                buf = ""
+                while not stop.is_set():
+                    chunk = ser.read(256).decode("ascii", errors="replace")
+                    if not chunk:
+                        continue
+                    buf += chunk
+                    while "\n" in buf or "\r" in buf:
+                        line, buf = re.split(r"[\r\n]+", buf, maxsplit=1)
+                        v = self._parse_line(line)
+                        if v is not None:
+                            self._values[idx] = v
+            except Exception as e:
+                print(f"[Scale{idx}] Error on {port}: {e}")
+            finally:
+                if ser and ser.is_open:
+                    try: ser.close()
+                    except: pass
+            if not stop.is_set():
+                stop.wait(reconnect_delay)
+        print(f"[Scale{idx}] Reader stopped")
+
+    @staticmethod
+    def _parse_line(line: str) -> float | None:
+        """Extract numeric weight value from a scale ASCII line."""
+        # Strip Ruishan/Mettler-Toledo status prefix: "ST,GS," "US,NT," etc.
+        line = re.sub(r'^[A-Z]{2},[A-Z]{2},', '', line.strip())
+        m = re.search(r'[+-]?\d+\.?\d*', line)
+        if m:
+            try:
+                return float(m.group())
+            except ValueError:
+                pass
+        return None
+
+scale_mgr = SerialScaleManager()
+scale_mgr.load(SCALES_PATH)
 
 # Logic Elements
 le_mgr = LEManager()
@@ -1037,6 +1172,7 @@ async def acq_loop():
                 "le": clean_for_json(le_tel),
                 "math": clean_for_json(math_tel),
                 "expr": clean_for_json(expr_tel),
+                "scales": clean_for_json(scale_mgr.get_values()),
                 # Global/static variables from expression engine (static.name = ...)
                 "global_vars": clean_for_json(expr_global_vars.list_all()),
                 # buttonVars synchronized from the frontend
@@ -1699,6 +1835,58 @@ async def zero_ai_channels(req: dict):
 def list_logs():
     return sorted([p.name for p in LOGS_DIR.glob("*") if p.is_dir()])
 
+@app.post("/api/check_events/save")
+async def save_check_events(req: Request):
+    """Save full checklist snapshot as chk.json in the current session directory."""
+    global session_logger
+    try:
+        import json as _json
+        data = await req.json()
+        if session_logger:
+            chk_dir = session_logger.path.parent
+        else:
+            dirs = sorted([p for p in LOGS_DIR.iterdir() if p.is_dir()], key=lambda p: p.name)
+            if not dirs:
+                return {"ok": False, "error": "No session directory found"}
+            chk_dir = dirs[-1]
+        chk_path = chk_dir / "chk.json"
+        chk_path.write_text(json.dumps(data, indent=2))
+        print(f"[MCC-Hub] Saved chk.json to {chk_path} ({len(data.get('checkEvents', []))} events)")
+        return {"ok": True, "path": str(chk_path)}
+    except Exception as e:
+        print(f"[MCC-Hub] chk.json save error: {e}")
+        return {"ok": False, "error": str(e)}
+
+@app.get("/api/logs/{session}/chk")
+def get_session_chk(session: str):
+    """Return chk.json for a session, or null if none."""
+    chk_path = LOGS_DIR / session / "chk.json"
+    if chk_path.exists():
+        try:
+            return json.loads(chk_path.read_text())
+        except Exception:
+            pass
+    return None
+
+# ---------- REST: Serial Scales ----------
+@app.get("/api/scales")
+def get_scales():
+    return scale_mgr.get_config()
+
+@app.put("/api/scales")
+async def put_scales(req: Request):
+    data = await req.json()
+    scale_mgr.set_config(data, SCALES_PATH)
+    return {"ok": True}
+
+@app.get("/api/scales/ports")
+def get_scale_ports():
+    return {"ports": list_serial_ports()}
+
+@app.get("/api/scales/values")
+def get_scale_values():
+    return {"values": scale_mgr.get_values()}
+
 @app.post("/api/check_events")
 async def post_check_events(req: Request):
     """Receive checklist check events from frontend and write to current log."""
@@ -1711,33 +1899,6 @@ async def post_check_events(req: Request):
         return {"ok": True, "count": len(events)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
-
-@app.post("/api/check_events/save")
-async def save_check_events(req: Request):
-    """Save full checklist snapshot as chk.json in the current session directory."""
-    global session_logger
-    try:
-        import json as _json
-        data = await req.json()
-        if not session_logger:
-            return {"ok": False, "error": "No active session"}
-        chk_path = session_logger.path.parent / "chk.json"
-        chk_path.write_text(_json.dumps(data, indent=2))
-        return {"ok": True, "path": str(chk_path)}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-@app.get("/api/logs/{session}/chk")
-def get_session_chk(session: str):
-    """Return chk.json for a session, or null if none."""
-    chk_path = LOGS_DIR / session / "chk.json"
-    if chk_path.exists():
-        try:
-            import json as _json
-            return _json.loads(chk_path.read_text())
-        except Exception:
-            pass
-    return None
 
 @app.post("/api/logs/close")
 def close_log():

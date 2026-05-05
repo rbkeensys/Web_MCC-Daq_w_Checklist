@@ -70,6 +70,9 @@ def _extract_cols(frame: dict) -> list:
     for i, _ in enumerate(frame.get("expr", [])):
         cols.append(f"expr{i}")
 
+    for i, _ in enumerate(frame.get("scales", [])):
+        cols.append(f"scale{i}")
+
     for name in sorted(frame.get("global_vars", {}).keys()):
         cols.append(f"gvar_{name}")
 
@@ -118,6 +121,9 @@ def _row_from_frame(frame: dict, col_idx: dict) -> list:
             put(f"expr{i}", expr.get("output"))
         elif expr is not None:
             put(f"expr{i}", expr)
+
+    for i, v in enumerate(frame.get("scales", [])):
+        put(f"scale{i}", v)
 
     for name, val in frame.get("global_vars", {}).items():
         put(f"gvar_{name}", val)

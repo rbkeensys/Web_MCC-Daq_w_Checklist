@@ -1,5 +1,5 @@
-const UI_VERSION = "2.0.5";  // 2026-04-03: chk.json auto-snapshot, restore on checklist load, server-side save
-11111111
+const UI_VERSION = "2.1.0";  // 2026-04-03: Serial scale support — TCP reader, config editor, chart/gauge/bars
+
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
 const el = (tag, props = {}, children = []) => {
@@ -327,36 +327,11 @@ let replayMode = null; // null = live, 'paused' = showing full log, 'playing' = 
 function parseCSV(text){
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return {cols:[], rows:[]};
+  // Auto-detect delimiter: tab-separated files are common from the server logger
   const firstLine = lines[0];
   const delim = firstLine.includes('\t') ? '\t' : ',';
-
-  function splitLine(line) {
-    const fields = [];
-    let i = 0;
-    while (i < line.length) {
-      if (line[i] === '"') {
-        let val = ''; i++;
-        while (i < line.length) {
-          if (line[i] === '"' && line[i+1] === '"') { val += '"'; i += 2; }
-          else if (line[i] === '"') { i++; break; }
-          else { val += line[i++]; }
-        }
-        fields.push(val);
-        if (line[i] === delim) i++;
-      } else {
-        const end = line.indexOf(delim, i);
-        if (end === -1) { fields.push(line.slice(i)); i = line.length; }
-        else { fields.push(line.slice(i, end)); i = end + 1; }
-      }
-    }
-    return fields;
-  }
-
-  const cols = splitLine(firstLine).map(s => s.trim());
-  const rows = lines.slice(1).map(line => {
-    const parts = splitLine(line);
-    return parts.map(s => { const t = s.trim(); return t === '' ? 0 : Number(t); });
-  });
+  const cols = firstLine.split(delim).map(s=>s.trim());
+  const rows = lines.slice(1).map(line => line.split(delim).map(v=>Number(v.trim())));
   return { cols, rows };
 }
 
@@ -397,6 +372,8 @@ async function friendlyColNames(cols) {
       return `${pname}_${m[2]}`;
     }
     m = low.match(/^pid(\d+)$/);  if (m) return pidNames[+m[1]]  || col;
+    m = low.match(/^scale(\d+)$/);
+    if (m) { const sc = window.scaleCache?.scales?.[+m[1]]; return (sc&&sc.name) ? sc.name : col; }
     if (col.startsWith('sv_'))   return col.slice(3);
     if (col.startsWith('gvar_')) return col.slice(5);
     return col;
@@ -464,9 +441,8 @@ function makeTickFromRow(cols, row, nameMap){
     if (colLow === 't' || colLow === 'time' || colLow === 'timestamp') {
       obj.t = v;
     } else if (col.startsWith('sv_')) {
+      // Static var: sv_Name
       sv[col.slice(3)] = v;
-    } else if (col.startsWith('gvar_')) {
-      sv[col.slice(5)] = v;
     } else if (colLow.startsWith('ai') && !isNaN(col.slice(2))) {
       ai[Number(col.slice(2))] = v;
     } else if (colLow.startsWith('ao') && !isNaN(col.slice(2))) {
@@ -505,6 +481,11 @@ function makeTickFromRow(cols, row, nameMap){
       // Button variables: bvar_Name
       if (!obj.button_vars) obj.button_vars = {};
       obj.button_vars[col.slice(5)] = v;
+    } else if (/^scale\d+$/.test(colLow)) {
+      // Serial scale: scale0, scale1, ...
+      const idx = Number(colLow.slice(5));
+      if (!obj.scales) obj.scales = [];
+      obj.scales[idx] = v;
     } else if (nameMap) {
       // Try resolving friendly name via the reverse lookup
       const ch = nameMap[colLow];
@@ -633,6 +614,7 @@ function loadAllReplayDataIntoCharts(){
             case 'static':
             case 'global': return msg.static_vars?.[sel.index] ?? 0;
             case 'button': return msg.button_vars?.[sel.index] ?? 0;
+            case 'scale':  return msg.scales?.[sel.index] ?? 0;
             default: return 0;
           }
         });
@@ -810,9 +792,6 @@ function closeReplay(){
   replayIndex = 0;
   replayMode = null;
   replayPaused = false;
-
-  const fnSpan = document.getElementById('replayFileName');
-  if (fnSpan) fnSpan.textContent = '';
 
   // Clear chart buffers and pan state
   chartBuffers.clear();
@@ -1035,34 +1014,9 @@ function hookLogButtons(){
             try{
               const {cols, rows} = parseCSV(rd.result);
               if (!cols.length || !rows.length) throw new Error('No data');
+              // Keep original column names for reliable parsing (ai0, expr7 etc.)
+              // Compute friendly names separately for display only
               const friendlyCols = await friendlyColNames(cols);
-
-              // Derive session name from first row t (Unix epoch → YYYYmmdd_HHMMSS)
-              let sessionName = '';
-              if (rows.length && rows[0][0] > 1e9) {
-                const d = new Date(rows[0][0] * 1000);
-                const p = n => String(n).padStart(2,'0');
-                sessionName = `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-              }
-
-              // Show session name in replay bar
-              const fnSpan = document.getElementById('replayFileName');
-              if (fnSpan) fnSpan.textContent = sessionName ? '📂 ' + sessionName : '';
-
-              // Load check events from server chk.json (primary path)
-              if (sessionName) {
-                try {
-                  const r = await fetch(`/api/logs/${sessionName}/chk`);
-                  if (r.ok) {
-                    const snap = await r.json();
-                    if (snap && Array.isArray(snap.checkEvents) && snap.checkEvents.length) {
-                      window.loadCheckEventsFromLog?.(JSON.stringify(snap.checkEvents));
-                      console.log('[Log] Loaded', snap.checkEvents.length, 'check events from server chk.json');
-                    }
-                  }
-                } catch(e) {}
-              }
-
               startReplay(cols, rows, friendlyCols);
             }catch(e){
               alert('Load failed: '+e.message);
@@ -1105,28 +1059,10 @@ function hookLogButtons(){
     closeLogBtn.addEventListener('click', async ()=>{
       if (!confirm('Close current log and start a new one?')) return;
       try {
-        // Save checklist snapshot to server chk.json before closing
-        const evts = window.checkEvents || [];
-        if (evts.length > 0) {
-          const snapshot = {
-            checklistPath:      window.checklistPath || '',
-            checklistActiveRow: window.checklistActiveRow || 0,
-            checklistReturnRow: window.checklistReturnRow || 0,
-            checklistShowRow:   window.checklistShowRow   || 0,
-            checklistItems:     window.checklistItems || [],
-            checkEvents:        evts
-          };
-          await fetch('/api/check_events/save', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify(snapshot)
-          }).catch(()=>{});
-        }
         const response = await fetch('/api/logs/close', { method: 'POST' });
         const result = await response.json();
         if (result.ok) {
           alert(result.message || 'Log closed and new session started');
-          window.checkEvents = [];
-          window.clearChartMarks?.();
         } else {
           alert(result.message || 'Failed to close log');
         }
@@ -1690,6 +1626,7 @@ function feedTick(msg){
   if (msg.le) state.le = msg.le;
   if (msg.math) state.math = msg.math;
   if (msg.expr) state.expr = msg.expr;
+  if (msg.scales) state.scales = msg.scales;
   if (msg.button_vars) state.buttonVars = {...(state.buttonVars||{}), ...msg.button_vars};
   if (msg.t != null) state.lastT = msg.t;  // for checklist _currentT() in live mode
   if (msg.static_vars && Object.keys(msg.static_vars).length > 0) {
@@ -1720,29 +1657,14 @@ window.addEventListener('checklist-check', (ev) => {
   const detail = ev.detail || {};
   let t;
   if (replayMode !== null && detail.tServer != null) {
+    // Replay: tServer matches the log's t column directly
     t = detail.tServer;
   } else {
+    // Live: use performance.now() which matches chartBuffers timestamps
     t = performance.now() / 1000;
   }
   const label = detail.label || String(detail.itemNum || '');
   window._chartMarks.push({ t, label });
-});
-
-window.addEventListener('checklist-uncheck', (ev) => {
-  const detail = ev.detail || {};
-  const itemNum = String(detail.itemNum || '');
-  window._chartMarks = (window._chartMarks || []).filter(m => m.label !== itemNum);
-});
-
-window.addEventListener('checklist-snapshot-loaded', (ev) => {
-  // Rebuild chart marks from the restored checkEvents
-  const snap = ev.detail || {};
-  const evts = snap.checkEvents || [];
-  window._chartMarks = [];
-  for (const e of evts) {
-    const t = e.tServer ?? e.t;
-    if (t != null) window._chartMarks.push({ t, label: e.label || String(e.itemNum || '') });
-  }
 });
 
 window.addEventListener('tick', (ev)=>{
@@ -1768,6 +1690,7 @@ function wireUI(){
   $('#editConfig')?.addEventListener('click', ()=>openConfigForm());
   $('#editPID')?.addEventListener('click', ()=>openPidForm());
   $('#editMotor')?.addEventListener('click', ()=>openMotorEditor());
+  $('#editScales')?.addEventListener('click', ()=>openScalesEditor());
   $('#editLE')?.addEventListener('click', ()=>openLEEditor());  // Logic Elements
   $('#editMath')?.addEventListener('click', ()=>openMathEditor());  // Math Operators
   $('#editExpr')?.addEventListener('click', ()=>openExpressionEditor());  // Expression Editor
@@ -2551,8 +2474,16 @@ async function createSignalSelector(kind, currentIndex, onChange) {
       select.onchange = () => onChange(select.value);  // Pass name, not index
       
       return select;
+    } else if (kind === 'scale') {
+      try {
+        const data = await (await fetch('/api/scales')).json();
+        window.scaleCache = data;
+        items = (data.scales || []).map((s, i) => ({
+          index: i,
+          name: s.name || `Scale${i}`
+        }));
+      } catch(e) { items = []; }
     } else if (kind === 'button') {
-      // Button variables - scan all DO button widgets for varNames
       const varNames = new Set();
       
       // Scan all pages for DO buttons with outputType='var'
@@ -2753,7 +2684,7 @@ function openWidgetSettings(w) {
         s.displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
         s.displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
 
-        const kindSel = selectEnum(['ai', 'ao', 'do', 'tc', 'pid', 'math', 'expr', 'button', 'static'], s.kind || 'ai', async v => {
+        const kindSel = selectEnum(['ai', 'ao', 'do', 'tc', 'pid', 'math', 'expr', 'button', 'static', 'scale'], s.kind || 'ai', async v => {
           s.kind = v;
           s.name = s.name || labelFor(s);
           // Rebuild selector when kind changes
@@ -3401,13 +3332,6 @@ function widgetOptions(w){
       onclick: () => saveClippedLog(w)
     }, '💾 Save');
 
-    const printBtn = el('button', {
-      className: 'btn',
-      title: 'Print current chart view',
-      style: 'padding:3px 7px;font-size:11px',
-      onclick: () => printChart(w)
-    }, '🖨 Print');
-
     // Store refs so we can update enabled state from draw()
     w._clipBtn = clipBtn;
     w._saveBtn = saveBtn;
@@ -3418,7 +3342,7 @@ function widgetOptions(w){
     saveBtn.disabled = false; // always available; saveClippedLog handles empty case gracefully
     if (!isPaused) { clipBtn.style.opacity='0.4'; }
 
-    opts.push(clipBtn, saveBtn, printBtn);
+    opts.push(clipBtn, saveBtn);
   }
   if (w.type==='bars'){
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
@@ -3435,45 +3359,6 @@ const chartRAFHandles=new Map(); // w.id -> {rafId: number, isRunning: boolean}
 // Pan state stored per widget-id so it survives mountChart re-renders
 const chartPan=new Map(); // w.id -> {dragging,startX,startTFreeze,reDecimateTimer}
 
-
-function printChart(w) {
-  const widgetEl = document.getElementById('w_' + w.id);
-  const canvas = widgetEl?.querySelector('canvas');
-  if (!canvas) { alert('Chart canvas not found.'); return; }
-
-  const title  = w.opts.title || 'Chart';
-  const series = (w.opts.series || []).map(s => labelFor(s)).join('  |  ');
-  const ts     = new Date().toLocaleString();
-  const imgData = canvas.toDataURL('image/png');
-
-  const old = document.getElementById('_chartPrintFrame');
-  if (old) old.remove();
-
-  const html = `<!DOCTYPE html><html><head>
-    <title>${title}</title>
-    <style>
-      *{margin:0;padding:0;box-sizing:border-box;}
-      body{font-family:system-ui,sans-serif;background:#fff;color:#111;padding:12px;}
-      h2{font-size:15px;margin-bottom:3px;}
-      .meta{font-size:10px;color:#555;margin-bottom:8px;}
-      img{width:100%;height:auto;display:block;}
-    </style>
-  </head><body>
-    <h2>${title}</h2>
-    <div class="meta">${series ? 'Series: '+series+'&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}${ts}</div>
-    <img src="${imgData}"/>
-  </body></html>`;
-
-  const iframe = document.createElement('iframe');
-  iframe.id = '_chartPrintFrame';
-  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1200px;height:800px;border:none;';
-  document.body.appendChild(iframe);
-  iframe.contentDocument.open();
-  iframe.contentDocument.write(html);
-  iframe.contentDocument.close();
-  iframe.contentWindow.onload = () => setTimeout(() => { iframe.contentWindow.focus(); iframe.contentWindow.print(); }, 150);
-  setTimeout(() => { if (iframe.contentDocument.readyState === 'complete') { iframe.contentWindow.focus(); iframe.contentWindow.print(); } }, 400);
-}
 
 function mountChart(w, body){
   const legend=el('div',{className:'legend'}); body.append(legend);
@@ -4293,8 +4178,13 @@ function labelFor(sel){
       return `btn:${sel.index}`;
     }
     if(sel.kind==='static' || sel.kind==='global'){
-      // sel.index is the variable name string
       return String(sel.index);
+    }
+    if(sel.kind==='scale'){
+      if(window.scaleCache?.scales?.[sel.index]) {
+        return window.scaleCache.scales[sel.index].name || `Scale${sel.index}`;
+      }
+      return `Scale${sel.index}`;
     }
   }catch{}
   return `${sel.kind.toUpperCase()}${sel.index}`;
@@ -6016,6 +5906,8 @@ function readSelection(sel){
     case 'global':
       // sel.index is the variable name (string)
       return state.static_vars?.[sel.index] ?? 0;
+    case 'scale':
+      return state.scales?.[sel.index|0] ?? 0;
   }
   return 0;
 }
@@ -6924,6 +6816,107 @@ async function openMotorEditor(){
     ]),
     el('div', {style: 'overflow:auto;max-height:60vh'}, formContainer),
     el('div', {style:'display:flex;gap:8px;margin-top:8px'}, [save, saveAs])
+  );
+  showModal(root, ()=>{ renderPage(); });
+}
+
+// ==================== SERIAL SCALES EDITOR ====================
+async function openScalesEditor(){
+  let data = await (await fetch('/api/scales')).json();
+  let scales = data.scales || [];
+  window.scaleCache = data;
+
+  // Fetch available COM ports
+  let availablePorts = [];
+  try {
+    const pr = await fetch('/api/scales/ports');
+    availablePorts = (await pr.json()).ports || [];
+  } catch(e) {}
+
+  const root = el('div', {});
+  root.append(el('h2', {}, 'Serial Scales'));
+  root.append(el('p', {style:'font-size:12px;color:var(--muted);margin-bottom:12px'},
+    'Configure serial scales on COM ports (e.g. Moxa NPort in Real COM mode). Requires pyserial.'));
+
+  const addBtn = el('button', { className:'btn', onclick: () => {
+    const defaultPort = availablePorts[0] || 'COM1';
+    scales.push({ name:`Scale${scales.length}`, port:defaultPort, baud:9600,
+                  bytesize:8, parity:'N', stopbits:1, units:'g', enabled:true });
+    buildForm();
+  }}, '+ Add Scale');
+
+  const formContainer = el('div', {});
+
+  const buildForm = () => {
+    formContainer.innerHTML = '';
+    if (scales.length === 0) {
+      formContainer.append(el('p', {style:'color:var(--muted);margin:12px 0'}, 'No scales configured.'));
+      return;
+    }
+    scales.forEach((sc, i) => {
+      const card = el('div', {style:'border:1px solid #2a3046;border-radius:6px;padding:12px;margin:8px 0;background:#1a2030'});
+      const hdr = el('div', {style:'display:flex;align-items:center;gap:8px;margin-bottom:8px'});
+      hdr.append(
+        el('strong', {}, `Scale ${i}`),
+        el('button', {className:'btn', style:'margin-left:auto;padding:2px 8px;font-size:11px',
+          onclick:()=>{ scales.splice(i,1); buildForm(); }}, '✕ Remove')
+      );
+
+      // COM port: populated dropdown + refresh button
+      const portSel = el('select', {style:'min-width:100px'});
+      const populatePorts = (ports) => {
+        portSel.innerHTML = '';
+        const allPorts = [...new Set([sc.port, ...ports].filter(Boolean))];
+        if (allPorts.length === 0) allPorts.push('COM1');
+        allPorts.forEach(p => portSel.append(el('option', {value:p}, p)));
+        portSel.value = sc.port || allPorts[0];
+        sc.port = portSel.value;
+      };
+      populatePorts(availablePorts);
+      portSel.onchange = () => { sc.port = portSel.value; };
+
+      const refreshBtn = el('button', {
+        className:'btn', style:'padding:2px 7px;font-size:11px',
+        title:'Refresh port list',
+        onclick: async () => {
+          try {
+            const pr = await fetch('/api/scales/ports');
+            const ports = (await pr.json()).ports || [];
+            availablePorts = ports;
+            populatePorts(ports);
+          } catch(e) {}
+        }
+      }, '🔄');
+
+      const portRow = el('div', {style:'display:flex;align-items:center;gap:4px'}, [portSel, refreshBtn]);
+
+      card.append(hdr, tableForm([
+        ['Name',      inputText(sc, 'name')],
+        ['COM Port',  portRow],
+        ['Baud Rate', inputNum(sc, 'baud', 1)],
+        ['Data Bits', inputNum(sc, 'bytesize', 1)],
+        ['Parity',    selectEnum(['N','E','O','M','S'], sc.parity||'N', v=>{ sc.parity=v; })],
+        ['Stop Bits', selectEnum(['1','1.5','2'], String(sc.stopbits||1), v=>{ sc.stopbits=parseFloat(v); })],
+        ['Units',     inputText(sc, 'units')],
+        ['Enabled',   inputChk(sc, 'enabled')]
+      ]));
+      formContainer.append(card);
+    });
+  };
+  buildForm();
+
+  const save = el('button', {className:'btn primary', onclick: async () => {
+    data.scales = scales;
+    const r = await fetch('/api/scales', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+    const res = await r.json();
+    if (res.ok) { window.scaleCache = data; closeModal(); renderPage(); }
+    else alert('Save failed: ' + res.error);
+  }}, '💾 Save');
+
+  root.append(
+    addBtn,
+    el('div', {style:'overflow:auto;max-height:60vh;margin-top:8px'}, formContainer),
+    el('div', {style:'display:flex;gap:8px;margin-top:8px'}, [save])
   );
   showModal(root, ()=>{ renderPage(); });
 }
