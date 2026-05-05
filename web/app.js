@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.0";  // 2026-04-03: Serial scale support — TCP reader, config editor, chart/gauge/bars
+const UI_VERSION = "2.1.4";  // 2026-05-05: Charts now show X-axis time labels at major grid positions; print preview gets White/Dark theme toggle and no longer auto-fires print dialog
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -925,6 +925,326 @@ function saveClippedLog(w) {
   // Reset clip button text now that the file has been saved
   w._clippedData = null;
   if (w._clipBtn) w._clipBtn.textContent = '✂ Clip';
+}
+
+/* ========================================================= */
+/* printChart — open a print-friendly preview window with a   */
+/* theme toggle (Dark / White). Time labels are already baked */
+/* into the live chart via mountChart's draw loop. The user   */
+/* picks the theme, then clicks Print — we do NOT auto-fire   */
+/* the system print dialog so it can't cover the preview.     */
+/* ========================================================= */
+
+/**
+ * Build a "white-themed" version of a dark chart snapshot.
+ * Operates pixel-by-pixel on the source canvas:
+ *   - Desaturated pixels (bg, grid lines, axis text)  → inverted
+ *     (e.g. dark bg → near-white; light gray axis text → dark gray)
+ *   - Saturated pixels (data lines)                   → kept,
+ *     but very-light tints are darkened 25% so they remain
+ *     visible against white when printed on paper.
+ * Saturation threshold of 40 (in 0–255 channel range) cleanly
+ * separates the dark theme's grays from typical line colors
+ * (cyan, orange, green, magenta, yellow).
+ */
+function _buildWhiteVariant(srcCanvas) {
+  const W = srcCanvas.width, H = srcCanvas.height;
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const octx = out.getContext('2d');
+
+  // Copy source pixels into a working canvas we can read from.
+  // (Reading from foreign-origin canvases would taint, but this is
+  // same-origin, so getImageData works.)
+  octx.drawImage(srcCanvas, 0, 0);
+  let imageData;
+  try {
+    imageData = octx.getImageData(0, 0, W, H);
+  } catch (e) {
+    // If pixel access ever fails, fall back to a plain copy with a
+    // white CSS backdrop — caller will still get a usable image.
+    return out;
+  }
+  const px = imageData.data;
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i], g = px[i+1], b = px[i+2];
+    const maxC = Math.max(r, g, b);
+    const minC = Math.min(r, g, b);
+    const sat = maxC - minC;  // chroma proxy; cheaper than full HSL
+
+    if (sat < 40) {
+      // Desaturated → invert (dark↔light swap)
+      px[i]   = 255 - r;
+      px[i+1] = 255 - g;
+      px[i+2] = 255 - b;
+    } else {
+      // Saturated line color → keep, but darken if it's light
+      // (typical paper printing tends to wash out bright tints)
+      if (maxC > 200) {
+        px[i]   = Math.round(r * 0.75);
+        px[i+1] = Math.round(g * 0.75);
+        px[i+2] = Math.round(b * 0.75);
+      }
+    }
+    // alpha (px[i+3]) untouched
+  }
+  octx.putImageData(imageData, 0, 0);
+  return out;
+}
+
+function printChart(w) {
+  if (!w || !w._canvas) {
+    alert('Chart is not mounted yet — try again after it has rendered.');
+    return;
+  }
+
+  // Snapshot the live (dark) canvas as a PNG data URL.
+  let darkImgData;
+  try {
+    darkImgData = w._canvas.toDataURL('image/png');
+  } catch (e) {
+    alert('Failed to capture chart image: ' + e.message);
+    return;
+  }
+
+  // Build a white-theme variant alongside it so the preview can
+  // toggle instantly without round-tripping back to this window.
+  let whiteImgData;
+  try {
+    whiteImgData = _buildWhiteVariant(w._canvas).toDataURL('image/png');
+  } catch (e) {
+    console.warn('[printChart] White variant failed, falling back to dark:', e);
+    whiteImgData = darkImgData;
+  }
+
+  // Gather metadata for the printout
+  const title = (w.opts && w.opts.title) ? w.opts.title : 'Chart';
+  let pageName = '';
+  try {
+    pageName = (state.pages[activePageIndex] && state.pages[activePageIndex].name) || '';
+  } catch (e) {}
+  const sessionLabel = (typeof sessionDir === 'string' && sessionDir) ? sessionDir : '';
+  const printedAt = new Date().toLocaleString();
+
+  // Visible window (replay shows full range; live shows the configured span)
+  let timeRangeText = '';
+  try {
+    if (w.view && Number.isFinite(w.view.span)) {
+      const tEnd = (w.view.paused && Number.isFinite(w.view.tFreeze)) ? w.view.tFreeze : null;
+      if (tEnd !== null) {
+        const tStart = tEnd - w.view.span;
+        timeRangeText = `t = ${tStart.toFixed(2)} → ${tEnd.toFixed(2)} s (span ${w.view.span.toFixed(2)} s)`;
+      } else {
+        timeRangeText = `Span ${w.view.span.toFixed(2)} s (live)`;
+      }
+    }
+  } catch (e) {}
+
+  // Y range
+  let yRangeText = '';
+  try {
+    if (w.opts && w.opts.scale === 'manual' &&
+        Number.isFinite(w.opts.min) && Number.isFinite(w.opts.max)) {
+      yRangeText = `Y: ${w.opts.min} → ${w.opts.max}`;
+    } else {
+      yRangeText = 'Y: auto';
+    }
+  } catch (e) {}
+
+  // Build legend HTML by walking the configured series + their colors
+  // (mirrors the on-screen legend so colors are guaranteed to match).
+  const series = (w.opts && w.opts.series) || [];
+  const customColors = series.map(s => s && s.color);
+  const legendItems = series.map((s, si) => {
+    const color = colorFor(si, customColors);
+    let label = (s && s.name && s.name.length) ? s.name : '';
+    if (!label) {
+      try { label = labelFor(s); } catch (e) { label = `Series ${si}`; }
+    }
+    label = String(label)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<div class="legend-item">
+              <span class="swatch" style="background:${color}"></span>
+              <span class="label">${label}</span>
+            </div>`;
+  }).join('');
+
+  const win = window.open('', '_blank', 'width=900,height=700');
+  if (!win) {
+    alert('Could not open print window — check your popup blocker.');
+    return;
+  }
+
+  const escTitle = String(title)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const escPage = String(pageName)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const escSession = String(sessionLabel)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  // Theme is applied via a body class so both screen preview and the
+  // printed page pick it up identically.
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Print — ${escTitle}</title>
+<style>
+  @page { margin: 0.5in; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 16px;
+    color: #111;
+    background: #fff;
+  }
+  /* Dark theme: only used when the user picks "Dark background" */
+  body.theme-dark {
+    color: #e6e6e6;
+    background: #0f1115;
+  }
+  body.theme-dark .meta { color: #b8bccb; }
+  body.theme-dark .meta b { color: #e6e6e6; }
+  body.theme-dark .legend-item { color: #e6e6e6; }
+  body.theme-dark .legend { border-top-color: #2a2f44; }
+  body.theme-dark .footer {
+    color: #7a7f8f;
+    border-top-color: #2a2f44;
+  }
+
+  h1 { font-size: 18px; margin: 0 0 4px 0; }
+  .meta {
+    font-size: 11px;
+    color: #444;
+    margin-bottom: 12px;
+    line-height: 1.5;
+  }
+  .meta .row { display: block; }
+  .meta b { color: #111; }
+
+  .chart-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 65vh;
+    border: 1px solid #ccc;
+  }
+  body.theme-dark .chart-img { border-color: #2a2f44; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid #ddd;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #111;
+  }
+  .swatch {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    border: 1px solid #888;
+  }
+  .footer {
+    margin-top: 16px;
+    padding-top: 6px;
+    border-top: 1px solid #eee;
+    font-size: 10px;
+    color: #777;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .toolbar {
+    margin-bottom: 12px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .toolbar label {
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 8px;
+  }
+  .toolbar button {
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+
+  /* Hide toolbar on the actual printed page */
+  @media print {
+    body { padding: 0; }
+    .chart-img { max-height: none; }
+    .no-print { display: none !important; }
+  }
+</style>
+</head>
+<body class="theme-white">
+  <div class="toolbar no-print">
+    <strong style="margin-right:8px">Background:</strong>
+    <label><input type="radio" name="theme" value="white" checked> White</label>
+    <label><input type="radio" name="theme" value="dark"> Dark</label>
+    <span style="flex:1"></span>
+    <button id="printBtn">🖨 Print</button>
+    <button onclick="window.close()">Close</button>
+  </div>
+  <h1>${escTitle}</h1>
+  <div class="meta">
+    ${escPage    ? `<span class="row"><b>Page:</b> ${escPage}</span>` : ''}
+    ${escSession ? `<span class="row"><b>Session:</b> ${escSession}</span>` : ''}
+    ${timeRangeText ? `<span class="row"><b>Time:</b> ${timeRangeText}</span>` : ''}
+    ${yRangeText    ? `<span class="row"><b>${yRangeText}</b></span>` : ''}
+    <span class="row"><b>Printed:</b> ${printedAt}</span>
+  </div>
+  <img class="chart-img" id="chartImg" alt="${escTitle}">
+  ${legendItems ? `<div class="legend">${legendItems}</div>` : ''}
+  <div class="footer">
+    <span>MCC Web Control</span>
+    <span>${printedAt}</span>
+  </div>
+<script>
+  // Two pre-rendered variants are embedded; the toggle just swaps src.
+  // No round-trip back to the parent window required.
+  var imgWhite = ${JSON.stringify(whiteImgData)};
+  var imgDark  = ${JSON.stringify(darkImgData)};
+  var img = document.getElementById('chartImg');
+  function applyTheme(t) {
+    document.body.className = (t === 'dark') ? 'theme-dark' : 'theme-white';
+    img.src = (t === 'dark') ? imgDark : imgWhite;
+  }
+  applyTheme('white');  // default
+
+  Array.prototype.forEach.call(
+    document.querySelectorAll('input[name=theme]'),
+    function(r){ r.addEventListener('change', function(){ applyTheme(r.value); }); }
+  );
+
+  // User must explicitly click Print — we do NOT auto-fire the system
+  // print dialog so it can't cover the preview while the user is still
+  // choosing a theme.
+  document.getElementById('printBtn').addEventListener('click', function(){
+    window.focus();
+    window.print();
+  });
+<\/script>
+</body>
+</html>`;
+
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
 }
 
 /* ========================================================= */
@@ -3342,7 +3662,16 @@ function widgetOptions(w){
     saveBtn.disabled = false; // always available; saveClippedLog handles empty case gracefully
     if (!isPaused) { clipBtn.style.opacity='0.4'; }
 
-    opts.push(clipBtn, saveBtn);
+    // Print button — captures the chart canvas + legend and opens a print
+    // dialog in a new window. Works in both live and replay mode.
+    const printBtn = el('button', {
+      className: 'btn',
+      title: 'Print this chart',
+      style: 'padding:3px 7px;font-size:11px',
+      onclick: () => printChart(w)
+    }, '🖨 Print');
+
+    opts.push(clipBtn, saveBtn, printBtn);
   }
   if (w.type==='bars'){
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
@@ -3364,6 +3693,11 @@ function mountChart(w, body){
   const legend=el('div',{className:'legend'}); body.append(legend);
   const canvas=el('canvas'); body.append(canvas);
   const ctx=canvas.getContext('2d');
+
+  // Stash refs so the Print button (and any other external action) can grab
+  // the rendered image and the legend HTML.
+  w._canvas = canvas;
+  w._legend = legend;
 
   // Initialize view state
   w.view = w.view || { span: (window.GLOBAL_BUFFER_SPAN || 10), paused: false, tFreeze: 0 };
@@ -3723,6 +4057,34 @@ function mountChart(w, body){
       const x = plotL + (gx - t0) * xscale;
       ctx.beginPath(); ctx.moveTo(x, plotT); ctx.lineTo(x, plotB); ctx.stroke();
     }
+
+    // ---- X-axis time labels (at major grid positions) ----
+    // Adaptive precision: tight zooms get more decimals, wide spans get fewer.
+    // gridDt is the spacing between major grid lines, in seconds.
+    let xDecimals;
+    if      (gridDt >= 60)  xDecimals = 0;
+    else if (gridDt >= 1)   xDecimals = 1;
+    else if (gridDt >= 0.1) xDecimals = 2;
+    else                    xDecimals = 3;
+
+    ctx.fillStyle = '#7a8199';
+    ctx.font = '11px system-ui';
+    ctx.textBaseline = 'top';
+    const labelY = plotB + 4;  // sits in the 30px bottom margin
+    for (let gx = firstGrid; gx <= t1 + 1e-6; gx += gridDt){
+      const x = plotL + (gx - t0) * xscale;
+      // Edge-aware alignment so labels at the extremes don't clip
+      if (x < plotL + 18) {
+        ctx.textAlign = 'left';
+      } else if (x > plotR - 18) {
+        ctx.textAlign = 'right';
+      } else {
+        ctx.textAlign = 'center';
+      }
+      ctx.fillText(gx.toFixed(xDecimals), x, labelY);
+    }
+    ctx.textAlign = 'left';   // restore default for downstream draws
+    ctx.textBaseline = 'alphabetic';
 
     // ---- Y grid ----
     const yGridLines = Math.max(2, Math.min(20, w.opts.yGridLines || 5));
@@ -6821,17 +7183,66 @@ async function openMotorEditor(){
 }
 
 // ==================== SERIAL SCALES EDITOR ====================
+// FIX 2026-05-05: /api/scales/ports returns [{port, description, hwid}, ...]
+// (same shape as /api/motors/ports), but the editor previously treated each
+// entry as a string — causing "[object Object]" entries in the dropdown.
+// Now: normalize to {port, description}; render "COM1 - <description>" but
+// store only the port string. Also repair any stale [object Object] / non-string
+// values left in scales.json by previous broken versions.
+
+// Normalize one port entry from the API into { port, description } with strings.
+function _scalesNormalizePort(p) {
+  if (typeof p === 'string') return { port: p, description: '' };
+  if (p && typeof p === 'object') {
+    const port = (typeof p.port === 'string') ? p.port : '';
+    const description = (typeof p.description === 'string') ? p.description : '';
+    return { port, description };
+  }
+  return { port: '', description: '' };
+}
+
+// Normalize an array of port entries; drop anything without a real port string.
+function _scalesNormalizePorts(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(_scalesNormalizePort).filter(p => p.port);
+}
+
+// Repair a scale's port field if it was corrupted by previous versions.
+// Returns a clean string. Falls back to first available port, then 'COM1'.
+function _scalesRepairPort(rawPort, availablePorts) {
+  if (typeof rawPort === 'string' && rawPort && rawPort !== '[object Object]') {
+    return rawPort;
+  }
+  // rawPort might be a dict (legacy save), null, or "[object Object]" string
+  if (rawPort && typeof rawPort === 'object' && typeof rawPort.port === 'string') {
+    return rawPort.port;
+  }
+  if (availablePorts.length > 0) return availablePorts[0].port;
+  return 'COM1';
+}
+
 async function openScalesEditor(){
   let data = await (await fetch('/api/scales')).json();
   let scales = data.scales || [];
   window.scaleCache = data;
 
-  // Fetch available COM ports
+  // Fetch available COM ports — returns [{port, description, hwid}, ...]
   let availablePorts = [];
   try {
     const pr = await fetch('/api/scales/ports');
-    availablePorts = (await pr.json()).ports || [];
-  } catch(e) {}
+    const pd = await pr.json();
+    availablePorts = _scalesNormalizePorts(pd.ports);
+  } catch(e) {
+    console.warn('[Scales] Failed to fetch ports:', e);
+  }
+
+  // Repair any pre-existing scales whose .port got saved as a dict or
+  // "[object Object]" string by the previous broken editor version.
+  // Also default any missing offset field to 0 (added in v2.1.2).
+  scales.forEach(sc => {
+    sc.port = _scalesRepairPort(sc.port, availablePorts);
+    if (typeof sc.offset !== 'number' || !Number.isFinite(sc.offset)) sc.offset = 0;
+  });
 
   const root = el('div', {});
   root.append(el('h2', {}, 'Serial Scales'));
@@ -6839,9 +7250,9 @@ async function openScalesEditor(){
     'Configure serial scales on COM ports (e.g. Moxa NPort in Real COM mode). Requires pyserial.'));
 
   const addBtn = el('button', { className:'btn', onclick: () => {
-    const defaultPort = availablePorts[0] || 'COM1';
+    const defaultPort = availablePorts.length > 0 ? availablePorts[0].port : 'COM1';
     scales.push({ name:`Scale${scales.length}`, port:defaultPort, baud:9600,
-                  bytesize:8, parity:'N', stopbits:1, units:'g', enabled:true });
+                  bytesize:8, parity:'N', stopbits:1, units:'g', offset:0, enabled:true });
     buildForm();
   }}, '+ Add Scale');
 
@@ -6863,14 +7274,33 @@ async function openScalesEditor(){
       );
 
       // COM port: populated dropdown + refresh button
-      const portSel = el('select', {style:'min-width:100px'});
+      const portSel = el('select', {style:'min-width:180px'});
       const populatePorts = (ports) => {
+        // ports is array of {port, description}
         portSel.innerHTML = '';
-        const allPorts = [...new Set([sc.port, ...ports].filter(Boolean))];
-        if (allPorts.length === 0) allPorts.push('COM1');
-        allPorts.forEach(p => portSel.append(el('option', {value:p}, p)));
-        portSel.value = sc.port || allPorts[0];
-        sc.port = portSel.value;
+
+        // Build list of unique port strings, preserving sc.port if it's not in
+        // the detected list (e.g. NPort offline at the moment of editing).
+        const detectedStrings = ports.map(p => p.port);
+        const merged = [];
+        if (sc.port && !detectedStrings.includes(sc.port)) {
+          merged.push({ port: sc.port, description: '(saved, not currently detected)' });
+        }
+        ports.forEach(p => merged.push(p));
+        if (merged.length === 0) merged.push({ port:'COM1', description:'' });
+
+        merged.forEach(p => {
+          const label = p.description ? `${p.port} - ${p.description}` : p.port;
+          portSel.append(el('option', {value: p.port}, label));
+        });
+
+        // Set selection — only assign sc.port from a real string value.
+        if (sc.port && merged.some(p => p.port === sc.port)) {
+          portSel.value = sc.port;
+        } else {
+          portSel.value = merged[0].port;
+          sc.port = portSel.value;
+        }
       };
       populatePorts(availablePorts);
       portSel.onchange = () => { sc.port = portSel.value; };
@@ -6881,10 +7311,12 @@ async function openScalesEditor(){
         onclick: async () => {
           try {
             const pr = await fetch('/api/scales/ports');
-            const ports = (await pr.json()).ports || [];
-            availablePorts = ports;
-            populatePorts(ports);
-          } catch(e) {}
+            const pd = await pr.json();
+            availablePorts = _scalesNormalizePorts(pd.ports);
+            populatePorts(availablePorts);
+          } catch(e) {
+            console.warn('[Scales] Refresh ports failed:', e);
+          }
         }
       }, '🔄');
 
@@ -6898,6 +7330,7 @@ async function openScalesEditor(){
         ['Parity',    selectEnum(['N','E','O','M','S'], sc.parity||'N', v=>{ sc.parity=v; })],
         ['Stop Bits', selectEnum(['1','1.5','2'], String(sc.stopbits||1), v=>{ sc.stopbits=parseFloat(v); })],
         ['Units',     inputText(sc, 'units')],
+        ['Offset',    inputNum(sc, 'offset', 0.01)],
         ['Enabled',   inputChk(sc, 'enabled')]
       ]));
       formContainer.append(card);
@@ -6906,6 +7339,8 @@ async function openScalesEditor(){
   buildForm();
 
   const save = el('button', {className:'btn primary', onclick: async () => {
+    // Final safety pass: ensure every scale has a string port before saving.
+    scales.forEach(sc => { sc.port = _scalesRepairPort(sc.port, availablePorts); });
     data.scales = scales;
     const r = await fetch('/api/scales', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
     const res = await r.json();
@@ -7980,19 +8415,226 @@ async function openZeroAIDialog() {
     className: 'btn',
     onclick: () => {
       clearInterval(updateInterval);
+      if (typeof scaleUpdateInterval !== 'undefined') clearInterval(scaleUpdateInterval);
       closeModal();
     }
   }, 'Cancel');
-  
-  root.append(
+
+  // ============================================================
+  // SCALES TARE SECTION — only render if scales are configured
+  // ============================================================
+  let scalesData = null;
+  try {
+    scalesData = await (await fetch('/api/scales')).json();
+  } catch(e) {
+    console.warn('[Zero/Tare] Failed to fetch scales config:', e);
+  }
+  const scales = (scalesData && Array.isArray(scalesData.scales)) ? scalesData.scales : [];
+  const hasScales = scales.length > 0;
+
+  let scalesSection = null;
+  let scaleUpdateInterval = null;
+  const selectedScales = new Set();
+  let tareBtn = null;
+
+  if (hasScales) {
+    // Title above the dialog already says "Zero AI" — change it to reflect both
+    title.textContent = 'Zero / Tare Channels';
+    subtitle.textContent = 'Select AI channels to zero, and/or scale channels to tare.';
+
+    scalesSection = el('div', {style: 'margin-top:24px;padding-top:16px;border-top:1px solid #2a3046'});
+
+    scalesSection.append(
+      el('h3', {style: 'margin:0 0 8px 0'}, 'Tare Serial Scales'),
+      el('p', {style: 'color:#a8b3cf;font-size:12px;margin:0 0 12px 0'},
+        'Average each scale\u2019s raw reading and set its offset so that the displayed value matches the target value.')
+    );
+
+    // Tare config row (averaging period + target)
+    const tareConfigRow = el('div', {
+      style: 'margin:8px 0 12px 0;padding:12px;background:#1a1d2e;border-radius:6px;display:flex;gap:20px;flex-wrap:wrap'
+    });
+
+    const tareAvgInput = el('input', {
+      type: 'number',
+      min: 0.1, step: 0.1, value: 1.0,
+      style: 'width:80px;margin-left:8px'
+    });
+
+    const tareTargetInput = el('input', {
+      type: 'number', step: 'any', value: 0.0,
+      style: 'width:120px;margin-left:8px'
+    });
+
+    tareConfigRow.append(
+      el('div', {style: 'flex:1;min-width:280px'}, [
+        el('label', {}, ['Averaging Period (sec): ', tareAvgInput]),
+        el('div', {style: 'color:#7a7f8f;font-size:10px;margin-top:4px;margin-left:8px'},
+          'Time to sample raw scale readings')
+      ]),
+      el('div', {style: 'flex:1;min-width:280px'}, [
+        el('label', {}, ['Target Value: ', tareTargetInput]),
+        el('div', {style: 'color:#7a7f8f;font-size:10px;margin-top:4px;margin-left:8px'},
+          'Displayed value after tare (e.g., 0.0 for zero, 100.0 for a known weight)')
+      ])
+    );
+    scalesSection.append(tareConfigRow);
+
+    // Scale channel list
+    const scaleList = el('div', {style: 'max-height:280px;overflow:auto'});
+    scales.forEach((sc, idx) => {
+      const row = el('div', {
+        style: 'padding:8px;margin:4px 0;background:#1a1d2e;border-radius:4px;display:flex;align-items:center;gap:12px'
+      });
+      const cb = el('input', {
+        type: 'checkbox',
+        id: `tare_scale_${idx}`,
+        onchange: e => {
+          if (e.target.checked) selectedScales.add(idx);
+          else selectedScales.delete(idx);
+        }
+      });
+      const lbl = el('label', {
+        htmlFor: `tare_scale_${idx}`,
+        style: 'flex:1;cursor:pointer;display:flex;align-items:center;gap:8px'
+      });
+      const name = el('span', {style: 'font-weight:600;min-width:150px'},
+                     sc.name || `Scale${idx}`);
+      const units = sc.units ? ` ${sc.units}` : '';
+      const rawVal = el('span', {
+        id: `tare_raw_${idx}`,
+        style: 'color:#7aa2f7;font-family:monospace;min-width:120px',
+        title: 'Raw reading (un-tared)'
+      }, 'Loading...');
+      const dispVal = el('span', {
+        id: `tare_disp_${idx}`,
+        style: 'color:#a8f0a8;font-family:monospace;min-width:120px',
+        title: 'Currently displayed (tared) value'
+      }, '');
+      const offsetSpan = el('span', {
+        id: `tare_off_${idx}`,
+        style: 'color:#9094a1;font-family:monospace;font-size:11px',
+        title: 'Current offset'
+      }, '');
+
+      lbl.append(cb, name,
+        el('span', {style: 'color:#7a7f8f;font-size:10px'}, 'raw:'),
+        rawVal,
+        el('span', {style: 'color:#7a7f8f;font-size:10px'}, 'disp:'),
+        dispVal,
+        offsetSpan,
+        units ? el('span', {style: 'color:#9094a1'}, units) : ''
+      );
+      row.append(lbl);
+      scaleList.append(row);
+    });
+    scalesSection.append(scaleList);
+
+    // Live updates: poll both raw and tared values 5x/sec.
+    // Raw via dedicated endpoint; tared comes from telemetry stream (state.scales).
+    const refreshScaleDisplay = async () => {
+      try {
+        const rr = await fetch('/api/scales/values/raw');
+        const rd = await rr.json();
+        const rawVals = rd.values || [];
+        scales.forEach((sc, idx) => {
+          const rawSpan = document.getElementById(`tare_raw_${idx}`);
+          const dispSpan = document.getElementById(`tare_disp_${idx}`);
+          const offSpan = document.getElementById(`tare_off_${idx}`);
+          if (!rawSpan) return;
+          const raw = rawVals[idx];
+          const off = (typeof sc.offset === 'number') ? sc.offset : 0;
+          if (Number.isFinite(raw)) {
+            rawSpan.textContent = raw.toFixed(4);
+            if (dispSpan) dispSpan.textContent = (raw + off).toFixed(4);
+          } else {
+            rawSpan.textContent = '---';
+            if (dispSpan) dispSpan.textContent = '---';
+          }
+          if (offSpan) offSpan.textContent = `(off: ${off.toFixed(3)})`;
+        });
+      } catch(e) {}
+    };
+    refreshScaleDisplay();
+    scaleUpdateInterval = setInterval(refreshScaleDisplay, 200);
+
+    // Tare button
+    tareBtn = el('button', {
+      className: 'btn primary',
+      onclick: async () => {
+        if (selectedScales.size === 0) {
+          alert('Please select at least one scale to tare.');
+          return;
+        }
+        const avgPeriod = parseFloat(tareAvgInput.value) || 1.0;
+        const targetValue = parseFloat(tareTargetInput.value) || 0.0;
+        const channelsToTare = Array.from(selectedScales);
+
+        tareBtn.disabled = true;
+        tareBtn.textContent = 'Averaging...';
+        try {
+          const resp = await fetch('/api/tare_scales', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+              channels: channelsToTare,
+              averaging_period: avgPeriod,
+              target_value: targetValue
+            })
+          });
+          const result = await resp.json();
+          if (result.ok) {
+            const lines = result.offsets.map(o =>
+              `${o.name}: raw_avg=${o.raw_avg.toFixed(4)}, ` +
+              `offset ${o.old_offset.toFixed(4)} \u2192 ${o.new_offset.toFixed(4)} ` +
+              `(displayed=${o.displayed.toFixed(4)})`
+            ).join('\n');
+            alert(`Successfully tared ${channelsToTare.length} scale(s)!\n` +
+                  `Target value: ${targetValue}\n\n${lines}`);
+            // Update the local scales array so the live display picks up new offsets
+            result.offsets.forEach(o => {
+              const idx = o.channel;
+              if (idx < scales.length) scales[idx].offset = o.new_offset;
+            });
+            // Clear selection and re-enable
+            selectedScales.clear();
+            scales.forEach((_, idx) => {
+              const cb = document.getElementById(`tare_scale_${idx}`);
+              if (cb) cb.checked = false;
+            });
+            tareBtn.disabled = false;
+            tareBtn.textContent = '\u2696\ufe0f Tare Selected Scales';
+          } else {
+            alert('Failed to tare: ' + (result.error || 'Unknown error'));
+            tareBtn.disabled = false;
+            tareBtn.textContent = '\u2696\ufe0f Tare Selected Scales';
+          }
+        } catch(e) {
+          alert('Network error: ' + e.message);
+          tareBtn.disabled = false;
+          tareBtn.textContent = '\u2696\ufe0f Tare Selected Scales';
+        }
+      }
+    }, '\u2696\ufe0f Tare Selected Scales');
+
+    scalesSection.append(
+      el('div', {className: 'row', style: 'gap:8px;margin-top:12px'}, [tareBtn])
+    );
+  }
+
+  // Build the dialog: AI section first, optional scales section, then footer buttons.
+  const children = [
     title,
     subtitle,
     configRow,
-    el('h3', {style: 'margin:20px 0 12px 0'}, 'Select Channels:'),
-    channelList,
-    el('div', {className: 'row', style: 'gap:8px;margin-top:20px'}, [zeroBtn, cancelBtn])
-  );
-  
+    el('h3', {style: 'margin:20px 0 12px 0'}, hasScales ? 'AI Channels:' : 'Select Channels:'),
+    channelList
+  ];
+  if (scalesSection) children.push(scalesSection);
+  children.push(el('div', {className: 'row', style: 'gap:8px;margin-top:20px'}, [zeroBtn, cancelBtn]));
+
+  root.append(...children);
+
   showModal(root);
 }
 

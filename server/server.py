@@ -31,8 +31,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.0"
-__updated__ = "2026-03-27"
+__version__ = "2.8.1"
+__updated__ = "2026-05-05"  # Added scale tare (offset) — /api/tare_scales endpoint, offset applied in telemetry
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # DLL versioning for hot-reload
@@ -365,7 +365,32 @@ class SerialScaleManager:
         self.save(path)
 
     def get_values(self) -> list[float]:
+        """Return offset-applied (tared) scale values for telemetry consumers.
+        offset semantics: displayed = raw + offset (so a tare to target T from
+        raw R produces offset = T - R; future raw X displays as X + offset)."""
+        out = []
+        for i, raw in enumerate(self._values):
+            cfg = self._scales[i] if i < len(self._scales) else {}
+            try:
+                off = float(cfg.get("offset", 0.0))
+            except (TypeError, ValueError):
+                off = 0.0
+            out.append(raw + off)
+        return out
+
+    def get_raw_values(self) -> list[float]:
+        """Return un-tared raw values (used by the tare endpoint to compute
+        new offsets without feedback)."""
         return list(self._values)
+
+    def set_offsets(self, offsets: dict[int, float], path: Path):
+        """Update offset on selected scale indices and persist scales.json.
+        Does not restart reader threads (offset is applied at read-out, not
+        in the serial reader itself)."""
+        for idx, val in offsets.items():
+            if 0 <= idx < len(self._scales):
+                self._scales[idx]["offset"] = float(val)
+        self.save(path)
 
     def _restart_all(self):
         for ev in self._stop_events:
@@ -1886,6 +1911,97 @@ def get_scale_ports():
 @app.get("/api/scales/values")
 def get_scale_values():
     return {"values": scale_mgr.get_values()}
+
+@app.get("/api/scales/values/raw")
+def get_scale_values_raw():
+    """Return un-tared raw values — used by the tare dialog so the user sees
+    the actual sensor reading while choosing a target."""
+    return {"values": scale_mgr.get_raw_values()}
+
+@app.post("/api/tare_scales")
+async def tare_scales(req: dict):
+    """Tare/balance serial scale channels by averaging raw readings and
+    setting an offset so that displayed value = target_value.
+
+    Request body:
+      channels: list[int]               — scale indices to tare
+      averaging_period: float (seconds) — how long to sample (default 1.0)
+      target_value: float               — desired displayed value (default 0.0)
+
+    Offset semantics: displayed = raw + offset. To make displayed == target,
+    offset = target - raw_average.
+    """
+    channels = req.get("channels", [])
+    averaging_period = float(req.get("averaging_period", 1.0))
+    target_value = float(req.get("target_value", 0.0))
+
+    if not channels:
+        return {"ok": False, "error": "No channels specified"}
+
+    num_scales = len(scale_mgr.get_raw_values())
+    for ch in channels:
+        if ch < 0 or ch >= num_scales:
+            return {"ok": False, "error": f"Invalid scale index: {ch}"}
+
+    # Sample the latest raw value at 10 Hz over the averaging window.
+    # Serial scales typically emit 1-10 Hz; oversampling at 100 Hz would just
+    # produce duplicate readings without improving the average.
+    sample_rate = 10.0
+    num_samples = max(1, int(averaging_period * sample_rate))
+    samples: dict[int, list[float]] = {ch: [] for ch in channels}
+
+    print(f"[Tare Scales] Collecting {num_samples} samples over {averaging_period}s "
+          f"for scales {channels}, target={target_value}")
+
+    last_seen: dict[int, float | None] = {ch: None for ch in channels}
+    for _ in range(num_samples):
+        raw = scale_mgr.get_raw_values()
+        for ch in channels:
+            if ch < len(raw):
+                v = raw[ch]
+                # Only record when the value has changed (avoid weighting stale reads).
+                # If it never changes during the window, last_seen carries the single
+                # value forward and the average is well-defined.
+                if v != last_seen[ch]:
+                    samples[ch].append(v)
+                    last_seen[ch] = v
+        await asyncio.sleep(1.0 / sample_rate)
+
+    offsets_applied: list[dict] = []
+    new_offsets: dict[int, float] = {}
+    for ch in channels:
+        if not samples[ch]:
+            # No fresh samples observed — fall back to the current value if any
+            cur = scale_mgr.get_raw_values()
+            if ch < len(cur):
+                samples[ch] = [cur[ch]]
+            else:
+                return {"ok": False, "error": f"No samples for scale {ch}"}
+
+        avg = sum(samples[ch]) / len(samples[ch])
+        cfg = scale_mgr._scales[ch] if ch < len(scale_mgr._scales) else {}
+        try:
+            old_offset = float(cfg.get("offset", 0.0))
+        except (TypeError, ValueError):
+            old_offset = 0.0
+        new_offset = target_value - avg
+        new_offsets[ch] = new_offset
+        offsets_applied.append({
+            "channel": ch,
+            "name": cfg.get("name", f"Scale{ch}"),
+            "raw_avg": avg,
+            "old_offset": old_offset,
+            "new_offset": new_offset,
+            "displayed": avg + new_offset,  # should equal target_value
+            "samples_used": len(samples[ch])
+        })
+        print(f"[Tare Scales] Scale{ch} ({cfg.get('name', '')}): "
+              f"raw_avg={avg:.4f}, old_offset={old_offset:.4f}, "
+              f"new_offset={new_offset:.4f} -> target={target_value}")
+
+    scale_mgr.set_offsets(new_offsets, SCALES_PATH)
+    print(f"[Tare Scales] Saved offsets to {SCALES_PATH}")
+    return {"ok": True, "offsets": offsets_applied}
 
 @app.post("/api/check_events")
 async def post_check_events(req: Request):
