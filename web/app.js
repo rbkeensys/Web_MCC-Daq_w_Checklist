@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.4";  // 2026-05-05: Charts now show X-axis time labels at major grid positions; print preview gets White/Dark theme toggle and no longer auto-fires print dialog
+const UI_VERSION = "2.1.6";  // 2026-05-05: Gauge Tare button moved to header (was floating in middle); per-series target lines for gauges and bars with custom color; bar value text adopts target color when target is set
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -1084,6 +1084,12 @@ function printChart(w) {
 
   // Theme is applied via a body class so both screen preview and the
   // printed page pick it up identically.
+  //
+  // CRITICAL: text on the printed page uses pt (a physical unit) rather
+  // than px, so the print engine can't accidentally shrink it. Earlier
+  // versions used px which can render at unexpected sizes when the
+  // browser's print fit-to-page logic kicks in — the chart looked huge
+  // and all the text proportionally tiny.
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -1091,8 +1097,19 @@ function printChart(w) {
 <title>Print — ${escTitle}</title>
 <style>
   @page { margin: 0.5in; }
+
+  /* Force the print engine to honor backgrounds/colors exactly,
+     so the dark theme (if chosen) actually prints with its dark
+     background instead of being stripped to plain white. */
+  html, body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
   body {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 11pt;             /* explicit size so children inherit a known base */
+    line-height: 1.4;
     margin: 0;
     padding: 16px;
     color: #111;
@@ -1112,9 +1129,9 @@ function printChart(w) {
     border-top-color: #2a2f44;
   }
 
-  h1 { font-size: 18px; margin: 0 0 4px 0; }
+  h1 { font-size: 16pt; margin: 0 0 4px 0; }
   .meta {
-    font-size: 11px;
+    font-size: 9pt;
     color: #444;
     margin-bottom: 12px;
     line-height: 1.5;
@@ -1122,9 +1139,15 @@ function printChart(w) {
   .meta .row { display: block; }
   .meta b { color: #111; }
 
+  /* Chart image:
+     - width:100% with max-width keeps it from overflowing the print column.
+     - On the screen we cap height with vh; on print we cap with a fixed
+       physical size so the chart leaves room for the legend + footer
+       on the same page (Letter portrait, content area ~10in tall). */
   .chart-img {
     display: block;
     width: 100%;
+    max-width: 100%;
     height: auto;
     max-height: 65vh;
     border: 1px solid #ccc;
@@ -1143,21 +1166,22 @@ function printChart(w) {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: 10pt;
     color: #111;
   }
   .swatch {
     display: inline-block;
-    width: 14px;
-    height: 14px;
+    width: 12pt;
+    height: 12pt;
     border-radius: 2px;
     border: 1px solid #888;
+    flex-shrink: 0;
   }
   .footer {
     margin-top: 16px;
     padding-top: 6px;
     border-top: 1px solid #eee;
-    font-size: 10px;
+    font-size: 8pt;
     color: #777;
     display: flex;
     justify-content: space-between;
@@ -1183,10 +1207,12 @@ function printChart(w) {
     cursor: pointer;
   }
 
-  /* Hide toolbar on the actual printed page */
+  /* Print-time overrides. Sizes in pt above already survive the print
+     pipeline; here we just remove screen-only padding and restore the
+     image to its natural print size. */
   @media print {
     body { padding: 0; }
-    .chart-img { max-height: none; }
+    .chart-img { max-height: 6.5in; }   /* leave room for header + legend on Letter */
     .no-print { display: none !important; }
   }
 </style>
@@ -3112,7 +3138,72 @@ function openWidgetSettings(w) {
         } else {
           row.append(el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Color:'), colorBtn);
         }
-        
+
+        // ----- Target line (gauges and bars only) -----
+        // Each series can have an optional target value drawn as a redline
+        // marker on the gauge arc / bar column. The target color is per-series
+        // and defaults to the app's chart-cursor red (#ff4d4d).
+        if (w.type === 'gauge' || w.type === 'bars') {
+          const TARGET_DEFAULT_COLOR = '#ff4d4d';
+          const targetEnabled = (typeof s.target === 'number' && Number.isFinite(s.target));
+
+          const targetChk = el('input', {
+            type: 'checkbox',
+            checked: targetEnabled,
+            title: 'Show target line for this series'
+          });
+          const targetVal = el('input', {
+            type: 'number',
+            step: 'any',
+            value: targetEnabled ? s.target : 0,
+            disabled: !targetEnabled,
+            style: 'width:70px',
+            title: 'Target value (in display units, after scale & offset)'
+          });
+          const targetColorBtn = el('div', {
+            style: `width:24px;height:22px;border-radius:4px;border:1px solid var(--border);cursor:pointer;background:${s.targetColor || TARGET_DEFAULT_COLOR};opacity:${targetEnabled ? 1 : 0.4}`,
+            title: 'Target line color'
+          });
+
+          targetChk.onchange = () => {
+            if (targetChk.checked) {
+              const v = parseFloat(targetVal.value);
+              s.target = Number.isFinite(v) ? v : 0;
+              if (!s.targetColor) s.targetColor = TARGET_DEFAULT_COLOR;
+              targetVal.disabled = false;
+              targetColorBtn.style.opacity = 1;
+            } else {
+              delete s.target;
+              targetVal.disabled = true;
+              targetColorBtn.style.opacity = 0.4;
+            }
+            saveLayout();
+          };
+          targetVal.oninput = () => {
+            const v = parseFloat(targetVal.value);
+            if (Number.isFinite(v)) {
+              s.target = v;
+              saveLayout();
+            }
+          };
+          targetColorBtn.onclick = (e) => {
+            e.stopPropagation();
+            const cur = s.targetColor || TARGET_DEFAULT_COLOR;
+            createColorPicker(cur, (newColor) => {
+              s.targetColor = newColor;
+              targetColorBtn.style.background = newColor;
+              saveLayout();
+            });
+          };
+
+          row.append(
+            el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Target:'),
+            targetChk,
+            targetVal,
+            targetColorBtn
+          );
+        }
+
         list.append(row);
       });
     }
@@ -3565,6 +3656,18 @@ function widgetOptions(w){
     const sync=()=>{ w.opts.min=parseFloat(min.value)||0; w.opts.max=parseFloat(max.value)||0; };
     min.oninput=sync; max.oninput=sync;
     opts.push(el('span',{},'Scale:'), sel, el('span',{},'Min:'), min, el('span',{},'Max:'), max);
+
+    // Gauge-only: place the Tare button on this header line so it sits
+    // alongside (and resizes with) the Scale/Min/Max controls instead of
+    // floating in the middle of the gauge graphic.
+    if (w.type === 'gauge' && w.opts.scaleOp) {
+      const tareBtn = el('button', {
+        className: 'btn',
+        style: 'font-size:11px;padding:4px 8px;background:#4a9eff;color:#0d1117'
+      }, 'Tare');
+      tareBtn.onclick = () => performGaugeTare(w, tareBtn);
+      opts.push(tareBtn);
+    }
   }
   if (w.type==='chart'){
     const span=el('input',{type:'number', value:w.opts.span, min:1, step:1, style:'width:70px'});
@@ -4553,6 +4656,57 @@ function labelFor(sel){
 }
 
 /* ------------------------------- gauge ---------------------------------- */
+
+// Tare logic, factored out of mountGauge so the header-bar Tare button
+// (created in widgetOptions) can call it without needing to dig into the
+// gauge body. The button itself is passed in so we can disable/relabel
+// it during the network round-trip.
+async function performGaugeTare(w, btn) {
+  if (!w || !w.opts) return;
+  if (btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Taring...';
+  }
+  try {
+    const needles = w.opts.needles || [];
+    const aiChannels = [];
+    needles.forEach(needle => {
+      if (needle.kind === 'ai' && Number.isInteger(needle.index)) {
+        aiChannels.push(needle.index);
+      }
+    });
+    if (aiChannels.length === 0) {
+      alert('No AI channels to tare in this gauge');
+      return;
+    }
+    const resp = await fetch('/api/zero_ai', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        channels: aiChannels,
+        averaging_period: 2.0,
+        balance_to_value: 0.0
+      })
+    });
+    const result = await resp.json();
+    if (result.ok) {
+      delete w.opts.tareOffsets;
+      alert(`Tared ${aiChannels.length} channel(s). Config offsets updated!`);
+    } else {
+      alert('Tare failed: ' + (result.error || 'Unknown error'));
+    }
+  } catch (e) {
+    console.error('[GAUGE] Tare error:', e);
+    alert('Tare failed: ' + e.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Tare';
+    }
+  }
+}
+
 function mountGauge(w, body){
   // Set default decimal places
   if (w.opts.decimals === undefined) w.opts.decimals = 3;
@@ -4573,69 +4727,13 @@ function mountGauge(w, body){
     })
   ]);
   body.append(decimalsControl);
-  
-  // Add Tare button if scaleOp is enabled
-  if (w.opts.scaleOp) {
-    const tareBtn = el('button', {
-      className: 'btn',
-      style: 'position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:11px;padding:4px 8px;z-index:10;background:#4a9eff;color:#0d1117',
-      onclick: async () => {
-        if (tareBtn.disabled) return;
-        
-        tareBtn.disabled = true;
-        tareBtn.textContent = 'Taring...';
-        
-        try {
-          // Get AI channels to zero
-          const needles = w.opts.needles || [];
-          const aiChannels = [];
-          
-          needles.forEach(needle => {
-            if (needle.kind === 'ai' && Number.isInteger(needle.index)) {
-              aiChannels.push(needle.index);
-            }
-          });
-          
-          if (aiChannels.length === 0) {
-            alert('No AI channels to tare in this gauge');
-            return;
-          }
-          
-          // Call server zero API to update config offsets
-          const resp = await fetch('/api/zero_ai', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-              channels: aiChannels,
-              averaging_period: 2.0,
-              balance_to_value: 0.0
-            })
-          });
-          
-          const result = await resp.json();
-          
-          if (result.ok) {
-            // Clear widget-level tare offsets since config is updated
-            delete w.opts.tareOffsets;
-            // No need to save layout - config is already updated on server
-            
-            alert(`Tared ${aiChannels.length} channel(s). Config offsets updated!`);
-          } else {
-            alert('Tare failed: ' + (result.error || 'Unknown error'));
-          }
-          
-        } catch(e) {
-          console.error('[GAUGE] Tare error:', e);
-          alert('Tare failed: ' + e.message);
-        } finally {
-          tareBtn.disabled = false;
-          tareBtn.textContent = 'Tare';
-        }
-      }
-    }, 'Tare');
-    body.append(tareBtn);
-  }
-  
+
+  // NOTE: the Tare button used to live here as an absolutely-positioned
+  // overlay on the gauge body. As of 2.1.6 it's been moved into the
+  // widget header (widgetOptions) so it sits in line with the
+  // Scale/Min/Max controls and resizes naturally with them. The actual
+  // tare logic is in performGaugeTare(w) below.
+
   const legend=el('div',{className:'legend'}); body.append(legend);
   const canvas=el('canvas'); body.append(canvas);
   const ctx=canvas.getContext('2d');
@@ -4744,6 +4842,29 @@ function mountGauge(w, body){
       ctx.lineTo(cx + (rInner + band*0.9)*nx, cy - (rInner + band*0.9)*ny);
       ctx.stroke();
 
+      // ----- Target marker (optional, per-series) -----
+      // Drawn as a short radial line in the outer band at the target's
+      // angle, in the user-chosen target color (defaults to red). Only
+      // rendered when target is in the visible scale range so it doesn't
+      // get clamped to 0 or 1 and lie about its position.
+      if (typeof s.target === 'number' && Number.isFinite(s.target) &&
+          s.target >= lo && s.target <= hi) {
+        const tFrac = (s.target - lo) / span;
+        const tAng = Math.PI + (0 - Math.PI) * tFrac;
+        const tx = Math.cos(tAng), ty = Math.sin(tAng);
+        const targetColor = s.targetColor || '#ff4d4d';
+        const r0 = rInner + 1;
+        const r1 = rOuter - 1;
+        ctx.save();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = targetColor;
+        ctx.beginPath();
+        ctx.moveTo(cx + r0 * tx, cy - r0 * ty);
+        ctx.lineTo(cx + r1 * tx, cy - r1 * ty);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       const lab = s.name && s.name.length ? s.name : labelFor(s);
       const decimals = w.opts.decimals !== undefined ? w.opts.decimals : 3;
       legend.append(el('div',{className:'item'},[
@@ -4850,6 +4971,27 @@ function mountBars(w, body){
       ctx.fillStyle = colorFor(idx, customColors);
       ctx.fillRect(x - barW / 2, y, barW, h);
 
+      // ----- Target line (optional, per-series) -----
+      // Drawn as a horizontal line across this bar's column at the target's
+      // Y position, in the user-chosen target color. Extends slightly beyond
+      // the bar edges (barW * 0.6 each side) so it's clearly readable as a
+      // target marker rather than just another bar element.
+      const hasTarget = (typeof sel.target === 'number' && Number.isFinite(sel.target));
+      if (hasTarget && sel.target >= lo && sel.target <= hi) {
+        const tt = (sel.target - lo) / span;
+        const targetY = plotB - tt * (plotB - plotT);
+        const targetColor = sel.targetColor || '#ff4d4d';
+        const halfWidth = barW * 0.6;
+        ctx.save();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = targetColor;
+        ctx.beginPath();
+        ctx.moveTo(x - halfWidth, targetY);
+        ctx.lineTo(x + halfWidth, targetY);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // Draw series label at bottom
       const label = sel.name || labelFor(sel);
       if (label) {
@@ -4858,9 +5000,11 @@ function mountBars(w, body){
         ctx.fillText(label, x, plotB + 2);
       }
 
-      // Draw value on top of bar
+      // Draw value on top of bar — colored in the target color when a
+      // target is set, so the relationship between the bar value and the
+      // target redline is visually obvious.
       if (Number.isFinite(displayValue)) {
-        ctx.fillStyle = '#e6e6e6';
+        ctx.fillStyle = hasTarget ? (sel.targetColor || '#ff4d4d') : '#e6e6e6';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.fillText(displayValue.toFixed(2), x, y - 2);

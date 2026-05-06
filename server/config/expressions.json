@@ -1,3 +1,118 @@
 {
-  "expressions": []
+  "expressions": [
+    {
+      "name": "Spark",
+      "enabled": true,
+      "expression": "count    = static.sparkCount\nbutton   = buttonVars.sparkON\nselfBuzz = buttonVars.selfBuzz\narm      = buttonVars.armIgnition\nsparkon  = 0\n\nbutton   = button or static.ignition\n\nif arm == 1 then\n if selfBuzz == 1 and button == 1 then\n    \"DO:Spark\" = 1\n endif\n\n if selfBuzz == 0 and button == 1 and arm == 1 then\n    sparkon = 1\n    if \"DO:Spark\" == 1 then\n       \"DO:Spark\" = 0\n    else\n       \"DO:Spark\" = 1\n    endif\n endif\nelse\n \"DO:Spark\" = 0\nendif\n\nif button == 0 then\n   \"DO:Spark\" = 0\nendif    \n\ncount = static.sparkCount\nspark = \"DO:Spark\"\n\"DO:Igniter\" = sparkon\nsparkon\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "LOX_PID_En",
+      "enabled": true,
+      "expression": "// Write your expression here\nbuttonVars.LOXPIDEn",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "Fuel_PID_En",
+      "enabled": true,
+      "expression": "// Write your expression here\nbuttonVars.FuelPIDEn",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "PressureSet",
+      "enabled": true,
+      "expression": "// Desired mini-tank pressure \nstatic.pressureSetPoint = 50\nstatic.fuelDelta = 0\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "LOXFuelOutletControl",
+      "enabled": true,
+      "expression": "// Controls individually and together the LOX and Fuel outlet valves\n\nrunState  = static.testState\nLOXOut    = buttonVars.LOXOutEn \nFuelOut   = buttonVars.FuelOutEn\nfillTank  = buttonVars.FillRunTank\ntimedFuel = buttonVars.TimedFuelOut or buttonVars.mixedOut\ntimedLOX  = buttonVars.TimedLOXOut or buttonVars.mixedOut\n\nlockout = static.startLockout \n\nif ( runState ) then\n    lockout = 1\nelse \n    lockout = 0\nendif\nstatic.startLockout = lockout\n\ngoLOX  = 0\ngoFuel = 0\n\nif ( runState > 0 ) then\n    if (static.LOXOut) then\n        goLOX = 1\n    endif\n    if (static.FuelOut) then\n        goFuel = 1\n    endif\nelse \n    if (LOXOut or fillTank or timedLOX) and lockout==0 then\n        goLOX = 1\n    endif\n    if (FuelOut or fillTank or timedFuel) and lockout==0 then\n        goFuel = 1\n    endif\nendif\n        \n\"DO:LOXOUT\"  = goLOX\n\"DO:FuelOUT\" = goFuel\n\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "LOX Pressurization Controller",
+      "enabled": true,
+      "expression": "// LOX Press Controller\nsetP       = static.pressureSetPoint\nmanualVent = buttonVars.manualLOXVent or buttonVars.ventBoth\nLOXMaxP    = static.LOXFillTankMaxP\n\nenable = buttonVars.LOXPIDEn\n\nLOXPress = \"AI:LOX P\"\n\nLOX_Press_ON = 0\nLOX_Vent_ON  = 0\nif ((enable == 1 ) and (LOXPress < setP)) then\n    LOX_Press_ON = 1\n    LOX_Vent_ON  = 0\nelse if (( enable == 1 ) and ( LOXPress > LOXMaxP)) then\n    LOX_Press_ON = 0\n    LOX_Vent_ON  = 1\nendif\n\nif (manualVent != 0) then\n    LOX_Press_ON = 0\nendif\n\nstatic.LOXVent  = LOX_Vent_ON\nstatic.LOXPress = LOX_Press_ON\n\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "Fuel Pressurization Controller",
+      "enabled": true,
+      "expression": "// Run Tank Press Controller\nregDelta   = static.FuelDelta\nsetP       = static.pressureSetPoint + regDelta\nmanualVent = buttonVars.manualFuelVent or buttonVars.ventBoth\nFuelMaxP   = static.FuelFillTankMaxP\n\nenable = buttonVars.FuelPIDEn\n\nFuelPress = \"AI:Fuel P\"\n\nFuel_Press_ON = 0\nFuel_Vent_ON  = 0\n\nif ((enable == 1 ) and (FuelPress < setP)) then\n    Fuel_Press_ON = 1\n    Fuel_Vent_ON  = 0\nelse if ((enable == 1) and (FuelPress > FuelMaxP)) then\n    Fuel_Press_ON = 0\n    Fuel_Vent_ON  = 1\nendif\n\nif (manualVent != 0) then\n    Fuel_Press_ON = 0\nendif\n\nstatic.FuelVent  = Fuel_Vent_ON\nstatic.FuelPress = Fuel_Press_ON\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "Test Sequencer",
+      "enabled": true,
+      "expression": "// Test Sequencer\n// Uses a state machine to step through \n// shut off mixing, purge, mix on, pause, ignite\n// run a set time, mix off, purge - done\n\nstatic.testState      //idle\n\nstatic.deltaTime     \nstatic.preStartTime    = 500\nstatic.prePurgeTime    = 1500\nstatic.prePurgeOverlap = 0\nstatic.ignitionTime    = 600\nstatic.postVentTime    = 2000\nstatic.postBleedTime   = 2000\nstatic.postPurgeTime   = 4000\nstatic.abort1PurgeTime = 1000\nstatic.abort2PurgeTime = 4000\nstatic.pressTimeOut    = 2000\nstatic.runTime         = 3000\nstatic.overlapRun\n\nstatic.ignition      // these output to control expressions that take in buttons or sequence output\nstatic.LOXVent  \nstatic.FuelVent \nstatic.Purge    \nstatic.LOXOut   \nstatic.FuelOut  \n\nstartTest = buttonVars.runTest\nabort     = buttonVars.abort or buttonVars.purge\npurgeIn   = buttonVars.purge\n\nTankPress = \"AI:Ch P\"\nsetP      = static.runTankSetPoint\n\nIDLE           = 0\nPRESTART       = 1  // condition on, press off\nPREPURGE       = 2  // purge on, wait timed amount\nSTARTPRESS     = 3  // purge off, press on wait for press >= set point\nIGNITION       = 4  // fire \nRUN            = 5  // wait run time, goes to POSTPURGE\nPOSTPURGE      = 6  // purge, goes through engine\nABORTPOSTVENT  = 7  // vent only, depress tank\nABORTPOSTBLEED = 8  // purge + bleed, clear line\nABORTPOSTPURGE = 9  // purge, goes through engine\nABORT          = 10  // go through the abort post events\n\nstate     = static.testState\ndeltaT    = static.deltaTime\n\npurge   = 0\nvent    = 0\nbleed   = 0\nigniton = 0\n\nif ( (abort or buttonVars.purge) and (state) and (state < ABORT) ) then\n    static.deltaTime = 0\n    static.overlapRun = 0\n    state = ABORT\nendif\n\nif ( state == IDLE ) then    // IDLE\n    if ( startTest > 0 ) then\n        static.deltaTime = 0\n        static.overlapRun = 0\n        state=PRESTART\n    endif\nelse if ( state == PRESTART ) then\n    mixon = 0\n    if ( deltaT > static.preStartTime ) then\n        static.deltaTime = 0\n        state = PREPURGE\n    endif\nelse if ( state == PREPURGE ) then\n    purge = 1\n    if ( deltaT > static.prePurgeTime ) then\n        state = STARTPRESS\n        static.deltaTime = 0\n        purge = 0\n    endif\nelse if ( state == STARTPRESS) then\n    if ( TankPress >= setP ) then\n        state = IGNITION\n        static.deltaTime = 0\n    endif\n    if ( deltaT > static.pressTimeOut ) then\n        state = ABORT\n        static.deltaTime = 0\n    endif\nelse if ( state == IGNITION ) then\n    ignition = 1\n    if ( deltaT > static.ignitionTime ) then\n        static.deltaTime = 0\n        state = RUN\n    endif\nelse if ( state == RUN ) then\n    if ( deltaT > static.runTime ) then\n        static.deltaTime = 0\n        state = POSTPURGE\n    endif\nelse if ( state == POSTPURGE ) then\n    vent  = 0\n    purge = 1\n    bleed = 0\n    if ( deltaT > static.postPurgeTime ) then\n        static.deltaTime = 0\n        state = IDLE\n    endif\nelse if ( state == ABORTPOSTVENT ) then\n    vent  = 1\n    bleed = 0\n    purge = 0\n    if ( deltaT > static.postVentTime ) then\n        static.deltaTime = 0\n        state = ABORTPOSTBLEED\n    endif\nelse if ( state == ABORTPOSTBLEED ) then\n    vent  = 0\n    purge = 1\n    bleed = 1\n    if ( deltaT > static.postBleedTime ) then\n        static.deltaTime = 0\n        state = ABORTPOSTPURGE\n    endif\nelse if ( state == ABORTPOSTPURGE ) then\n    vent  = 1\n    purge = 1\n    bleed = 0\n    if ( deltaT > static.postPurgeTime ) then\n        static.deltaTime = 0\n        state = IDLE\n    endif\nelse if ( state == ABORT ) then\n    static.deltaTime = 0\n    state = ABORTPOSTVENT\nendif\n\nif ( state > 0 ) then\n    static.deltaTime = static.deltaTime + 7.215  //Valid for 160Hz update rate\nendif\n\nstatic.ignition    = ignition\nstatic.Purge       = purge\nstatic.RunTankVent = vent\nstatic.doBleed     = bleed\n\nstatic.testState = state\n\n\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "Vent Control",
+      "enabled": true,
+      "expression": "// LOX and Fuel Vent Control\n\nLOXMan   = buttonVars.manualLOXVent\nFuelMan  = buttonVars.manualFuelVent\nLOXAuto  = static.LOXVent\nFuelAuto = static.FuelVent\nbothMan  = buttonVars.ventBoth\nsetP     = static.pressureSetPoint\nLOXMaxP  = static.LOXFillTankMaxP\nFuelMaxP = static.FuelFillTankMaxP\n\nLOXinputs  = LOXMan or LOXAuto or bothMan\nFuelinputs = FuelMan or FuelAuto or bothMan\n\nif LOXinputs or ( \"AI:LOX P\" > LOXMaxP) then\n    \"DO:LOXVent\" = 1\nelse\n    \"DO:LOXVent\" = 0\nendif\n\nif Fuelinputs or ( \"AI:Fuel P\" > FuelMaxP) then\n    \"DO:FuelVent\" = 1\nelse\n    \"DO:FuelVent\" = 0\nendif",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "Purge Control",
+      "enabled": true,
+      "expression": "// Manual and Auto Purge Valve Controller\n\nmanPurge     = buttonVars.purge\nautoPurge    = static.Purge\npressRunTank = static.pressRunTank\nstate        = static.testState\n\nif ((manPurge or autoPurge) or pressRunTank) then\n    purge = 1\n    \"DO:PURGE\" = purge\nelse\n    purge = 0\n    \"DO:PURGE\" = purge\nendif\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "sparkRef",
+      "enabled": true,
+      "expression": "// Write your expression here\nsparkRef1 = static.ignition\nsparkRef2 = buttonVars.sparkON\nsparkRef = sparkRef1 or sparkRef2",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "Line Condition LOX",
+      "enabled": true,
+      "expression": "// Line Conditioning\n// Conditioning valve on\n// LOX Prop Out ON\n\nlineConditioning  = buttonVars.lineConditionLOX\nlineConditionFuel = buttonVars.lineConditionFuel\nconditionBoth     = buttonVars.conditionBoth\n\nrunState  = static.testState\nLOXOut    = buttonVars.LOXOutEn \n\ngoLOX  = 0\nbleed  = 0\n\nif ( runState >= 1 and runState <=2 ) then   // PRESTART on, test sequencer in control\n    goLOX = 0  // prop out off, this is purging before a run\n    bleed = 1  // bleed valve\nelse \n    if (LOXOut or lineConditioning) then\n        goLOX  = 1\n        bleed = 1  // bleed valve on\n    endif\nendif\n       \nstatic.LOXdoBleed = bleed\nif lineConditioning and (lineConditionFuel == 0 or conditionBoth) then\n    \"DO:LOXOUT\" = goLOX\nendif",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "RunTankPressurization",
+      "enabled": true,
+      "expression": "// Run Tank Press Controller\nstatic.runTankSetPoint = 50.0\nstatic.pressRunTank\nstatic.runTankPressLockout\n\ndepress     = buttonVars.depressRunTank\nautoDepress = static.RunTankVent\nmanualVent  = depress\nstate       = static.testState\nTankPress   = \"AI:Ch P\"\nsetP        = static.runTankSetPoint\nlockOut     = static.runPressTankLockout\nRunTankMaxP = static.RunTankMaxP\n\nif state >= 3 and state < 6 then  // PURGE complete, going to PRESSURIZE\n    enable = 1\nelse\n    enable = buttonVars.RunTankPressEn \nendif\n\nif depress or lockOut then\n    enable = 0\n    lockOut = 1\n    static.runPressTankLockout = lockOut\nendif\n\nif depress == 0 and buttonVars.RunTankPressEn == 0 then\n    lockOut = 0\n    static.runPressTankLockout = lockOut\nendif\n\nRun_Press_ON = 0\nRun_Vent_ON  = 0\n\nif (enable  and (TankPress < setP)) then\n    Tank_Press_ON = 1\n    Tank_Vent_ON  = 0\n    \"DO:PURGE\"    = Tank_Press_ON\nendif\n\nif ( depress ) then\n    Tank_Press_ON = 0\n    Tank_Vent_ON  = 1\n    \"DO:PURGE\"    = Tank_Press_ON\nendif\n\nif (TankPress > RunTankMaxP) then\n    Tank_Press_ON    = 0\n    Tank_Vent_ON     = 1\n    \"DO:RunTankVent\" = Tank_Vent_ON\nendif\n\nstatic.pressRunTank = Tank_Press_ON\n\n\"DO:RunTankVent\" = Tank_Vent_ON or autoDepress\nif Tank_Press_ON then\n    \"DO:PURGE\"       = Tank_Press_ON\n    static.FueldoBleed = 0 //line condition valve OFF\n    static.LOXdoBleed  = 0\nendif\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "Line Condition Fuel",
+      "enabled": true,
+      "expression": "// Line Conditioning FUEL ONLY\n// Conditioning valve on\n// Prop Out ON\n\nlineConditioning = buttonVars.lineConditionFuel\nlineConditionLOX = buttonVars.lineConditionLOX\nconditionBoth    = buttonVars.conditionBoth\n\nrunState  = static.testState\nFuelOut   = buttonVars.FuelOutEn\n\ngoFuel = 0\nbleed  = 0\n\nif ( runState >= 1 and runState <=2 ) then   // PRESTART on, test sequencer in control\n    goFuel = 0  // prop out off, this is purging before a run\n    bleed  = 1  // bleed valve\nelse \n    if (FuelOut or lineConditioning) then\n        goFuel  = 1\n        bleed = 1\n    endif\nendif\n \nstatic.FueldoBleed = bleed\nif lineConditioning and (lineConditionLOX == 0 or conditionBoth) then\n    \"DO:FuelOUT\"   = goFuel\nendif\n   ",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "Bleed Control",
+      "enabled": true,
+      "expression": "// Control the bleed valve\n\ndoBleed = static.LOXdoBleed or static.FueldoBleed or static.doBleed\noutOnly = buttonVars.TimedLOXOut or buttonVars.TimedFuelOut\n\nif doBleed and outOnly == 0 then\n    \"DO:LineBleed\" = 1\nelse\n    \"DO:LineBleed\" = 0\nendif",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "Press Valve Control",
+      "enabled": true,
+      "expression": "// LOX and Fuel Press Valve Control\n\nLOXAuto  = static.LOXPress\nFuelAuto = static.FuelPress\nsetP     = static.pressureSetPoint\n\nif LOXAuto != 0 then\n    \"DO:LOX Press\" = 1\nelse\n    \"DO:LOX Press\" = 0\nendif\n\nif FuelAuto != 0 then\n    \"DO:Fuel Press\" = 1\nelse\n    \"DO:Fuel Press\" = 0\nendif\n\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "LOXFillTankMAX_P",
+      "enabled": true,
+      "expression": "// LOX fill tank maximum P before auto venting\nstatic.LOXFillTankMaxP = 60",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "FuelFillTankMAX_P",
+      "enabled": true,
+      "expression": "// Fuel fill tank maximum P before auto venting\nstatic.FuelFillTankMaxP = 60",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "RunTankMaxP",
+      "enabled": true,
+      "expression": "// Run tank maximum pressure\nstatic.RunTankMaxP = 55",
+      "execution_rate_hz": null
+    }
+  ]
 }

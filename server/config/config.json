@@ -5,23 +5,23 @@
       "sampleRateHz": 160.0,
       "blockSize": 128,
       "aiMode": "SE",
-      "enabled": false,
+      "enabled": true,
       "analogs": [
         {
           "name": "LOX P",
           "slope": 25.0,
-          "offset": -12.951812744140625,
+          "offset": -12.968673706054688,
           "cutoffHz": 0.2,
           "units": "psi",
-          "include": false
+          "include": true
         },
         {
           "name": "Fuel P",
           "slope": 37.5,
-          "offset": -18.734893798828125,
+          "offset": -18.777809143066406,
           "cutoffHz": 0.2,
           "units": "psi",
-          "include": false
+          "include": true
         },
         {
           "name": "Unused1",
@@ -29,7 +29,7 @@
           "offset": 0.0,
           "cutoffHz": 1.0,
           "units": "psi",
-          "include": false
+          "include": true
         },
         {
           "name": "Unused2",
@@ -37,7 +37,7 @@
           "offset": 0.0,
           "cutoffHz": 1.0,
           "units": "psi",
-          "include": false
+          "include": true
         },
         {
           "name": "Ch P",
@@ -45,7 +45,7 @@
           "offset": -28.106427676688227,
           "cutoffHz": 0.2,
           "units": "psi",
-          "include": false
+          "include": true
         },
         {
           "name": "AI5",
@@ -78,7 +78,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -87,7 +87,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -96,7 +96,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -105,7 +105,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -152,7 +152,7 @@
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
-          "include": false,
+          "include": true,
           "enable_gate": true,
           "enable_kind": "le",
           "enable_index": 0
@@ -162,7 +162,7 @@
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
-          "include": false,
+          "include": true,
           "enable_gate": false,
           "enable_kind": "do",
           "enable_index": 0
@@ -174,15 +174,15 @@
       "sampleRateHz": 160.0,
       "blockSize": 128,
       "aiMode": "SE",
-      "enabled": false,
+      "enabled": true,
       "analogs": [
         {
           "name": "Scale",
           "slope": 123.39041416348212,
-          "offset": -251.63729247328513,
+          "offset": -251.79958882492227,
           "cutoffHz": 1.0,
           "units": "grams",
-          "include": false
+          "include": true
         },
         {
           "name": "AI1",
@@ -247,7 +247,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -256,7 +256,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -265,7 +265,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -274,7 +274,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -283,7 +283,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -292,7 +292,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -301,7 +301,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         },
@@ -310,7 +310,7 @@
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle"
         }
@@ -321,7 +321,7 @@
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
-          "include": false,
+          "include": true,
           "enable_gate": false,
           "enable_kind": "le",
           "enable_index": 0
@@ -331,7 +331,7 @@
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
-          "include": false,
+          "include": true,
           "enable_gate": false,
           "enable_kind": "do",
           "enable_index": 0
