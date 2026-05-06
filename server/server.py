@@ -31,8 +31,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.2"
-__updated__ = "2026-05-06"  # Fixed scale read latency: ser.read(256) → ser.in_waiting pattern; was throttling 9 Hz scale data to 2-3 Hz at UI
+__version__ = "2.8.3"
+__updated__ = "2026-05-06"  # Removed scale lines/sec debug print after confirming fix
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # DLL versioning for hot-reload
@@ -447,10 +447,6 @@ class SerialScaleManager:
                 ser.open()
                 print(f"[Scale{idx}] Opened {port}")
                 buf = ""
-                # Rate counter — prints lines/sec every ~5 s so you can verify
-                # the reader is keeping up with the scale's native output rate.
-                rate_lines = 0
-                rate_t0 = time.monotonic()
                 while not stop.is_set():
                     # Read pattern: drain whatever's in the OS serial buffer
                     # immediately (no waiting), and only block on a 1-byte read
@@ -474,14 +470,6 @@ class SerialScaleManager:
                         v = self._parse_line(line)
                         if v is not None:
                             self._values[idx] = v
-                            rate_lines += 1
-                    # Print rate every ~5 s
-                    now = time.monotonic()
-                    if now - rate_t0 >= 5.0:
-                        rate_hz = rate_lines / (now - rate_t0)
-                        print(f"[Scale{idx}] {rate_hz:.1f} lines/sec on {port}")
-                        rate_lines = 0
-                        rate_t0 = now
             except Exception as e:
                 print(f"[Scale{idx}] Error on {port}: {e}")
             finally:
