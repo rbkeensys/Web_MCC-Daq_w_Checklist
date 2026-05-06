@@ -31,8 +31,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.1"
-__updated__ = "2026-05-05"  # Added scale tare (offset) — /api/tare_scales endpoint, offset applied in telemetry
+__version__ = "2.8.2"
+__updated__ = "2026-05-06"  # Fixed scale read latency: ser.read(256) → ser.in_waiting pattern; was throttling 9 Hz scale data to 2-3 Hz at UI
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # DLL versioning for hot-reload
@@ -447,8 +447,25 @@ class SerialScaleManager:
                 ser.open()
                 print(f"[Scale{idx}] Opened {port}")
                 buf = ""
+                # Rate counter — prints lines/sec every ~5 s so you can verify
+                # the reader is keeping up with the scale's native output rate.
+                rate_lines = 0
+                rate_t0 = time.monotonic()
                 while not stop.is_set():
-                    chunk = ser.read(256).decode("ascii", errors="replace")
+                    # Read pattern: drain whatever's in the OS serial buffer
+                    # immediately (no waiting), and only block on a 1-byte read
+                    # when nothing is available. The previous ser.read(256) call
+                    # would wait for either 256 bytes OR the 1-second timeout,
+                    # and a 9 Hz scale at 9 bytes/line takes ~3 s to fill 256 b
+                    # — so reads were timing out and lines were being processed
+                    # in big bursts where intermediate values get overwritten in
+                    # _values[idx] before the broadcast loop sees them. Hence
+                    # the user-visible 2-3 Hz instead of the actual 9 Hz.
+                    n_avail = ser.in_waiting
+                    if n_avail > 0:
+                        chunk = ser.read(n_avail).decode("ascii", errors="replace")
+                    else:
+                        chunk = ser.read(1).decode("ascii", errors="replace")
                     if not chunk:
                         continue
                     buf += chunk
@@ -457,6 +474,14 @@ class SerialScaleManager:
                         v = self._parse_line(line)
                         if v is not None:
                             self._values[idx] = v
+                            rate_lines += 1
+                    # Print rate every ~5 s
+                    now = time.monotonic()
+                    if now - rate_t0 >= 5.0:
+                        rate_hz = rate_lines / (now - rate_t0)
+                        print(f"[Scale{idx}] {rate_hz:.1f} lines/sec on {port}")
+                        rate_lines = 0
+                        rate_t0 = now
             except Exception as e:
                 print(f"[Scale{idx}] Error on {port}: {e}")
             finally:
