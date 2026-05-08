@@ -6,8 +6,8 @@ Version: 1.1.0 (2026-03-16)
 - Zero code changes to expr_engine.py (backwards compatible)
 - Execution_rate_hz for per-expression decimation
 """
-__version__ = "1.1.0"
-__updated__ = "2026-03-16"
+__version__ = "1.2.0"
+__updated__ = "2026-05-06"  # Added Scale: signal-type to syntax checker
 
 import json
 from pathlib import Path
@@ -234,7 +234,7 @@ class ExpressionManager:
         
         # Extract signal references from expression
         import re
-        signal_pattern = r'"(AI|AO|TC|DO|PID|LE|Math|Expr):([^"]+)"'
+        signal_pattern = r'"(AI|AO|TC|DO|PID|LE|Math|Expr|Scale):([^"]+)"'
         matches = re.findall(signal_pattern, expression, re.IGNORECASE)
         
         # Build available signal names
@@ -246,17 +246,20 @@ class ExpressionManager:
             'PID': [item['name'] for item in signal_state.get('pid_list', [])],
             'LE': [item['name'] for item in signal_state.get('le_list', [])],
             'Math': [item['name'] for item in signal_state.get('math_list', [])],
-            'Expr': [item['name'] for item in signal_state.get('expr_list', [])]
+            'Expr': [item['name'] for item in signal_state.get('expr_list', [])],
+            'Scale': [item['name'] for item in signal_state.get('scale_list', [])]
         }
         
         # Validate each signal reference
         for sig_type, sig_name in matches:
             sig_type_proper = sig_type.upper()
-            # Normalize Math and Expr
+            # Normalize Math, Expr, and Scale (they're case-mixed in dict keys)
             if sig_type_proper == 'MATH':
                 sig_type_proper = 'Math'
             elif sig_type_proper == 'EXPR':
                 sig_type_proper = 'Expr'
+            elif sig_type_proper == 'SCALE':
+                sig_type_proper = 'Scale'
             
             available = available_signals.get(sig_type_proper, [])
             

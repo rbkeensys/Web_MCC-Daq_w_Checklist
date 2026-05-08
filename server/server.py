@@ -31,8 +31,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.3"
-__updated__ = "2026-05-06"  # Removed scale lines/sec debug print after confirming fix
+__version__ = "2.8.4"
+__updated__ = "2026-05-06"  # Scale: signal-type integration in expressions (Python + C++)
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # DLL versioning for hot-reload
@@ -568,6 +568,10 @@ def should_recompile_cpp_expressions():
     
     # Also check PID file
     pid_mtime = PID_PATH.stat().st_mtime if PID_PATH.exists() else 0
+
+    # Also check scales file — adding/removing/renaming a scale changes
+    # scale_map and therefore the generated C++ "scale[i]" references.
+    scales_mtime = SCALES_PATH.stat().st_mtime if SCALES_PATH.exists() else 0
     
     if expr_mtime > dll_mtime:
         log.info("[CPP-EXPR] expressions.json modified, will recompile")
@@ -575,6 +579,10 @@ def should_recompile_cpp_expressions():
     
     if pid_mtime > dll_mtime:
         log.info("[CPP-EXPR] pid.json modified, will recompile")
+        return True
+
+    if scales_mtime > dll_mtime:
+        log.info("[CPP-EXPR] scales.json modified, will recompile")
         return True
     
     return False
@@ -597,7 +605,8 @@ def compile_cpp_expressions(dll_name: str = "compiled/expressions.dll"):
             success = expr_to_cpp.compile_all_expressions(
                 str(CFG_DIR / "expressions.json"),
                 str(CFG_PATH),
-                "compiled"
+                "compiled",
+                scales_file=str(SCALES_PATH)
             )
             
             if not success:
@@ -994,7 +1003,8 @@ async def acq_loop():
                         tc_vals=tc_vals,
                         do_vals=do,
                         pid_vals=[tel.get('output', 0.0) for tel in telemetry],
-                        button_vars=button_vars  # CRITICAL: Pass buttonVars!
+                        button_vars=button_vars,  # CRITICAL: Pass buttonVars!
+                        scale_vals=scale_mgr.get_values()  # Serial scales for "Scale:Foo" refs
                     )
                     
                     # DEBUG: Check after evaluate
@@ -1054,6 +1064,7 @@ async def acq_loop():
                         "math": math_tel,
                         "le": le_tel,
                         "expr": last_expr_outputs,
+                        "scales": scale_mgr.get_values(),  # Read-only serial scale values
                         "buttonVars": button_vars,
                         "ai_list": [{"name": ch.name} for ch in get_all_analogs(app_cfg)],
                         "ao_list": [{"name": ch.name} for ch in get_all_analog_outputs(app_cfg)],
@@ -1062,7 +1073,9 @@ async def acq_loop():
                         "pid_list": [{"name": loop.name} for loop in pid_mgr.meta],
                         "math_list": [{"name": op.name} for op in math_mgr.operators],
                         "le_list": [{"name": elem.name} for elem in le_mgr.elements],
-                        "expr_list": [{"name": expr.name} for expr in expr_mgr.expressions]
+                        "expr_list": [{"name": expr.name} for expr in expr_mgr.expressions],
+                        "scale_list": [{"name": sc.get("name", f"Scale{i}")}
+                                       for i, sc in enumerate(scale_mgr._scales)]
                     }, bridge=mcc, sample_rate_hz=acq_rate_hz)
                 
                 # Extract expr outputs for use in PID gates and other systems
@@ -1432,6 +1445,9 @@ def check_expression_syntax(body: dict):
         'le': [0] * len(le_mgr.elements),
         'expr_list': [{'name': expr.name} for expr in expr_mgr.expressions],
         'expr': [0.0] * len(expr_mgr.expressions),
+        'scale_list': [{'name': sc.get('name', f'Scale{i}')}
+                       for i, sc in enumerate(scale_mgr._scales)],
+        'scales': [0.0] * len(scale_mgr._scales),
         'time': 0.0,
         'sample': 0
     }
@@ -1913,8 +1929,33 @@ def get_scales():
 
 @app.put("/api/scales")
 async def put_scales(req: Request):
+    global cpp_backend, USE_CPP_EXPRESSIONS, CURRENT_DLL_PATH
     data = await req.json()
     scale_mgr.set_config(data, SCALES_PATH)
+
+    # Recompile C++ expressions if name changes affect Scale: references.
+    # We always recompile here for simplicity — the cost is a few hundred ms
+    # and the only practical alternative would be diffing names, which adds
+    # complexity for marginal benefit. Same pattern as put_pid.
+    if USE_CPP_EXPRESSIONS:
+        try:
+            print("[MCC-Hub] Recompiling with new scale configuration...")
+            success = compile_cpp_expressions()
+            if success:
+                new_backend = load_cpp_backend(CURRENT_DLL_PATH)
+                if new_backend:
+                    cpp_backend = new_backend
+                    USE_CPP_EXPRESSIONS = True
+                    print("[MCC-Hub] ✓ C++ backend reloaded with new scales")
+                else:
+                    print("[MCC-Hub] ✗ Backend reload failed")
+                    USE_CPP_EXPRESSIONS = False
+                    cpp_backend = None
+            else:
+                print("[MCC-Hub] ✗ Compilation failed, using old DLL")
+        except Exception as e:
+            print(f"[MCC-Hub] Recompile after scales-save failed: {e}")
+
     return {"ok": True}
 
 @app.get("/api/scales/ports")

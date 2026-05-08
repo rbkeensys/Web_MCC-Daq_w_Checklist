@@ -14,8 +14,8 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 - NUMBER, PLUS, MINUS, MULT, DIV, MOD, POWER
 """
 
-__version__ = "3.2.0"
-__updated__ = "2026-03-20"
+__version__ = "3.3.0"
+__updated__ = "2026-05-06"  # Added Scale: signal-type — new scale[] array, scale_map in SignalMap, reads scales.json
 
 import json
 import os
@@ -32,12 +32,13 @@ from expr_engine import Lexer, Parser
 class SignalMap:
     """Maps signal names to array indices"""
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, scales_cfg: Optional[List[Dict]] = None):
         self.ai_map = {}
         self.ao_map = {}
         self.do_map = {}
         self.tc_map = {}
         self.pid_map = {}
+        self.scale_map = {}  # Serial scale name -> index (read-only inputs)
         
         # Build maps from board-centric config
         ai_index = 0
@@ -73,6 +74,14 @@ class SignalMap:
                 if ch.get('include', True):
                     self.tc_map[ch['name']] = tc_index
                     tc_index += 1
+
+        # Serial scales — read from scales.json (separate file from config.json).
+        # Index matches the order in scales.json so it stays in sync with the
+        # values the SerialScaleManager places at scale_mgr.get_values()[i].
+        if scales_cfg:
+            for i, sc in enumerate(scales_cfg):
+                name = sc.get('name', f'Scale{i}')
+                self.scale_map[name] = i
     
     def get_signal_index(self, sig_type: str, sig_name: str) -> int:
         """Get array index for a signal"""
@@ -110,6 +119,14 @@ class SignalMap:
                 return int(sig_name)
             else:
                 print(f"[CPP-WARN] Unknown TC signal: {sig_name}, using index 0")
+                return 0
+        elif sig_type == 'SCALE':
+            if sig_name in self.scale_map:
+                return self.scale_map[sig_name]
+            elif sig_name.isdigit():
+                return int(sig_name)
+            else:
+                print(f"[CPP-WARN] Unknown Scale signal: {sig_name}, using index 0")
                 return 0
         else:
             return 0
@@ -155,6 +172,7 @@ class CPPCodeGenerator:
         code.append(f"double {func_name}(")
         code.append("    double* ai, double* ao, double* tc, double* do_state, double* pid,")
         code.append("    double* do_out, double* ao_out,")
+        code.append("    double* scale,")
         code.append("    double* static_vars, double* buttonVars,")
         code.append(f"    double* local_out_{expr_index}")
         code.append(") {")
@@ -487,19 +505,43 @@ class CPPCodeGenerator:
             return f"/* Unhandled: {node_type} */"
 
 
-def compile_all_expressions(expressions_file: str, config_file: str, output_dir: str = "compiled"):
-    """Compile all expressions to C++ DLL"""
+def compile_all_expressions(expressions_file: str, config_file: str, output_dir: str = "compiled",
+                            scales_file: Optional[str] = None):
+    """Compile all expressions to C++ DLL.
+
+    scales_file: optional path to scales.json (separate from config.json).
+    If None, the function looks for scales.json next to config_file. Missing
+    scales.json is fine — scale_map will simply be empty and Scale: refs
+    will warn about unknown signals.
+    """
     print("[CPP] ========== COMPILING EXPRESSIONS ==========")
     print(f"[CPP] expr_to_cpp.py VERSION: {__version__} (updated {__updated__})")
-    print(f"[CPP] DLL Signature: 15 parameters (NEW)")
+    print(f"[CPP] DLL Signature: 16 parameters (NEW — adds scale[])")
     print("[CPP] ===============================================")
     
     # Load config
     with open(config_file) as f:
         config = json.load(f)
+
+    # Load scales config (separate file). If not provided, look for scales.json
+    # next to config.json — that's where server.py keeps it.
+    scales_cfg: List[Dict] = []
+    if scales_file is None:
+        candidate = Path(config_file).parent / "scales.json"
+        scales_file = str(candidate) if candidate.exists() else None
+    if scales_file:
+        try:
+            with open(scales_file) as f:
+                scales_data = json.load(f)
+            scales_cfg = scales_data.get('scales', []) or []
+        except Exception as e:
+            print(f"[CPP-WARN] Could not load scales from {scales_file}: {e}")
+            scales_cfg = []
     
-    signal_map = SignalMap(config)
-    print(f"[CPP] Signal map: {len(signal_map.ai_map)} AI, {len(signal_map.do_map)} DO, {len(signal_map.ao_map)} AO")
+    signal_map = SignalMap(config, scales_cfg=scales_cfg)
+    print(f"[CPP] Signal map: {len(signal_map.ai_map)} AI, {len(signal_map.do_map)} DO, "
+          f"{len(signal_map.ao_map)} AO, {len(signal_map.tc_map)} TC, "
+          f"{len(signal_map.scale_map)} Scale")
     
     # Load expressions
     with open(expressions_file) as f:
@@ -583,7 +625,8 @@ inline double clamp(double x, double lo, double hi) {
         'local_var_names': {str(k): v for k, v in all_local_vars.items()},  # FIXED: was 'local_vars'
         'static_vars': list(sorted(all_static_vars)),
         'buttonvar_map': generator.buttonvar_map,  # name -> index
-        'staticvar_map': generator.staticvar_map   # name -> index
+        'staticvar_map': generator.staticvar_map,  # name -> index
+        'scale_map': signal_map.scale_map          # Scale name -> index (matches scales.json order)
     }
     
     with open(output_path / "expr_metadata.json", 'w') as f:
@@ -600,6 +643,7 @@ def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]]) ->
     code.append("EXPORT void evaluate_all_expressions(")
     code.append("    double* ai, double* ao, double* tc, double* do_state, double* pid,")
     code.append("    double* do_out, double* ao_out,")
+    code.append("    double* scale,")
     code.append("    double* static_vars, double* buttonVars,")
     code.append("    double* expr_results,")
     code.append("    double* local_vars_out,")
@@ -646,7 +690,7 @@ def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]]) ->
         code.append(f"    // Expression {i}")
         code.append(f"    for (int j = 0; j < 64; j++) {{ temp_do[j] = -1.0; }}")  # -1 = not written yet
         code.append(f"    for (int j = 0; j < 16; j++) {{ temp_ao[j] = -999999.0; }}")  # Sentinel for not written
-        code.append(f"    expr_results[{i}] = expr_{i}(ai, ao, tc, do_state, pid, temp_do, temp_ao, static_vars, buttonVars, local_vars_out + {local_offset});")
+        code.append(f"    expr_results[{i}] = expr_{i}(ai, ao, tc, do_state, pid, temp_do, temp_ao, scale, static_vars, buttonVars, local_vars_out + {local_offset});")
         
         # Track offset for next expression
         if local_vars.get(i):

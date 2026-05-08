@@ -26,8 +26,8 @@ VERSION 2.0 Changes:
 - Added buttonVars support for reading frontend button states
 - buttonVars are read-only in expressions (set by UI buttons)
 """
-__version__ = "2.1.0"
-__updated__ = "2026-01-27"
+__version__ = "2.2.0"
+__updated__ = "2026-05-06"  # Added Scale: signal-type support (read-only)
 
 import re
 import math
@@ -598,6 +598,12 @@ class Evaluator:
         for i, sig in enumerate(self.signal_state.get('expr_list', [])):
             key = f"EXPR:{sig['name']}"
             self._signal_cache[key] = {'type': 'expr', 'index': i}
+
+        # Cache Scale signals (read-only — serial scales feed values into
+        # state['scales'] via the SerialScaleManager telemetry path)
+        for i, sig in enumerate(self.signal_state.get('scale_list', [])):
+            key = f"SCALE:{sig['name']}"
+            self._signal_cache[key] = {'type': 'scale', 'index': i}
     
     def evaluate(self, statements: List[ASTNode]) -> float:
         """Evaluate list of statements, return last value"""
@@ -838,7 +844,20 @@ class Evaluator:
                     if isinstance(val, dict):
                         return val.get('output', 0.0)
                     return float(val)
-            
+
+            elif sig_type == 'scale':
+                # Scale values are tared floats fed in from SerialScaleManager.
+                # Read-only — assignments to "Scale:Foo" are not supported (a
+                # scale is a sensor, not an output).
+                values = self.signal_state.get('scales', [])
+                if idx < len(values):
+                    val = values[idx]
+                    try:
+                        return float(val)
+                    except (TypeError, ValueError):
+                        return 0.0
+                return 0.0
+
             return 0.0
         
         # SLOW FALLBACK: Original method for signals not in cache
@@ -884,6 +903,9 @@ class Evaluator:
         elif signal_type == 'EXPR':
             signals = self.signal_state.get('expr_list', [])
             values = self.signal_state.get('expr', [])
+        elif signal_type == 'SCALE':
+            signals = self.signal_state.get('scale_list', [])
+            values = self.signal_state.get('scales', [])
         else:
             return 0.0
         

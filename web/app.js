@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.6";  // 2026-05-05: Gauge Tare button moved to header (was floating in middle); per-series target lines for gauges and bars with custom color; bar value text adopts target color when target is set
+const UI_VERSION = "2.1.7";  // 2026-05-06: Added Scale: signal type to expression help fallback (server-side full integration)
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -9379,7 +9379,8 @@ function openExpressionHelp() {
 "PID:LoopName"     // PID Controller
 "Math:OpName"      // Math Operator
 "LE:ElementName"   // Logic Element
-"Expr:ExprName"    // Other Expression</pre>
+"Expr:ExprName"    // Other Expression
+"Scale:ScaleName"  // Serial Scale (read-only)</pre>
 
         <h3 style="color:#9ece6a;margin-top:15px;">PID Properties</h3>
         <pre style="background:#1a1d2e;padding:10px;border-radius:4px;font-size:12px;">

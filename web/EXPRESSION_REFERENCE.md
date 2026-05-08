@@ -171,6 +171,40 @@ IF "TC:Furnace" > 500 THEN
 
 ---
 
+### Serial Scales (Scale)
+
+**Syntax:** `"Scale:ScaleName"`
+
+Read the value from a serial-attached scale (RS-232 / RS-485 / Moxa NPort, etc.).
+Scale references are **read-only** — assigning to `"Scale:Foo"` is not supported.
+
+**Examples:**
+```javascript
+// Read current weight
+weight = "Scale:HopperA"
+totalWeight = "Scale:HopperA" + "Scale:HopperB"
+
+// Use as a control input
+overweight = "Scale:Hopper" > 50.0
+IF "Scale:Hopper" > targetMass THEN
+    "DO:FeedValve" = 0       // Stop feed
+ELSE
+    "DO:FeedValve" = 1       // Open feed
+
+// Tare-aware computations (the Scale: value is already
+// post-offset — see the Tare button in the Zero/Tare dialog)
+netWeight = "Scale:Hopper" - emptyHopperWeight
+```
+
+**Notes:**
+- Values reflect the configured tare offset — `"Scale:X"` returns
+  what's displayed in chart/gauge/bar widgets.
+- Update rate is set by the scale itself (typically 1–10 Hz).
+- Names come from `Scale Editor` (Scales button in the toolbar). If you
+  rename a scale, expressions using the old name will warn and return 0.
+
+---
+
 ### Digital Outputs (DO)
 
 **Syntax:** `"DO:SignalName"`

@@ -20,8 +20,8 @@ CHANGELOG:
   • Hardware write support (DO, AO)
   • Static and global variable support
 """
-__version__ = "3.2.0"
-__updated__ = "2026-03-26"
+__version__ = "3.3.0"
+__updated__ = "2026-05-06"  # Added scale[] array — Scale: signal-type support, 16-arg DLL signature
 
 import ctypes
 import json
@@ -49,6 +49,7 @@ class CPPExpressionBackend:
         self.pid = np.zeros(50, dtype=np.float64)
         self.do_out = np.zeros(64, dtype=np.float64)
         self.ao_out = np.zeros(16, dtype=np.float64)
+        self.scale = np.zeros(16, dtype=np.float64)  # Serial scales (read-only inputs from SerialScaleManager)
         self.static_vars = np.zeros(100, dtype=np.float64)
         self.button_vars = np.zeros(100, dtype=np.float64)
         self.expr_results = np.zeros(50, dtype=np.float64)
@@ -122,6 +123,7 @@ class CPPExpressionBackend:
             ctypes.POINTER(ctypes.c_double),  # pid
             ctypes.POINTER(ctypes.c_double),  # do_out
             ctypes.POINTER(ctypes.c_double),  # ao_out
+            ctypes.POINTER(ctypes.c_double),  # scale  (NEW in v3.3.0 — Scale: signal type)
             ctypes.POINTER(ctypes.c_double),  # static_vars
             ctypes.POINTER(ctypes.c_double),  # button_vars
             ctypes.POINTER(ctypes.c_double),  # expr_results
@@ -161,13 +163,16 @@ class CPPExpressionBackend:
         tc_vals: List[float],
         do_vals: List[float],
         pid_vals: List[float],
-        button_vars: Optional[Dict[str, float]] = None
+        button_vars: Optional[Dict[str, float]] = None,
+        scale_vals: Optional[List[float]] = None
     ) -> Dict:
         """
         Evaluate all expressions in one shot
         
         Args:
             button_vars: Dict of {varName: value} for button variables
+            scale_vals: Optional list of serial scale values (read-only inputs).
+                        Pass scale_mgr.get_values() from server.
         
         Returns:
             {
@@ -192,6 +197,14 @@ class CPPExpressionBackend:
         self.tc[:len(tc_vals)] = tc_vals
         self.do_state[:len(do_vals)] = do_vals
         self.pid[:len(pid_vals)] = pid_vals
+
+        # Scale values — copy in if provided, otherwise leave the array zeroed
+        # (zeroed scales are a safe default; expressions referencing missing
+        # scales will get 0.0, matching the Python evaluator's behavior).
+        self.scale.fill(0.0)
+        if scale_vals:
+            n = min(len(scale_vals), len(self.scale))
+            self.scale[:n] = scale_vals[:n]
         
         # Update button_vars from dict
         # CRITICAL: Reset ALL button vars to 0 first, then update from dict
@@ -220,6 +233,7 @@ class CPPExpressionBackend:
             self.pid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.do_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.ao_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            self.scale.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.static_vars.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.button_vars.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.expr_results.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
