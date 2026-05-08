@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.7";  // 2026-05-06: Added Scale: signal type to expression help fallback (server-side full integration)
+const UI_VERSION = "2.1.8";  // 2026-05-06: Target lines on charts (NEW), gauges, and bars now support fixed value OR live signal source (any input kind: AI/AO/TC/DO/PID/Math/Expr/Scale/static/button)
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -3139,59 +3139,157 @@ function openWidgetSettings(w) {
           row.append(el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Color:'), colorBtn);
         }
 
-        // ----- Target line (gauges and bars only) -----
-        // Each series can have an optional target value drawn as a redline
-        // marker on the gauge arc / bar column. The target color is per-series
-        // and defaults to the app's chart-cursor red (#ff4d4d).
-        if (w.type === 'gauge' || w.type === 'bars') {
+        // ----- Target line (charts, gauges, and bars) -----
+        // Each series can have an optional target line drawn as a redline
+        // marker. Target value can be a fixed number or sourced from any
+        // signal in the system (AI / AO / TC / DO / PID / Math / Expr /
+        // Scale / static / button). The target color is per-series and
+        // defaults to the app's chart-cursor red.
+        if (w.type === 'chart' || w.type === 'gauge' || w.type === 'bars') {
           const TARGET_DEFAULT_COLOR = '#ff4d4d';
-          const targetEnabled = (typeof s.target === 'number' && Number.isFinite(s.target));
+
+          // Normalize legacy formats so the rest of this block can assume
+          // s.target is either undefined (off) or {mode, value|sel}.
+          const t0 = s.target;
+          let initialEnabled = false;
+          let initialMode = 'fixed';
+          let initialValue = 0;
+          let initialSel = { kind: 'ai', index: 0 };
+          if (t0 != null) {
+            initialEnabled = true;
+            if (typeof t0 === 'number' && Number.isFinite(t0)) {
+              initialMode = 'fixed';
+              initialValue = t0;
+            } else if (typeof t0 === 'object') {
+              initialMode = (t0.mode === 'signal') ? 'signal' : 'fixed';
+              if (initialMode === 'fixed') {
+                initialValue = Number.isFinite(Number(t0.value)) ? Number(t0.value) : 0;
+              } else if (t0.sel) {
+                initialSel = {
+                  kind: t0.sel.kind || 'ai',
+                  index: (t0.sel.index !== undefined) ? t0.sel.index : 0
+                };
+              }
+            }
+          }
 
           const targetChk = el('input', {
             type: 'checkbox',
-            checked: targetEnabled,
+            checked: initialEnabled,
             title: 'Show target line for this series'
           });
-          const targetVal = el('input', {
+
+          const modeSel = el('select', {
+            disabled: !initialEnabled,
+            title: 'Fixed: type a number. Signal: pick a live signal whose current value is the target.'
+          });
+          modeSel.append(el('option', {value: 'fixed'}, 'Fixed'));
+          modeSel.append(el('option', {value: 'signal'}, 'Signal'));
+          modeSel.value = initialMode;
+
+          // Fixed-mode input
+          const fixedInput = el('input', {
             type: 'number',
             step: 'any',
-            value: targetEnabled ? s.target : 0,
-            disabled: !targetEnabled,
+            value: initialValue,
+            disabled: !initialEnabled || initialMode !== 'fixed',
             style: 'width:70px',
             title: 'Target value (in display units, after scale & offset)'
           });
-          const targetColorBtn = el('div', {
-            style: `width:24px;height:22px;border-radius:4px;border:1px solid var(--border);cursor:pointer;background:${s.targetColor || TARGET_DEFAULT_COLOR};opacity:${targetEnabled ? 1 : 0.4}`,
+
+          // Signal-mode kind+selector pair
+          const signalKindSel = selectEnum(
+            ['ai', 'ao', 'do', 'tc', 'pid', 'math', 'expr', 'button', 'static', 'scale'],
+            initialSel.kind,
+            () => {}  // wired below after we have a closure to rebuild signalSel
+          );
+          signalKindSel.disabled = !initialEnabled || initialMode !== 'signal';
+
+          // The signal selector is built async. We hold a placeholder until
+          // the real one comes back, then swap. Subsequent kind changes do
+          // the same swap.
+          let signalSel = el('select', {style: 'width:120px',
+                                        disabled: !initialEnabled || initialMode !== 'signal'});
+          signalSel.append(el('option', {}, 'Loading...'));
+
+          const colorBtn = el('div', {
+            style: `width:24px;height:22px;border-radius:4px;border:1px solid var(--border);cursor:pointer;background:${s.targetColor || TARGET_DEFAULT_COLOR};opacity:${initialEnabled ? 1 : 0.4}`,
             title: 'Target line color'
           });
 
-          targetChk.onchange = () => {
-            if (targetChk.checked) {
-              const v = parseFloat(targetVal.value);
-              s.target = Number.isFinite(v) ? v : 0;
-              if (!s.targetColor) s.targetColor = TARGET_DEFAULT_COLOR;
-              targetVal.disabled = false;
-              targetColorBtn.style.opacity = 1;
-            } else {
+          // Centralised target-state writer — called whenever any control
+          // changes, so the persisted s.target stays canonical no matter
+          // which input the user touched.
+          const writeTarget = () => {
+            if (!targetChk.checked) {
               delete s.target;
-              targetVal.disabled = true;
-              targetColorBtn.style.opacity = 0.4;
+              return;
             }
+            if (modeSel.value === 'fixed') {
+              s.target = { mode: 'fixed', value: parseFloat(fixedInput.value) || 0 };
+            } else {
+              s.target = { mode: 'signal',
+                           sel: { kind: signalKindSel.value, index: signalSel.value } };
+            }
+            if (!s.targetColor) s.targetColor = TARGET_DEFAULT_COLOR;
+          };
+
+          // Apply enabled/mode to the per-control disabled flags + opacity.
+          const applyEnable = () => {
+            const on = targetChk.checked;
+            modeSel.disabled = !on;
+            const isFixed = (modeSel.value === 'fixed');
+            fixedInput.disabled = !on || !isFixed;
+            signalKindSel.disabled = !on || isFixed;
+            signalSel.disabled = !on || isFixed;
+            colorBtn.style.opacity = on ? 1 : 0.4;
+          };
+
+          // Build (or rebuild) the signal selector for the current kind.
+          const rebuildSignalSel = async (kind, currentIndex) => {
+            try {
+              const newSel = await createSignalSelector(kind, currentIndex, newIdx => {
+                signalSel.value = newIdx;
+                writeTarget();
+                saveLayout();
+              });
+              newSel.style.width = '120px';
+              newSel.disabled = signalSel.disabled;
+              signalSel.replaceWith(newSel);
+              signalSel = newSel;
+            } catch (e) {
+              console.warn('[target-signal] selector build failed:', e);
+            }
+          };
+          // Initial async build — only relevant when starting in signal mode,
+          // but we build either way so switching modes is instant.
+          rebuildSignalSel(initialSel.kind, initialSel.index);
+
+          targetChk.onchange = () => {
+            applyEnable();
+            writeTarget();
             saveLayout();
           };
-          targetVal.oninput = () => {
-            const v = parseFloat(targetVal.value);
-            if (Number.isFinite(v)) {
-              s.target = v;
-              saveLayout();
-            }
+          modeSel.onchange = () => {
+            applyEnable();
+            writeTarget();
+            saveLayout();
           };
-          targetColorBtn.onclick = (e) => {
+          fixedInput.oninput = () => {
+            writeTarget();
+            saveLayout();
+          };
+          signalKindSel.onchange = async () => {
+            await rebuildSignalSel(signalKindSel.value, 0);
+            writeTarget();
+            saveLayout();
+          };
+          colorBtn.onclick = (e) => {
             e.stopPropagation();
             const cur = s.targetColor || TARGET_DEFAULT_COLOR;
             createColorPicker(cur, (newColor) => {
               s.targetColor = newColor;
-              targetColorBtn.style.background = newColor;
+              colorBtn.style.background = newColor;
               saveLayout();
             });
           };
@@ -3199,8 +3297,11 @@ function openWidgetSettings(w) {
           row.append(
             el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Target:'),
             targetChk,
-            targetVal,
-            targetColorBtn
+            modeSel,
+            fixedInput,
+            signalKindSel,
+            signalSel,
+            colorBtn
           );
         }
 
@@ -4234,6 +4335,39 @@ function mountChart(w, body){
       ]));
     });
 
+    // ---- Per-series target lines (optional) ----
+    // Drawn as a horizontal line across the whole plot area at the target's
+    // Y position, in the user-chosen target color (defaults to red). Each
+    // series has its own optional target so multiple redlines can stack.
+    // The label sits at the right edge so it doesn't clip series data.
+    (w.opts.series || []).forEach((s, si) => {
+      const targetVal = resolveTargetValue(s);
+      if (targetVal === null) return;
+      if (targetVal < ymin || targetVal > ymax) return;  // off-screen, skip
+      const targetColor = s.targetColor || '#ff4d4d';
+      const y = plotB - (targetVal - ymin) * yscale;
+      ctx.save();
+      ctx.strokeStyle = targetColor;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);  // dashed so it's distinguishable from data lines
+      ctx.beginPath();
+      ctx.moveTo(plotL, y);
+      ctx.lineTo(plotR, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Tiny label at the right edge so it's clear which series this targets
+      const lab = (s.name && s.name.length) ? s.name : labelFor(s);
+      const labelText = `▸ ${lab}: ${targetVal.toFixed(2)}`;
+      ctx.fillStyle = targetColor;
+      ctx.font = '10px system-ui';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(labelText, plotR - 2, y - 2);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+    });
+
     // ---- Checklist check-mark overlay ----
     // Draw a vertical dashed amber line for each checklist mark in the view window
     const marks = window._chartMarks || [];
@@ -4847,9 +4981,9 @@ function mountGauge(w, body){
       // angle, in the user-chosen target color (defaults to red). Only
       // rendered when target is in the visible scale range so it doesn't
       // get clamped to 0 or 1 and lie about its position.
-      if (typeof s.target === 'number' && Number.isFinite(s.target) &&
-          s.target >= lo && s.target <= hi) {
-        const tFrac = (s.target - lo) / span;
+      const targetVal = resolveTargetValue(s);
+      if (targetVal !== null && targetVal >= lo && targetVal <= hi) {
+        const tFrac = (targetVal - lo) / span;
         const tAng = Math.PI + (0 - Math.PI) * tFrac;
         const tx = Math.cos(tAng), ty = Math.sin(tAng);
         const targetColor = s.targetColor || '#ff4d4d';
@@ -4976,9 +5110,10 @@ function mountBars(w, body){
       // Y position, in the user-chosen target color. Extends slightly beyond
       // the bar edges (barW * 0.6 each side) so it's clearly readable as a
       // target marker rather than just another bar element.
-      const hasTarget = (typeof sel.target === 'number' && Number.isFinite(sel.target));
-      if (hasTarget && sel.target >= lo && sel.target <= hi) {
-        const tt = (sel.target - lo) / span;
+      const targetVal = resolveTargetValue(sel);
+      const hasTarget = (targetVal !== null);
+      if (hasTarget && targetVal >= lo && targetVal <= hi) {
+        const tt = (targetVal - lo) / span;
         const targetY = plotB - tt * (plotB - plotT);
         const targetColor = sel.targetColor || '#ff4d4d';
         const halfWidth = barW * 0.6;
@@ -6416,6 +6551,40 @@ function readSelection(sel){
       return state.scales?.[sel.index|0] ?? 0;
   }
   return 0;
+}
+
+/**
+ * Resolve a series' target value to a number, or return null if no target.
+ *
+ * Supports three storage shapes:
+ *   - undefined / null              → no target (returns null)
+ *   - plain number (legacy, ≤2.1.7) → fixed value
+ *   - { mode: 'fixed', value }      → fixed value (new)
+ *   - { mode: 'signal', sel }       → live read via readSelection() (new)
+ *
+ * Signal-mode targets read the raw signal value as-is. Display scale/offset
+ * configured on the series itself are NOT applied to the target — the
+ * assumption is that the picked signal is already in the correct unit space
+ * (e.g. picking "AO:Setpoint" gives you whatever AO:Setpoint reads, in its
+ * own units). If you need to rescale a signal target, feed it through a
+ * Math operator and pick the Math output.
+ */
+function resolveTargetValue(s) {
+  if (s == null || s.target == null) return null;
+  // Legacy: bare number
+  if (typeof s.target === 'number') return Number.isFinite(s.target) ? s.target : null;
+  // New: object form
+  if (typeof s.target === 'object') {
+    if (s.target.mode === 'fixed') {
+      const v = Number(s.target.value);
+      return Number.isFinite(v) ? v : null;
+    }
+    if (s.target.mode === 'signal' && s.target.sel) {
+      const v = readSelection(s.target.sel);
+      return Number.isFinite(v) ? v : null;
+    }
+  }
+  return null;
 }
 
 // drag/resize — block drag when interacting with inputs
