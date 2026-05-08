@@ -1,7 +1,7 @@
 # server/server.py
 # Python 3.10+
 
-import asyncio, json, time, os, sys
+import asyncio, json, math, time, os, sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -31,8 +31,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.4"
-__updated__ = "2026-05-06"  # Scale: signal-type integration in expressions (Python + C++)
+__version__ = "2.8.5"
+__updated__ = "2026-05-08"  # Lifted clean_for_json to module scope; REST endpoints now scrub NaN/Inf so 0/0 in expressions doesn't crash JSON serialization
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # DLL versioning for hot-reload
@@ -90,6 +90,35 @@ if not WEB_DIR.exists():
 <p>This placeholder was created automatically. Copy the /web files here and refresh.</p>
 </body></html>
 """)
+
+def clean_for_json(obj):
+    """
+    Recursively scrub NaN / Inf out of a value tree so it can be passed to
+    json.dumps (which rejects them by default and would otherwise crash the
+    HTTP response). NaN and Inf become None (→ JSON null on the wire).
+
+    Handles:
+      - Python float (NaN/Inf → None)
+      - numpy scalars (numpy.float64 etc. — these are float subclasses, so
+        the isinstance(float) check covers them)
+      - dict / list / tuple (recursed)
+      - everything else passed through unchanged
+
+    This used to be a nested function inside the WS telemetry loop. It now
+    lives at module scope so REST endpoints that return expression-derived
+    values (locals, static vars, syntax-check results) can use it too — any
+    one of those can produce NaN if a user expression does 0/0 etc.
+    """
+    if isinstance(obj, float):
+        return None if not math.isfinite(obj) else obj
+    if isinstance(obj, list):
+        return [clean_for_json(item) for item in obj]
+    if isinstance(obj, tuple):
+        return [clean_for_json(item) for item in obj]
+    if isinstance(obj, dict):
+        return {k: clean_for_json(v) for k, v in obj.items()}
+    return obj
+
 
 app = FastAPI()
 
@@ -1202,15 +1231,9 @@ async def acq_loop():
                     })
 
             # Convert NaN/Infinity to None for JSON serialization
-            def clean_for_json(obj):
-                if isinstance(obj, float):
-                    return None if not math.isfinite(obj) else obj
-                elif isinstance(obj, list):
-                    return [clean_for_json(item) for item in obj]
-                elif isinstance(obj, dict):
-                    return {k: clean_for_json(v) for k, v in obj.items()}
-                return obj
-
+            # clean_for_json is defined at module scope (see top of file) so
+            # the same NaN/Inf scrubbing applies to both this WS frame and
+            # the REST endpoints that surface expression-derived values.
             frame = {
                 "type": "tick",
                 "t": time.time(),
@@ -1452,7 +1475,7 @@ def check_expression_syntax(body: dict):
         'sample': 0
     }
     
-    return expr_mgr.check_syntax(expression, test_state)
+    return clean_for_json(expr_mgr.check_syntax(expression, test_state))
 
 @app.get("/api/expressions/globals")
 def get_expression_globals():
@@ -1469,11 +1492,13 @@ def get_expression_globals():
         else:
             log.warning("[GLOBALS-API] cpp_backend missing staticvar_map or static_vars")
         log.info(f"[GLOBALS-API] Returning {len(static_dict)} static variables")
-        return {"globals": static_dict}
+        # Scrub NaN/Inf so the response is valid JSON even if a user
+        # expression has stored a bad value into a static var.
+        return {"globals": clean_for_json(static_dict)}
     else:
         # Return Python global vars
         log.info("[GLOBALS-API] Using Python global vars")
-        return {"globals": expr_global_vars.list_all()}
+        return {"globals": clean_for_json(expr_global_vars.list_all())}
 
 @app.delete("/api/expressions/globals")
 def delete_expression_global(body: dict):
@@ -1549,7 +1574,10 @@ def get_static_vars():
         vars_dict = {}
         for name, index in cpp_backend.staticvar_map.items():
             vars_dict[name] = float(cpp_backend.static_vars[index])
-        return {"ok": True, "vars": vars_dict}
+        # Scrub NaN/Inf — an expression that does 0/0 will silently store
+        # NaN into a static var, and json.dumps would otherwise reject the
+        # whole response.
+        return {"ok": True, "vars": clean_for_json(vars_dict)}
     else:
         return {"ok": False, "error": "C++ backend not available", "vars": {}}
 
