@@ -476,9 +476,10 @@ class SerialScaleManager:
                 ser.open()
                 print(f"[Scale{idx}] Opened {port}")
                 buf = ""
+
                 while not stop.is_set():
                     # Read pattern: drain whatever's in the OS serial buffer
-                    # immediately (no waiting), and only block on a 1-byte read
+                    # immediately (no waiting), and only block on a 1-byte read,;9
                     # when nothing is available. The previous ser.read(256) call
                     # would wait for either 256 bytes OR the 1-second timeout,
                     # and a 9 Hz scale at 9 bytes/line takes ~3 s to fill 256 b

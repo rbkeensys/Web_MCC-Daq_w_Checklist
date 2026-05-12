@@ -15,7 +15,7 @@
     {
       "name": "LOXFuelOutletControl",
       "enabled": true,
-      "expression": "// Controls individually and together the LOX and Fuel outlet valves\n\nrunState     = static.testState\nLOXOut       = buttonVars.LOXOutEn \nFuelOut      = buttonVars.FuelOutEn\ntimedFuel    = buttonVars.TimedFuelOut or buttonVars.mixedOut\ntimedLOX     = buttonVars.TimedLOXOut or buttonVars.mixedOut\nLOXbyWeight  = static.LOXOutValve\nFuelbyWeight = static.FuelOutValve\n\ngoLOX  = 0\ngoFuel = 0\n\nif (FuelbyWeight or LOXOut or LOXbyWeight) then\n        goLOX = 1\nendif\nif (FuelOut or FuelbyWeight) then\n        goFuel = 1\nendif\n        \n\"DO:LOXOUT\"  = goLOX\n\"DO:FuelOUT\" = goFuel\n\n",
+      "expression": "// Controls individually and together the LOX and Fuel outlet valves\n\nrunState     = static.testState\nLOXOut       = buttonVars.LOXOutEn \nFuelOut      = buttonVars.FuelOutEn\ntimedFuel    = buttonVars.TimedFuelOut or buttonVars.mixedOut\ntimedLOX     = buttonVars.TimedLOXOut or buttonVars.mixedOut\nLOXbyWeight  = static.LOXOutValve\nFuelbyWeight = static.FuelOutValve\n\ngoLOX  = 0\ngoFuel = 0\n\nif (LOXOut or LOXbyWeight) then\n        goLOX = 1\nendif\nif (FuelOut or FuelbyWeight) then\n        goFuel = 1\nendif\n        \n\"DO:LOXOUT\"  = goLOX\n\"DO:FuelOUT\" = goFuel\n\n",
       "execution_rate_hz": null
     },
     {
