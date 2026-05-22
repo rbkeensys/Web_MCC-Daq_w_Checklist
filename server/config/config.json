@@ -2,7 +2,7 @@
   "boards1608": [
     {
       "boardNum": 0,
-      "sampleRateHz": 160.0,
+      "sampleRateHz": 100.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -10,7 +10,7 @@
         {
           "name": "LOX P",
           "slope": 25.0,
-          "offset": -12.968673706054688,
+          "offset": -12.486343383789062,
           "cutoffHz": 0.2,
           "units": "psi",
           "include": true
@@ -114,16 +114,16 @@
           "normallyOpen": false,
           "momentary": true,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "momentary"
         },
         {
-          "name": "Fuel Press",
+          "name": "EductorAir",
           "normallyOpen": false,
           "momentary": true,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "momentary"
         },
@@ -132,7 +132,7 @@
           "normallyOpen": false,
           "momentary": true,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "momentary"
         },
@@ -141,7 +141,7 @@
           "normallyOpen": false,
           "momentary": true,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "momentary"
         }
@@ -171,7 +171,7 @@
     },
     {
       "boardNum": 2,
-      "sampleRateHz": 160.0,
+      "sampleRateHz": 100.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -252,7 +252,7 @@
           "mode": "toggle"
         },
         {
-          "name": "LineBleed",
+          "name": "RunTankVent",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
@@ -261,7 +261,7 @@
           "mode": "toggle"
         },
         {
-          "name": "RunTankVent",
+          "name": "PropMixLoad",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,

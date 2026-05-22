@@ -15,7 +15,7 @@
     {
       "name": "LOXFuelOutletControl",
       "enabled": true,
-      "expression": "// Controls individually and together the LOX and Fuel outlet valves\n\nrunState     = static.testState\nLOXOut       = buttonVars.LOXOutEn \nFuelOut      = buttonVars.FuelOutEn\ntimedFuel    = buttonVars.TimedFuelOut or buttonVars.mixedOut\ntimedLOX     = buttonVars.TimedLOXOut or buttonVars.mixedOut\nLOXbyWeight  = static.LOXOutValve\nFuelbyWeight = static.FuelOutValve\n\ngoLOX  = 0\ngoFuel = 0\n\nif (LOXOut or LOXbyWeight) then\n        goLOX = 1\nendif\nif (FuelOut or FuelbyWeight) then\n        goFuel = 1\nendif\n        \n\"DO:LOXOUT\"  = goLOX\n\"DO:FuelOUT\" = goFuel\n\n",
+      "expression": "// Controls individually and together the LOX and Fuel outlet valves\n\nrunState     = static.testState\nLOXOut       = buttonVars.LOXOutEn \nFuelOut      = buttonVars.FuelOutEn\ntimedFuel    = buttonVars.TimedFuelOut or buttonVars.mixedOut\ntimedLOX     = buttonVars.TimedLOXOut or buttonVars.mixedOut\nLOXbyWeight  = static.LOXOutValve\nFuelbyWeight = static.FuelOutValve\nFakeFuel     = buttonVars.doFakeFuel\n\n\ngoLOX  = 0\ngoFuel = 0\n\nif ((FuelbyWeight and FakeFuel) or LOXOut or LOXbyWeight) then\n        goLOX = 1\nendif\nif (LOXOut or FuelbyWeight) then\n        goFuel = 1\nendif\n        \n\"DO:LOXOUT\"  = goLOX\n\"DO:FuelOUT\" = goFuel\n\n",
       "execution_rate_hz": null
     },
     {
@@ -39,25 +39,19 @@
     {
       "name": "Line Condition LOX",
       "enabled": true,
-      "expression": "// Line Conditioning for LOX\n// Conditioning valve on\n\nLOXBleed  = buttonVars.LOXBleedEn\n\nif ( LOXBleed ) then\n    static.LOXdoBleed = 1\nelse\n    static.LOXdoBleed = 0\nendif\n\n\"DO:LOXVent\" = static.LOXdoBleed\n\n",
+      "expression": "// Line Conditioning for LOX\n// Conditioning valve on\n\nLOXBdoBleed = 0\nbutton = buttonVars.LOXBleedEn\n\nif ( button ) then\n    LOXdoBleed = 1\nelse\n    LOXdoBleed = 0\nendif\n\n\"DO:LOXVent\" = LOXdoBleed\nstatic.LineConditionLOX = LOXdoBleed\n\n",
       "execution_rate_hz": null
     },
     {
       "name": "RunTankPressurization",
       "enabled": true,
-      "expression": "// Run Tank Press Controller\nstatic.runTankSetPoint = 50.0\nstatic.pressRunTank\nstatic.runTankPressLockout\n\ndepress     = buttonVars.depressRunTank\nautoDepress = static.RunTankVent\nmanualVent  = depress\nstate       = static.testState\nTankPress   = \"AI:Ch P\"\nsetP        = static.runTankSetPoint\nlockOut     = static.runPressTankLockout\nRunTankMaxP = static.RunTankMaxP\n\nif state >= 3 and state < 6 then  // PURGE complete, going to PRESSURIZE\n    enable = 1\nelse\n    enable = buttonVars.RunTankPressEn \nendif\n\nif depress or lockOut then\n    enable = 0\n    lockOut = 1\n    static.runPressTankLockout = lockOut\nendif\n\nif depress == 0 and buttonVars.RunTankPressEn == 0 then\n    lockOut = 0\n    static.runPressTankLockout = lockOut\nendif\n\nRun_Press_ON = 0\nRun_Vent_ON  = 0\n\nif (enable  and (TankPress < setP)) then\n    Tank_Press_ON = 1\n    Tank_Vent_ON  = 0\n    \"DO:PURGE\"    = Tank_Press_ON\nendif\n\nif ( depress ) then\n    Tank_Press_ON = 0\n    Tank_Vent_ON  = 1\n    \"DO:PURGE\"    = Tank_Press_ON\nendif\n\nif (TankPress > RunTankMaxP) then\n    Tank_Press_ON    = 0\n    Tank_Vent_ON     = 1\n    \"DO:RunTankVent\" = Tank_Vent_ON\nendif\n\nstatic.pressRunTank = Tank_Press_ON\n\n\"DO:RunTankVent\" = Tank_Vent_ON or autoDepress\nif Tank_Press_ON then\n    \"DO:PURGE\"       = Tank_Press_ON\n    static.FueldoBleed = 0 //line condition valve OFF\n    static.LOXdoBleed  = 0\nendif\n",
+      "expression": "// Run Tank Press Controller\nstatic.runTankSetPoint = 50.0\nstatic.pressRunTank\nstatic.runTankPressLockout\n\ndepress      = buttonVars.depressRunTank\nautoDepress  = static.RunTankVent\nmanualVent   = depress\nstate        = static.testState\nTankPress    = \"AI:Ch P\"\nsetP         = static.runTankSetPoint\nlockOut      = static.runPressTankLockout\nRunTankMaxP  = static.RunTankMaxP\nventFromLoad = static.ventFromLoad\n\nif state >= 3 and state < 6 then  // PURGE complete, going to PRESSURIZE\n    enable = 1\nelse\n    enable = buttonVars.RunTankPressEn \nendif\n\nif depress or lockOut then\n    enable = 0\n    lockOut = 1\n    static.runPressTankLockout = lockOut\nendif\n\nif depress == 0 and buttonVars.RunTankPressEn == 0 then\n    lockOut = 0\n    static.runPressTankLockout = lockOut\nendif\n\nRun_Press_ON = 0\nRun_Vent_ON  = 0\n\nif (enable  and (TankPress < setP)) then\n    Tank_Press_ON = 1\n    Tank_Vent_ON  = 0\n    \"DO:PURGE\"    = Tank_Press_ON\nendif\n\nif ( depress ) then\n    Tank_Press_ON = 0\n    Tank_Vent_ON  = 1\n    \"DO:PURGE\"    = Tank_Press_ON\nendif\n\nif (TankPress > RunTankMaxP) then\n    Tank_Press_ON    = 0\n    Tank_Vent_ON     = 1\n    \"DO:RunTankVent\" = Tank_Vent_ON\nendif\n\nstatic.pressRunTank = Tank_Press_ON\n\n\"DO:RunTankVent\" = Tank_Vent_ON or autoDepress or ventFromLoad \nif Tank_Press_ON then\n    \"DO:PURGE\"       = Tank_Press_ON\n    static.FueldoBleed = 0 //line condition valve OFF\n    static.LOXdoBleed  = 0\nendif\n",
       "execution_rate_hz": null
     },
     {
       "name": "Line Condition Fuel",
       "enabled": true,
       "expression": "// Line Conditioning for Fuel\n// Conditioning valve on\n\nFuelBleed  = buttonVars.FuelBleedEn\n\nif ( FuelBleed ) then\n    static.FueldoBleed = 1\nelse\n    static.FueldoBleed = 0\nendif\n\n\"DO:FuelVent\" = static.FueldoBleed\n\n",
-      "execution_rate_hz": null
-    },
-    {
-      "name": "Press Valve Control",
-      "enabled": true,
-      "expression": "// LOX and Fuel Press Valve Control\n\nLOXAuto  = static.LOXPress\nFuelAuto = static.FuelPress\nsetP     = static.pressureSetPoint\n\nif LOXAuto != 0 then\n    \"DO:LOX Press\" = 1\nelse\n    \"DO:LOX Press\" = 0\nendif\n\nif FuelAuto != 0 then\n    \"DO:Fuel Press\" = 1\nelse\n    \"DO:Fuel Press\" = 0\nendif\n\n",
       "execution_rate_hz": null
     },
     {
@@ -69,13 +63,13 @@
     {
       "name": "LOX-Fill_by_Weight",
       "enabled": true,
-      "expression": "// Load LOX by Weight\n\nstatic.LOXTargetWeight\nstatic.currentScale\nstatic.prevFillState\nstatic.tareWeight\nstatic.LOXOutValve\n\nscaleWeight = \"Scale:Scale0\"\nbutton      = buttonVars.FillLOXByWeight\nreset       = buttonVars.resetLOX\nfillState   = static.prevFillState\n\nLOXTarget = static.LOXTargetWeight\nif LOXTarget == 0 then\n    LOXTarget = 200\n    static.LOXTargetWeight = LOXTarget\nendif\n\nif ( reset ) then\n    static.L0 = 0\n    static.Lf = 0\n    static.F  = 0\n    static.fuelWeight = static.F\nendif\n\nif ( button ) then\n    if scaleWeight < LOXTarget then\n        LOXOut = 1\n        static.L0 = scaleWeight\n        LOXWeight = static.L0\n        static.LOXWeight = LOXWeight\n    else\n        LOXOut = 0\n    endif\nelse\n    LOXOut = 0\nendif\n\nstatic.LOXOutValve = LOXOut\n\n        \n",
+      "expression": "// Load LOX by Weight\n\nstatic.LOXTargetWeight\nstatic.currentScale\nstatic.prevFillState\nstatic.tareWeight\nstatic.LOXOutValve\n\nscaleWeight = \"Scale:Scale0\"\nbutton      = buttonVars.FillLOXByWeight\nreset       = buttonVars.resetLOX\nfillState   = static.prevFillState\n\nLOXTarget = static.LOXTargetWeight\nif LOXTarget == 0 then\n    LOXTarget = 200\n    static.movingLOXTarget = LOXTarget\n    static.LOXTargetWeight = LOXTarget\nendif\n\nif ( reset ) then\n    static.L0 = 0\n    static.Lf = 0\n    static.F  = 0\n    static.fuelWeight = static.F\nendif\n\nif ( button ) then\n    if scaleWeight < LOXTarget then\n        LOXOut = 1\n        static.L0 = scaleWeight\n        LOXWeight = static.L0\n        static.LOXWeight = LOXWeight\n        static.movingLOXTarget = LOXTarget\n    else\n        LOXOut = 0\n    endif\nelse\n    LOXOut = 0\nendif\n\nstatic.LOXOutValve = LOXOut\n\n        \n",
       "execution_rate_hz": null
     },
     {
       "name": "Fuel-Fill_By_Weight",
       "enabled": true,
-      "expression": "// Fill Fuel by weight.\n// Read _weight continuously at first, when _weight rises by nn grams assume fuel is now going in.\n// Save the _weight at this point as _static.LOXWeight, calculate needed fuel _weight to reach _static.massRatio.\n// Continue to fill until total _weight equals target = LOXWeight * (1+MR)\n\nstatic.massRatio\nstatic.fuelFillState\nstatic.fuelWeight\nstatic.prevFuelWeight\nstatic.prevLOXWeight\n\nstatic.LOXLossToLNGinput = 0.6  // grams/gram LOX boiled off for each gram of LNG added ~0.5 to 0.7 g/g\n\nweight = \"Scale:Scale0\"\nbutton = buttonVars.FillFuelByWeight\nreset  = buttonVars.resetFuelFill\n\ntargetWeight = static.targetWeight\ntargetFuel   = static.targetFuel\nLOXWeight    = static.LOXWeight\nCorrectedLOX = static.CorrectedLOX\nfuelWeight   = static.fuelWeight\nfullWeight   = static.fullWeight\nfuelOut      = static.FuelOutValve\nminWeight    = static.minWeight\nstate        = static.fuelFillState\nmassRatio    = static.massRatio\n\nL0 = static.L0   // initial LOX\nLf = static.Lf   // calculated final LOX\nR  = static.R    // desired fuel to LOX MR\nF  = static.F    // LNG mass to add\n\nIDLE             = 0\nSTART            = 1\nWAITFORMASSUP    = 2\nCALCNEEDEDMASS   = 3\nWAITFORFINALMASS = 4\nCOMPLETE         = 5\n\nif ( reset ) then\n    state = IDLE\nendif\n\nif ( state == IDLE ) then\n    if ( button ) then\n        state = START\n    endif\n    fuelOut = 0\nelse if ( state == START ) then\n    minWeight = weight\n    state = WAITFORMASSUP\nelse if ( state == WAITFORMASSUP ) then\n    fuelOut = 1\n    if ( weight <= minWeight) then\n        minWeight = weight\n    else if ( weight > minWeight + 1 ) then\n        LOXWeight = weight\n        state = CALCNEEDEDMASS\n    endif\nelse if ( state == CALCNEEDEDMASS ) then\n    L0 = weight                    // initial LOX weight from current scale weight\n    R  = massRatio                 // desired Fuel / LOX\n    b  = static.LOXLossToLNGinput  // LOX boil off to LNG added g/g\n    F  = (R*L0) / (1 + (R*b))      // target LNG load\n    Lf = L0 / (1 + (R*b))          // LOX expected final weight\n    targetFuel   = F\n    targetWeight = Lf + F\n    static.L0 = L0\n    static.Lf = Lf\n    static.F  = F\n    static.R  = R\n    LOXWeight = L0\n    fuelOut   = 0\n    state = WAITFORFINALMASS\nelse if ( state == WAITFORFINALMASS ) then\n    fuelWeight = weight - L0\n    if ( fuelWeight >= targetFuel ) then\n        fuelOut = 0\n        state = COMPLETE\n    else\n        fuelOut = 1\n    endif\nelse if ( state == COMPLETE ) then\n    state = IDLE\nendif\n\nstatic.fuelFillState = state\nstatic.FuelOutValve  = fuelOut\n\nfullWeight           = weight\nstatic.minWeight     = minWeight\nstatic.targetFuel    = targetFuel\nstatic.targetWeight  = targetWeight\nstatic.fuelWeight    = fuelWeight\nstatic.LOXWeight     = L0 - (fuelWeight * static.LOXLossToLNGinput)\nstatic.fullWeight    = fullWeight\n\n\n\n",
+      "expression": "// Fill Fuel by weight.\n// Read _weight continuously at first, when _weight rises by nn grams assume fuel is now going in.\n// Save the _weight at this point as _static.LOXWeight, calculate needed fuel _weight to reach _static.massRatio.\n// Continue to fill until total _weight equals target = LOXWeight * (1+MR)\n\nstatic.massRatio\nstatic.fuelFillState\nstatic.fuelWeight\nstatic.prevFuelWeight\nstatic.prevLOXWeight\n\nstatic.LOXLossToLNGinput = 0.6  // grams/gram LOX boiled off for each gram of LNG added ~0.5 to 0.7 g/g\n\nweight = \"Scale:Scale0\"\nbutton = buttonVars.FillFuelByWeight\nreset  = buttonVars.resetFuelFill\n\ntargetWeight = static.targetWeight\ntargetFuel   = static.targetFuel\nLOXWeight    = static.LOXWeight\nCorrectedLOX = static.CorrectedLOX\nfuelWeight   = static.fuelWeight\nfullWeight   = static.fullWeight\nfuelOut      = static.FuelOutValve\nminWeight    = static.minWeight\nstate        = static.fuelFillState\nmassRatio    = static.massRatio\n\nL0 = static.L0   // initial LOX\nLf = static.Lf   // calculated final LOX\nR  = static.R    // desired fuel to LOX MR\nF  = static.F    // LNG mass to add\n\nIDLE             = 0\nSTART            = 1\nWAITFORMASSUP    = 2\nCALCNEEDEDMASS   = 3\nWAITFORFINALMASS = 4\nCOMPLETE         = 5\n\nif ( reset ) then\n    state = IDLE\nendif\n\nif ( state == IDLE ) then\n    if ( button ) then\n        state = START\n    endif\n    fuelOut = 0\nelse if ( state == START ) then\n    minWeight = weight\n    state = WAITFORMASSUP\nelse if ( state == WAITFORMASSUP ) then\n    fuelOut = 1\n    if ( weight <= minWeight) then\n        minWeight = weight\n    else if ( weight > minWeight + 1 ) then\n        LOXWeight = weight\n        state = CALCNEEDEDMASS\n    endif\nelse if ( state == CALCNEEDEDMASS ) then\n    L0 = weight                    // initial LOX weight from current scale weight\n    R  = massRatio                 // desired Fuel / LOX\n    b  = static.LOXLossToLNGinput  // LOX boil off to LNG added g/g\n    F  = (R*L0) / (1 + (R*b))      // target LNG load\n    Lf = L0 / (1 + (R*b))          // LOX expected final weight\n    targetFuel   = F\n    targetWeight = Lf + F\n    static.L0 = L0\n    static.Lf = Lf\n    static.F  = F\n    static.R  = R\n    LOXWeight = L0\n    fuelOut   = 0\n    state = WAITFORFINALMASS\nelse if ( state == WAITFORFINALMASS ) then\n    fuelWeight = weight - L0\n    if ( fuelWeight >= targetFuel ) then\n        fuelOut = 0\n        state = COMPLETE\n    else\n        fuelOut = 1\n    endif\n    static.movingLOXTarget = targetWeight - targetFuel\nelse if ( state == COMPLETE ) then\n    state = IDLE\nendif\n\nstatic.fuelFillState = state\nstatic.FuelOutValve  = fuelOut\n\nfullWeight           = weight\nstatic.minWeight     = minWeight\nstatic.targetFuel    = targetFuel\nstatic.targetWeight  = targetWeight\nstatic.fuelWeight    = fuelWeight\nstatic.LOXWeight     = L0 - (fuelWeight * static.LOXLossToLNGinput)\nstatic.fullWeight    = fullWeight\n\n\n\n\n",
       "execution_rate_hz": null
     },
     {
@@ -88,6 +82,24 @@
       "name": "CalcMR",
       "enabled": true,
       "expression": "// Calc MR\n\n\nLOXWeight  = static.LOXWeight\nFuelWeight = static.fuelWeight\ncalcMR = 0\n\nif ( LOXWeight > 0.00001 ) then\n    calcMR = FuelWeight / LOXWeight\nendif\n\nstatic.FuelToLOXMR = calcMR",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "LoadProp",
+      "enabled": true,
+      "expression": "// Load prop using eductor, vent and prop inlet valves\n// Note: vent is actually controlled by RunTankPressurization, so we set a global var for that\n\nbutton = buttonVars.LoadProp\nstatic.ventFromLoad\nstatic.EductorOn\n\nvent    = 0\ninlet   = 0\neductor = 0\n\nif ( button == 1 ) then\n    vent    = 1\n    inlet   = 1\n    eductor = 1\nendif\n\nstatic.ventFromLoad = vent\n\n\"DO:PropMixLoad\" = inlet\nstatic.EductorOn = eductor",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "LOXCondOut",
+      "enabled": true,
+      "expression": "\"DO:LOXVent\" = static.LineConditionLOX",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "EductorControl",
+      "enabled": true,
+      "expression": "// Turn on/off eductor via air\n\nbutton  = buttonVars.EductorEn\nloading = static.EductorOn\n\nif ( button or loading ) then\n    eductor = 1\nelse\n    eductor = 0\nendif\n\n\"DO:EductorAir\" = eductor",
       "execution_rate_hz": null
     }
   ]

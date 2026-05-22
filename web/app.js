@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.8";  // 2026-05-06: Target lines on charts (NEW), gauges, and bars now support fixed value OR live signal source (any input kind: AI/AO/TC/DO/PID/Math/Expr/Scale/static/button)
+const UI_VERSION = "2.1.9";  // 2026-05-08: Target-line state now reliably persists in saved layouts — removed bogus saveLayout() refs that threw silently; signalSel.value coerced to number for numeric kinds; guards against saving "Loading..." placeholder during async selector build
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -3220,6 +3220,15 @@ function openWidgetSettings(w) {
           // Centralised target-state writer — called whenever any control
           // changes, so the persisted s.target stays canonical no matter
           // which input the user touched.
+          //
+          // Mutations land in s.target / s.targetColor directly. The layout
+          // dialog's existing convention is "mutate in place; persistence
+          // happens when the user clicks Save Layout, which serializes
+          // state.pages to disk via saveLayoutToFile()". Earlier versions of
+          // this code called a non-existent saveLayout() helper after every
+          // change — those calls threw silently. The mutations themselves
+          // were unaffected, but cleaning them up makes the failure mode of
+          // future edits obvious.
           const writeTarget = () => {
             if (!targetChk.checked) {
               delete s.target;
@@ -3228,8 +3237,21 @@ function openWidgetSettings(w) {
             if (modeSel.value === 'fixed') {
               s.target = { mode: 'fixed', value: parseFloat(fixedInput.value) || 0 };
             } else {
-              s.target = { mode: 'signal',
-                           sel: { kind: signalKindSel.value, index: signalSel.value } };
+              // For numeric kinds the HTML <select> stores values as strings;
+              // coerce to int so the saved layout JSON matches the convention
+              // used everywhere else (sel.index is a number for ai/ao/do/tc/
+              // pid/math/le/expr/scale, a string name for static/button).
+              const kind = signalKindSel.value;
+              let rawIdx = signalSel ? signalSel.value : 0;
+              if (rawIdx === 'Loading...' || rawIdx == null) {
+                // Async selector hasn't finished building yet — keep the old
+                // value rather than persisting garbage. The next user change
+                // (or the kind-change handler's rebuild) will fix it up.
+                return;
+              }
+              const numericKinds = ['ai','ao','do','tc','pid','math','le','expr','scale'];
+              const index = numericKinds.includes(kind) ? (parseInt(rawIdx, 10) || 0) : rawIdx;
+              s.target = { mode: 'signal', sel: { kind, index } };
             }
             if (!s.targetColor) s.targetColor = TARGET_DEFAULT_COLOR;
           };
@@ -3249,14 +3271,20 @@ function openWidgetSettings(w) {
           const rebuildSignalSel = async (kind, currentIndex) => {
             try {
               const newSel = await createSignalSelector(kind, currentIndex, newIdx => {
+                // Keep signalSel's .value in sync with the new selection,
+                // then write the canonical s.target. (No explicit save call —
+                // mutation in place is what the rest of this dialog does.)
                 signalSel.value = newIdx;
                 writeTarget();
-                saveLayout();
               });
               newSel.style.width = '120px';
               newSel.disabled = signalSel.disabled;
               signalSel.replaceWith(newSel);
               signalSel = newSel;
+              // After the real selector mounts, capture its current value
+              // into s.target so a user who never touches it still gets a
+              // valid signal reference saved.
+              writeTarget();
             } catch (e) {
               console.warn('[target-signal] selector build failed:', e);
             }
@@ -3268,21 +3296,17 @@ function openWidgetSettings(w) {
           targetChk.onchange = () => {
             applyEnable();
             writeTarget();
-            saveLayout();
           };
           modeSel.onchange = () => {
             applyEnable();
             writeTarget();
-            saveLayout();
           };
           fixedInput.oninput = () => {
             writeTarget();
-            saveLayout();
           };
           signalKindSel.onchange = async () => {
             await rebuildSignalSel(signalKindSel.value, 0);
             writeTarget();
-            saveLayout();
           };
           colorBtn.onclick = (e) => {
             e.stopPropagation();
@@ -3290,7 +3314,6 @@ function openWidgetSettings(w) {
             createColorPicker(cur, (newColor) => {
               s.targetColor = newColor;
               colorBtn.style.background = newColor;
-              saveLayout();
             });
           };
 
