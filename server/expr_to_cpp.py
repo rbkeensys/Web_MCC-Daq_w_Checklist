@@ -14,8 +14,8 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 - NUMBER, PLUS, MINUS, MULT, DIV, MOD, POWER
 """
 
-__version__ = "3.4.0"
-__updated__ = "2026-05-19"  # Added print()/printf() codegen → C printf to server console
+__version__ = "3.6.0"
+__updated__ = "2026-05-28"  # Generated C functions now named expr_N_<SanitizedUIName> instead of bare expr_N
 
 import json
 import os
@@ -33,6 +33,36 @@ try:
     import expr_print
 except ImportError:
     expr_print = None
+
+
+import re as _re_sym
+
+
+def make_expr_symbol(index: int, name: str) -> str:
+    """
+    Build a valid, unique C identifier for an expression's generated function.
+
+    C function names can only contain [A-Za-z0-9_] and can't start with a
+    digit, so a UI name like "LOX Fill Controller" or "Fuel->LOX MR" can't be
+    used verbatim. We sanitize the name and prefix it with the index:
+
+        index=1,  name="LOX Fill Controller"  -> "expr_1_LOX_Fill_Controller"
+        index=14, name="Fuel->LOX MR"         -> "expr_14_Fuel_LOX_MR"
+        index=5,  name=""                      -> "expr_5"
+
+    The "expr_{index}_" prefix guarantees uniqueness (even for blank or
+    duplicate names) and keeps the functions sorted/greppable, while the
+    suffix makes expressions.cpp readable at a glance.
+    """
+    base = f"expr_{index}"
+    if not name:
+        return base
+    # Replace any run of non-identifier chars with a single underscore
+    cleaned = _re_sym.sub(r'[^A-Za-z0-9_]+', '_', str(name))
+    cleaned = cleaned.strip('_')
+    if not cleaned:
+        return base
+    return f"{base}_{cleaned}"
 
 
 class SignalMap:
@@ -156,8 +186,15 @@ class CPPCodeGenerator:
     def indent(self) -> str:
         return "    " * self.indent_level
     
-    def compile_expression(self, expr_text: str, expr_index: int) -> Tuple[str, List[str], List[str]]:
-        """Compile one expression to C++ function"""
+    def compile_expression(self, expr_text: str, expr_index: int,
+                           func_name: Optional[str] = None) -> Tuple[str, List[str], List[str]]:
+        """Compile one expression to C++ function.
+
+        func_name: the C symbol for the generated function. Defaults to
+        ``expr_{expr_index}`` when not supplied. Callers pass a name-embedding
+        symbol (e.g. ``expr_1_LOX_Fill_Controller``) for readability; it must
+        already be a valid C identifier (see make_expr_symbol()).
+        """
         self.local_vars = set()
         self.static_vars = set()
         self._static_assigns = set()  # Track which static vars are ASSIGNED in this expression
@@ -173,7 +210,8 @@ class CPPCodeGenerator:
         self._collect_variables(ast)
         
         # Generate function
-        func_name = f"expr_{expr_index}"
+        if func_name is None:
+            func_name = f"expr_{expr_index}"
         code = []
         code.append(f"double {func_name}(")
         code.append("    double* ai, double* ao, double* tc, double* do_state, double* pid,")
@@ -581,16 +619,29 @@ def compile_all_expressions(expressions_file: str, config_file: str, output_dir:
     functions = []
     all_local_vars = {}
     all_static_vars = set()
-    
+    expr_names = {}    # index -> UI name (for headers/metadata)
+    expr_symbols = {}  # index -> C function symbol (e.g. expr_1_LOX_Fill_Controller)
+
     for i, expr in enumerate(expressions):
         expr_text = expr.get('expression', '')
         expr_name = expr.get('name', f'Expr{i}')
-        
-        print(f"[CPP] Compiling #{i}: {expr_name}")
+        expr_names[i] = expr_name
+        symbol = make_expr_symbol(i, expr_name)
+        expr_symbols[i] = symbol
+
+        print(f"[CPP] Compiling #{i}: {expr_name}  ->  {symbol}()")
         
         try:
-            func_code, local_vars, static_vars = generator.compile_expression(expr_text, i)
-            functions.append(func_code)
+            func_code, local_vars, static_vars = generator.compile_expression(expr_text, i, func_name=symbol)
+            # Prepend a readable header naming the expression, so anyone reading
+            # the generated expressions.cpp can match a function to its UI name
+            # without counting entries in expressions.json.
+            header = (
+                f"// ============================================================\n"
+                f"// Expr #{i}: \"{expr_name}\"\n"
+                f"// ============================================================\n"
+            )
+            functions.append(header + func_code)
             all_local_vars[i] = local_vars
             all_static_vars.update(static_vars)
             
@@ -606,7 +657,7 @@ def compile_all_expressions(expressions_file: str, config_file: str, output_dir:
             return False
     
     # Generate batch function
-    batch_func = generate_batch_function(len(expressions), all_local_vars)
+    batch_func = generate_batch_function(len(expressions), all_local_vars, expr_names, expr_symbols)
     
     # Write C++ file
     output_path = Path(output_dir)
@@ -630,9 +681,11 @@ inline double clamp(double x, double lo, double hi) {
 
 """)
         
-        # Function prototypes
+        # Function prototypes (symbol embeds the UI name; comment shows raw name)
         for i in range(len(expressions)):
-            f.write(f"double expr_{i}(double*, double*, double*, double*, double*, double*, double*, double*, double*, double*);\n")
+            sym = expr_symbols.get(i, f"expr_{i}")
+            f.write(f"double {sym}(double*, double*, double*, double*, double*, double*, double*, double*, double*, double*);"
+                    f"  // {expr_names.get(i, f'Expr{i}')}\n")
         
         f.write("\n// Expression functions\n\n")
         
@@ -649,6 +702,8 @@ inline double clamp(double x, double lo, double hi) {
     # Write metadata with variable mappings
     metadata = {
         'num_expressions': len(expressions),
+        'expr_names': {str(k): v for k, v in expr_names.items()},      # index -> UI name
+        'expr_symbols': {str(k): v for k, v in expr_symbols.items()},  # index -> C function symbol
         'local_var_names': {str(k): v for k, v in all_local_vars.items()},  # FIXED: was 'local_vars'
         'static_vars': list(sorted(all_static_vars)),
         'buttonvar_map': generator.buttonvar_map,  # name -> index
@@ -663,8 +718,14 @@ inline double clamp(double x, double lo, double hi) {
     return True
 
 
-def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]]) -> str:
+def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]],
+                            expr_names: Optional[Dict[int, str]] = None,
+                            expr_symbols: Optional[Dict[int, str]] = None) -> str:
     """Generate batch evaluation function with per-expression write tracking"""
+    if expr_names is None:
+        expr_names = {}
+    if expr_symbols is None:
+        expr_symbols = {}
     code = []
     code.append("// Batch evaluation with per-expression write tracking")
     code.append("EXPORT void evaluate_all_expressions(")
@@ -714,10 +775,10 @@ def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]]) ->
     
     local_offset = 0
     for i in range(num_exprs):
-        code.append(f"    // Expression {i}")
+        code.append(f"    // Expression {i}: {expr_names.get(i, f'Expr{i}')}")
         code.append(f"    for (int j = 0; j < 64; j++) {{ temp_do[j] = -1.0; }}")  # -1 = not written yet
         code.append(f"    for (int j = 0; j < 16; j++) {{ temp_ao[j] = -999999.0; }}")  # Sentinel for not written
-        code.append(f"    expr_results[{i}] = expr_{i}(ai, ao, tc, do_state, pid, temp_do, temp_ao, scale, static_vars, buttonVars, local_vars_out + {local_offset});")
+        code.append(f"    expr_results[{i}] = {expr_symbols.get(i, f'expr_{i}')}(ai, ao, tc, do_state, pid, temp_do, temp_ao, scale, static_vars, buttonVars, local_vars_out + {local_offset});")
         
         # Track offset for next expression
         if local_vars.get(i):
