@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.9";  // 2026-05-08: Target-line state now reliably persists in saved layouts — removed bogus saveLayout() refs that threw silently; signalSel.value coerced to number for numeric kinds; guards against saving "Loading..." placeholder during async selector build
+const UI_VERSION = "2.1.10";  // 2026-05-19: Expression print() to server console (see expr_print.py); added to expr help
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -9608,6 +9608,13 @@ global.x = value       // Persistent across system</pre>
 ABS(x) SQRT(x) MIN(a,b) MAX(a,b) CLAMP(v,min,max)
 SIN(x) COS(x) TAN(x) ASIN(x) ACOS(x) ATAN(x)
 EXP(x) LOG(x) LOG10(x) POW(base,exp)</pre>
+
+        <h3 style="color:#9ece6a;margin-top:15px;">Console Output</h3>
+        <pre style="background:#1a1d2e;padding:10px;border-radius:4px;font-size:12px;">
+print("Pressure %2.1f psi, valve=%d", static.pressure, buttonVars.valve)
+// C-style printf to the SERVER console (not the browser).
+// %f %.2f %d %x %% etc.  %s is not supported (values are numeric).
+// Has no value — never affects the expression's output.</pre>
 
         <p style="margin-top:20px;color:#9094a1;"><em>For complete documentation with examples, ensure EXPRESSION_REFERENCE.md is in the web directory.</em></p>
       `;

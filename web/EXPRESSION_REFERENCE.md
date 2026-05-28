@@ -1137,6 +1137,55 @@ volume = POW(side, 3)
 
 ---
 
+## Console Output: print()
+
+**print("format", arg1, arg2, ...)** writes a line to the **server console**
+(the terminal/window running the server), not the browser. Use it to watch
+values during operation without cluttering the UI.
+
+The format string uses C `printf` conventions:
+
+```javascript
+print("Pressure %2.1f psi, valve=%d", static.pressure, buttonVars.valve)
+print("Tank=%.2f  Hopper=%.2f", "AI:Tank", "Scale:Hopper")
+print("State %d  progress %d%%", state, pct)
+```
+
+**Format specifiers** (each consumes one argument):
+
+| Spec | Meaning | Example arg → output |
+|------|---------|----------------------|
+| `%f`, `%F` | fixed-point float | `3.14159` → `3.141590` |
+| `%.2f` | float, 2 decimals | `3.14159` → `3.14` |
+| `%6.1f` | float, width 6, 1 decimal | `3.1` → `   3.1` |
+| `%e`, `%g` | scientific / general float | `1234.5` → `1.2345e+03` |
+| `%d`, `%i` | integer (value truncated toward zero) | `3.9` → `3` |
+| `%x`, `%X` | hexadecimal integer | `255` → `ff` |
+| `%o` | octal integer | `8` → `10` |
+| `%c` | character from code point | `65` → `A` |
+| `%%` | a literal percent sign (no argument) | → `%` |
+
+**Notes:**
+- All expression values are numbers. Integer specifiers (`%d`, `%x`, etc.)
+  use the truncated integer part of the value.
+- `%s` is **not** supported — there are no string variables to print.
+- A newline is added automatically; each `print()` is its own console line.
+- `print()` has no value and never affects the expression's output, so you
+  can drop it on its own line anywhere (including as the last line) without
+  changing what the expression computes.
+- Output is prefixed with `[EXPR-PRINT]` in the Python evaluator. In the C++
+  backend it is emitted directly via `printf`.
+- Any input is fair game: locals, `static.name`, `buttonVars.name`,
+  `"AI:..."`, `"Scale:..."`, `"PID:..."`, etc.
+
+```javascript
+// Example: trace a fill state machine
+weight = "Scale:Hopper"
+print("fill state=%d  weight=%.2f  target=%.1f", state, weight, static.target)
+```
+
+---
+
 ## Advanced Integration
 
 ### Using Expressions with Other System Components

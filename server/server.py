@@ -31,8 +31,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.5"
-__updated__ = "2026-05-08"  # Lifted clean_for_json to module scope; REST endpoints now scrub NaN/Inf so 0/0 in expressions doesn't crash JSON serialization
+__version__ = "2.8.6"
+__updated__ = "2026-05-28"  # Removed leftover DEBUG-EVAL/DEBUG-LOCALS/per-tick debug prints and per-expr local-vars enumeration on backend load
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # DLL versioning for hot-reload
@@ -476,10 +476,9 @@ class SerialScaleManager:
                 ser.open()
                 print(f"[Scale{idx}] Opened {port}")
                 buf = ""
-
                 while not stop.is_set():
                     # Read pattern: drain whatever's in the OS serial buffer
-                    # immediately (no waiting), and only block on a 1-byte read,;9
+                    # immediately (no waiting), and only block on a 1-byte read
                     # when nothing is available. The previous ser.read(256) call
                     # would wait for either 256 bytes OR the 1-second timeout,
                     # and a 9 Hz scale at 9 bytes/line takes ~3 s to fill 256 b
@@ -701,9 +700,6 @@ def load_cpp_backend(dll_path: str = "compiled/expressions.dll"):
         if backend:
             log.info(f"[CPP-EXPR] ✓ C++ expression backend loaded from {dll_path}")
             log.info(f"[CPP-EXPR] ✓ Loaded metadata: {backend.num_expressions} expressions")
-            for idx, var_names in backend.local_var_names.items():
-                if var_names:
-                    log.info(f"[CPP-EXPR]   Expr {idx}: {len(var_names)} local vars: {var_names}")
             return backend
         else:
             log.info("[CPP-EXPR] C++ backend not available, using Python")
@@ -1037,15 +1033,6 @@ async def acq_loop():
                         scale_vals=scale_mgr.get_values()  # Serial scales for "Scale:Foo" refs
                     )
                     
-                    # DEBUG: Check after evaluate
-                    if 'pressureSetPoint' in cpp_backend.staticvar_map:
-                        idx = cpp_backend.staticvar_map['pressureSetPoint']
-                        if ticks < 3:  # Only first 3 ticks
-                            log.info(f"[DEBUG-EVAL] AFTER evaluate: pressureSetPoint index={idx} value={cpp_backend.static_vars[idx]}")
-                            log.info(f"[DEBUG-LOCALS] local_vars_per_expr keys: {list(cpp_results.get('local_vars_per_expr', {}).keys())}")
-                            if 0 in cpp_results.get('local_vars_per_expr', {}):
-                                log.info(f"[DEBUG-LOCALS] Expr 0 locals: {cpp_results['local_vars_per_expr'][0]}")
-                    
                     # Convert to same format as Python evaluator
                     expr_tel = []
                     for i in range(len(expr_mgr.expressions)):
@@ -1260,10 +1247,6 @@ async def acq_loop():
             if cpp_backend and hasattr(cpp_backend, 'staticvar_map') and hasattr(cpp_backend, 'static_vars'):
                 for name, index in cpp_backend.staticvar_map.items():
                     frame['static_vars'][name] = float(cpp_backend.static_vars[index])
-                
-                # Debug first 3 ticks
-                if ticks < 3:
-                    log.info(f"[DEBUG] Tick #{ticks+1} static_vars in telemetry: {frame['static_vars']}")
 
             ticks += 1
             log_ctr += 1

@@ -14,8 +14,8 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 - NUMBER, PLUS, MINUS, MULT, DIV, MOD, POWER
 """
 
-__version__ = "3.3.0"
-__updated__ = "2026-05-06"  # Added Scale: signal-type — new scale[] array, scale_map in SignalMap, reads scales.json
+__version__ = "3.4.0"
+__updated__ = "2026-05-19"  # Added print()/printf() codegen → C printf to server console
 
 import json
 import os
@@ -27,6 +27,12 @@ from typing import Dict, List, Tuple, Optional, Set
 # Import expression engine
 sys.path.insert(0, str(Path(__file__).parent / "server"))
 from expr_engine import Lexer, Parser
+
+# Shared print() formatting support (C printf statement generation).
+try:
+    import expr_print
+except ImportError:
+    expr_print = None
 
 
 class SignalMap:
@@ -500,7 +506,27 @@ class CPPCodeGenerator:
             args = [self.generate_node(arg) for arg in node.children]
             args_str = ", ".join(args)
             return f"{func_name}({args_str})"
-        
+
+        elif node_type == 'PRINT':
+            # print("fmt", arg1, ...) -> a C printf statement to stdout.
+            # node.value is the literal format string; node.children are the
+            # argument expressions. This returns a complete statement ending
+            # in ';' so generate_statements() leaves it alone (it won't try to
+            # wrap it as `result = ...`).
+            fmt = node.value
+            arg_exprs = [self.generate_node(arg) for arg in node.children]
+            if expr_print is None:
+                return "/* print() unavailable: expr_print not importable */"
+            if fmt is None:
+                # No format string — print args space-separated as %g.
+                fmt = ' '.join(['%g'] * len(arg_exprs))
+            try:
+                return expr_print.cpp_printf_call(fmt, arg_exprs)
+            except Exception as e:
+                # Bad format string — emit a comment instead of breaking the build
+                safe = str(e).replace('*/', '* /')
+                return f"/* print() format error: {safe} */"
+
         else:
             return f"/* Unhandled: {node_type} */"
 
@@ -594,6 +620,7 @@ def compile_all_expressions(expressions_file: str, config_file: str, output_dir:
 
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
 
 #define EXPORT extern "C" __declspec(dllexport)
 

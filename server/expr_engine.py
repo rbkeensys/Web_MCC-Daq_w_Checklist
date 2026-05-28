@@ -26,13 +26,20 @@ VERSION 2.0 Changes:
 - Added buttonVars support for reading frontend button states
 - buttonVars are read-only in expressions (set by UI buttons)
 """
-__version__ = "2.2.0"
-__updated__ = "2026-05-06"  # Added Scale: signal-type support (read-only)
+__version__ = "2.3.0"
+__updated__ = "2026-05-19"  # Added print()/printf() to console via expr_print module
 
 import re
 import math
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
+
+# Shared print() formatting support (used by both this interpreter and the
+# C++ code generator in expr_to_cpp.py).
+try:
+    import expr_print
+except ImportError:
+    expr_print = None
 
 
 class GlobalVariables:
@@ -509,9 +516,39 @@ class Parser:
         return self.make_node('IF', None, [condition, then_expr, else_expr])
     
     def parse_function_call(self, name: str) -> ASTNode:
-        """Parse function call: func(arg1, arg2, ...)"""
+        """Parse function call: func(arg1, arg2, ...)
+
+        print()/printf() are special-cased: the first argument is a literal
+        format string (lexed as a STRING token, which normally means a signal
+        reference). We capture it verbatim and produce a PRINT node so the
+        evaluator/codegen can treat it as a console-output statement rather
+        than a value-producing expression.
+        """
         self.expect('LPAREN')
-        
+
+        # ---- print()/printf() ----
+        if expr_print is not None and expr_print.is_print_name(name):
+            fmt = None
+            args = []
+            tok = self.current()
+            if tok and tok.type == 'STRING':
+                # First arg: the format string, taken literally.
+                fmt = self.advance().value
+                while self.current() and self.current().type == 'COMMA':
+                    self.advance()  # consume comma
+                    args.append(self.parse_or())
+            elif tok and tok.type != 'RPAREN':
+                # Someone passed a non-string first arg. Treat the whole list
+                # as args with an empty format — the evaluator will just print
+                # them space-separated as a fallback.
+                args.append(self.parse_or())
+                while self.current() and self.current().type == 'COMMA':
+                    self.advance()
+                    args.append(self.parse_or())
+            self.expect('RPAREN')
+            node = self.make_node('PRINT', fmt, args)
+            return node
+
         args = []
         if self.current() and self.current().type != 'RPAREN':
             args.append(self.parse_or())
@@ -606,9 +643,17 @@ class Evaluator:
             self._signal_cache[key] = {'type': 'scale', 'index': i}
     
     def evaluate(self, statements: List[ASTNode]) -> float:
-        """Evaluate list of statements, return last value"""
+        """Evaluate list of statements, return last value.
+
+        PRINT statements are evaluated for their side effect (console output)
+        but do NOT update `result` — otherwise a trailing print() would
+        clobber the expression's actual output value with 0.
+        """
         for stmt in statements:
-            self.result = self.eval_node(stmt)
+            if getattr(stmt, 'type', None) == 'PRINT':
+                self.eval_node(stmt)  # side effect only
+            else:
+                self.result = self.eval_node(stmt)
         return self.result
     
     def eval_node(self, node: ASTNode) -> float:
@@ -783,6 +828,21 @@ class Evaluator:
             
             args = [self.eval_node(arg) for arg in node.children]
             return self.FUNCTIONS[func_name](*args)
+
+        elif node.type == 'PRINT':
+            # print("fmt", arg1, arg2, ...) -> write a line to the server console.
+            # node.value is the literal format string; node.children are the
+            # argument expressions (evaluated to numbers here).
+            fmt = node.value
+            arg_vals = [self.eval_node(arg) for arg in node.children]
+            if expr_print is not None:
+                if fmt is None:
+                    # No format string given — print args space-separated.
+                    fmt = ' '.join(['%g'] * len(arg_vals))
+                expr_print.do_print(fmt, arg_vals)
+            # print() has no useful value; evaluates to 0.0 so it can sit on a
+            # line by itself without affecting `result`.
+            return 0.0
         
         return 0.0
     

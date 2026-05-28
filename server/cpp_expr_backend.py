@@ -20,8 +20,8 @@ CHANGELOG:
   • Hardware write support (DO, AO)
   • Static and global variable support
 """
-__version__ = "3.3.0"
-__updated__ = "2026-05-06"  # Added scale[] array — Scale: signal-type support, 16-arg DLL signature
+__version__ = "3.4.0"
+__updated__ = "2026-05-28"  # Removed verbose per-eval CPP-DEBUG locals dump and per-expr metadata listing; trimmed to summaries; fixed stale 15-param banner
 
 import ctypes
 import json
@@ -93,11 +93,10 @@ class CPPExpressionBackend:
             
             print(f"[CPP-EXPR] Loaded metadata: {self.num_expressions} expressions")
             if self.local_var_names:
-                print(f"[CPP-EXPR] LocalVars: {len(self.local_var_names)} expressions with locals")
-                for expr_idx, var_names in self.local_var_names.items():
-                    print(f"[CPP-EXPR]   Expr {expr_idx}: {var_names}")
-            print(f"[CPP-EXPR] StaticVars: {len(self.staticvar_map)} variables: {list(self.staticvar_map.keys())}")
-            print(f"[CPP-EXPR] ButtonVars: {len(self.buttonvar_map)} variables: {list(self.buttonvar_map.keys())}")
+                _exprs_with_locals = sum(1 for v in self.local_var_names.values() if v)
+                print(f"[CPP-EXPR] LocalVars: {_exprs_with_locals} expressions with locals")
+            print(f"[CPP-EXPR] StaticVars: {len(self.staticvar_map)} variables")
+            print(f"[CPP-EXPR] ButtonVars: {len(self.buttonvar_map)} variables")
             
         except Exception as e:
             print(f"[CPP-EXPR] Error loading metadata: {e}")
@@ -108,7 +107,7 @@ class CPPExpressionBackend:
             raise FileNotFoundError(f"DLL not found: {self.dll_path}")
         
         print(f"[CPP-EXPR] cpp_expr_backend.py VERSION: {__version__} (updated {__updated__})")
-        print(f"[CPP-EXPR] DLL Signature: 15 parameters (NEW)")
+        print(f"[CPP-EXPR] DLL Signature: 16 parameters (ai/ao/tc/do/pid/do_out/ao_out/scale/static/button + outputs)")
         
         self.dll = ctypes.CDLL(str(self.dll_path))
         
@@ -304,16 +303,7 @@ class CPPExpressionBackend:
                     expr_locals[var_name] = self.local_vars_out[local_offset + i]
                 results['local_vars_per_expr'][expr_idx] = expr_locals
                 local_offset += len(var_names)
-        
-        # Debug first call
-        if not hasattr(self, '_debug_locals_shown'):
-            self._debug_locals_shown = True
-            print(f"[CPP-DEBUG] local_var_names keys: {list(self.local_var_names.keys())}")
-            print(f"[CPP-DEBUG] local_vars_per_expr keys: {list(results['local_vars_per_expr'].keys())}")
-            if results['local_vars_per_expr']:
-                for idx, locals_dict in results['local_vars_per_expr'].items():
-                    print(f"[CPP-DEBUG] Expr {idx} locals: {locals_dict}")
-        
+
         return results
     
     def evaluate_pids(
