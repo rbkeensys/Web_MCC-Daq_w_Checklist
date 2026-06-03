@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.10";  // 2026-05-19: Expression print() to server console (see expr_print.py); added to expr help
+const UI_VERSION = "2.1.12";  // 2026-06-03: Indicator dot was invisible — first update() bailed on dot.isConnected before the widget was attached. Also dropped border/glow per request
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -2353,6 +2353,10 @@ function addWidget(type){
   } else if (type === 'mathop') {
     defaultW = 280;
     defaultH = 20;   // Reduced from 40 (HALF AGAIN!)
+  } else if (type === 'indicator') {
+    // Tiny by default — just enough for a small dot + a one-line label.
+    defaultW = 60;
+    defaultH = 40;
   }
   
   const w={ id:crypto.randomUUID(), type, x:40, y:40, w:defaultW, h:defaultH, opts:defaultsFor(type) };
@@ -2693,6 +2697,25 @@ function defaultsFor(type){
     case 'mathop':   return { title:'Math', mathIndex:0, showInputs:true };
     case 'expr':     return { title:'Expression', exprIndex:0, showSource:true, showOutput:true };
     case 'staticvar': return { title:'Static Var', varName:'', decimalPlaces:3 };
+    case 'indicator': return {
+      title: 'Indicator',
+      shape: 'round',          // 'round' or 'rect'
+      size: 14,                // dot/rect diameter in px (~1/8" at 96 DPI is 12)
+      colorA: '#2faa60',       // displayed when condA is true (priority 1)
+      colorB: '#d84a4a',       // displayed when condB is true (priority 2)
+      colorOff: '#3b425e',     // displayed when neither condition is true
+      showLabel: true,
+      condA: {
+        op: '>',                                                       // '>' '<' '=' '!='
+        lhs: { mode: 'signal', sel: { kind: 'ai', index: 0 } },
+        rhs: { mode: 'fixed', value: 0 }
+      },
+      condB: {
+        op: '<',
+        lhs: { mode: 'signal', sel: { kind: 'ai', index: 0 } },
+        rhs: { mode: 'fixed', value: 0 }
+      }
+    };
   }
   return {};
 }
@@ -3667,6 +3690,159 @@ function openWidgetSettings(w) {
     })();
   }
 
+  if (w.type === 'indicator') {
+    // ===== Indicator settings =====
+    // Two priority-ordered conditions (A wins ties), each with:
+    //   lhs (signal-or-fixed)  op (> < = !=)  rhs (signal-or-fixed)
+    // Plus shape, size, three colors, label toggle.
+    //
+    // The operand picker reuses the same convention as target-line sources
+    // (mode 'fixed' = number, mode 'signal' = signal selector). We build the
+    // signal selectors asynchronously and swap them in when they mount, same
+    // pattern target-line uses.
+    const TARGET_KINDS = ['ai','ao','do','tc','pid','math','expr','button','static','scale'];
+
+    /**
+     * Build a row of widgets that lets the user edit one operand of a
+     * comparison. The operand object is mutated in place; we never replace it
+     * (so the surrounding cond object's reference stays valid).
+     */
+    const makeOperandRow = (operand) => {
+      const wrap = el('span', {style: 'display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap'});
+
+      const modeSel = el('select', {});
+      modeSel.append(el('option', {value:'fixed'},  'Fixed'));
+      modeSel.append(el('option', {value:'signal'}, 'Signal'));
+      modeSel.value = (operand.mode === 'signal') ? 'signal' : 'fixed';
+
+      const fixedInp = el('input', {
+        type: 'number', step: 'any',
+        value: Number.isFinite(Number(operand.value)) ? operand.value : 0,
+        style: 'width:80px'
+      });
+
+      const kindSel = selectEnum(TARGET_KINDS,
+        (operand.sel && operand.sel.kind) || 'ai',
+        () => {});
+      let sigSel = el('select', {style: 'min-width:120px'},
+                     [el('option', {}, 'Loading...')]);
+
+      const applyEnable = () => {
+        const isSignal = (modeSel.value === 'signal');
+        fixedInp.disabled = isSignal;
+        kindSel.disabled  = !isSignal;
+        sigSel.disabled   = !isSignal;
+        fixedInp.style.opacity = isSignal ? 0.4 : 1;
+        kindSel.style.opacity  = isSignal ? 1 : 0.4;
+        sigSel.style.opacity   = isSignal ? 1 : 0.4;
+      };
+
+      const writeBack = () => {
+        if (modeSel.value === 'fixed') {
+          operand.mode = 'fixed';
+          operand.value = parseFloat(fixedInp.value) || 0;
+        } else {
+          operand.mode = 'signal';
+          const kind = kindSel.value;
+          let rawIdx = sigSel.value;
+          if (rawIdx === 'Loading...' || rawIdx == null) return;
+          const numericKinds = ['ai','ao','do','tc','pid','math','le','expr','scale'];
+          const index = numericKinds.includes(kind) ? (parseInt(rawIdx, 10) || 0) : rawIdx;
+          operand.sel = { kind, index };
+        }
+      };
+
+      const rebuildSig = async (kind, currentIdx) => {
+        try {
+          const newSel = await createSignalSelector(kind, currentIdx, (newIdx) => {
+            sigSel.value = newIdx;
+            writeBack();
+          });
+          newSel.style.minWidth = '120px';
+          newSel.disabled = sigSel.disabled;
+          sigSel.replaceWith(newSel);
+          sigSel = newSel;
+          // After mount, capture current selection back into the operand
+          writeBack();
+        } catch (e) {
+          console.warn('[indicator] signal selector build failed:', e);
+        }
+      };
+      rebuildSig(
+        (operand.sel && operand.sel.kind) || 'ai',
+        (operand.sel && operand.sel.index !== undefined) ? operand.sel.index : 0
+      );
+
+      modeSel.onchange   = () => { applyEnable(); writeBack(); };
+      fixedInp.oninput   = () => { writeBack(); };
+      kindSel.onchange   = async () => { await rebuildSig(kindSel.value, 0); writeBack(); };
+
+      applyEnable();
+      wrap.append(modeSel, fixedInp, kindSel, sigSel);
+      return wrap;
+    };
+
+    /** Build a full condition editor row: [LHS] [op] [RHS]. */
+    const makeConditionRow = (cond) => {
+      const lhs = makeOperandRow(cond.lhs);
+      const opSel = el('select', {style:'width:60px;font-weight:bold;text-align:center'});
+      ['>','<','=','!='].forEach(o => opSel.append(el('option', {value:o}, o)));
+      opSel.value = cond.op || '>';
+      opSel.onchange = () => { cond.op = opSel.value; };
+      const rhs = makeOperandRow(cond.rhs);
+
+      return el('div', {
+        style: 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;' +
+               'padding:6px;background:#1a1d2e;border-radius:6px'
+      }, [lhs, opSel, rhs]);
+    };
+
+    // Color pickers — reusing the swatch+picker pattern from elsewhere.
+    const makeColorSwatch = (key, defaultColor) => {
+      const sw = el('div', {
+        style: `width:24px;height:22px;border-radius:4px;border:1px solid var(--border);` +
+               `cursor:pointer;background:${w.opts[key] || defaultColor}`,
+        title: 'Click to choose color'
+      });
+      sw.onclick = (e) => {
+        e.stopPropagation();
+        const cur = w.opts[key] || defaultColor;
+        createColorPicker(cur, (newColor) => {
+          w.opts[key] = newColor;
+          sw.style.background = newColor;
+        });
+      };
+      return sw;
+    };
+
+    const shapeSel = selectEnum(['round','rect'], w.opts.shape || 'round',
+                                v => { w.opts.shape = v; });
+    const sizeInp  = inputNum(w.opts, 'size', 1);
+    const showLblChk = inputChk(w.opts, 'showLabel');
+
+    const condARow = makeConditionRow(w.opts.condA);
+    const condBRow = makeConditionRow(w.opts.condB);
+
+    root.append(
+      tableForm([
+        ['Shape',         shapeSel],
+        ['Size (px)',     sizeInp],
+        ['Show Label',    showLblChk],
+        ['Color A (priority 1)', makeColorSwatch('colorA', '#2faa60')],
+        ['Color B (priority 2)', makeColorSwatch('colorB', '#d84a4a')],
+        ['Off color',            makeColorSwatch('colorOff', '#3b425e')]
+      ]),
+      el('div', {style: 'margin-top:12px;color:#a8b3cf;font-size:12px'},
+        'Condition A — shown in Color A when true. Takes priority over B.'),
+      condARow,
+      el('div', {style: 'margin-top:8px;color:#a8b3cf;font-size:12px'},
+        'Condition B — shown in Color B when true (and A is false).'),
+      condBRow,
+      el('div', {style: 'margin-top:8px;color:#7a7f8f;font-size:11px'},
+        'When neither condition is true, the indicator shows the Off color.')
+    );
+  }
+
   showModal(root, () => {
     renderPage();
   });
@@ -3681,7 +3857,13 @@ function renderPage(){
     node.style.width=(w.w||300)+'px';
     node.style.height=(w.h||200)+'px';
     cv.append(node);
-    makeDragResize(node, w, node.querySelector('header'), node.querySelector('.resize'));
+    // Indicators have no header/resize — drag from the body itself, and
+    // skip the resize wiring entirely (size is set in Settings, not by drag).
+    if (w.type === 'indicator') {
+      makeDragResize(node, w, node.querySelector('.body'), null);
+    } else {
+      makeDragResize(node, w, node.querySelector('header'), node.querySelector('.resize'));
+    }
   }
   updateDOButtons();
 }
@@ -3695,7 +3877,19 @@ function renderWidget(w){
   if (w.type === 'bars') classList += ' bars-widget';
   if (w.type === 'expr') classList += ' expr-widget';
   if (w.type === 'staticvar') classList += ' staticvar-widget';
+  if (w.type === 'indicator') classList += ' indicator-widget';
   const box=el('div',{className:classList, id:'w_'+w.id});
+
+  // Indicators are intentionally chromeless: no header bar, no settings/close
+  // icons, no resize grabber. The whole body is the drag handle, and a
+  // right-click (or double-click) opens settings; a context menu lets you
+  // delete it without a visible × button.
+  if (w.type === 'indicator') {
+    const body = el('div', {className: 'body'});
+    box.append(body);
+    mountIndicator(w, body, box);
+    return box;
+  }
   
   const isCompact = (w.type === 'le' || w.type === 'mathop');
   
@@ -3757,6 +3951,8 @@ function renderWidget(w){
     case 'mathop':   mountMathOpWidget(w,body); break;
     case 'expr':     mountExprWidget(w,body); break;
     case 'staticvar': mountStaticVarWidget(w,body); break;
+    // 'indicator' is handled by the early-return branch at the top of
+    // renderWidget (no header / no resize) — don't list it here.
   }
   return box;
 }
@@ -6532,6 +6728,161 @@ function mountStaticVarWidget(w, body) {
   })();
 }
 
+/* ----------------------------- indicator -------------------------------- */
+
+/**
+ * Resolve one side of a condition (lhs or rhs) to a number.
+ *  - { mode:'fixed', value:N }                 -> N
+ *  - { mode:'signal', sel:{kind,index} }       -> readSelection(sel)
+ * Anything malformed yields 0.
+ */
+function _indicatorReadOperand(operand) {
+  if (!operand || typeof operand !== 'object') return 0;
+  if (operand.mode === 'fixed') {
+    const v = Number(operand.value);
+    return Number.isFinite(v) ? v : 0;
+  }
+  if (operand.mode === 'signal') return readSelection(operand.sel);
+  return 0;
+}
+
+/**
+ * Evaluate one comparison: { op, lhs, rhs } -> bool.
+ * Floats are compared with a 1e-9 tolerance for '=' and '!='.
+ */
+function _indicatorEvalCondition(cond) {
+  if (!cond || typeof cond !== 'object') return false;
+  const a = _indicatorReadOperand(cond.lhs);
+  const b = _indicatorReadOperand(cond.rhs);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  switch (cond.op) {
+    case '>':  return a >  b;
+    case '<':  return a <  b;
+    case '=':  return Math.abs(a - b) < 1e-9;
+    case '!=': return Math.abs(a - b) >= 1e-9;
+  }
+  return false;
+}
+
+/**
+ * Indicator widget — small status dot/rect with two priority-ordered
+ * conditions. Drag from the body, right-click (or double-click) to edit,
+ * right-click also offers Delete.
+ *
+ * `box` is the widget root; we attach a contextmenu handler so users can
+ * still reach Settings/Delete even though there's no header bar.
+ */
+function mountIndicator(w, body, box) {
+  body.style.cssText =
+    'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+    'padding:4px;cursor:grab;user-select:none;overflow:hidden;text-align:center;';
+
+  // The dot/rect element. Size and shape are applied in update() so changes
+  // from the settings dialog take effect without a full re-render.
+  const dot = el('div', {});
+
+  // Label below the dot (the widget title).
+  const labelEl = el('div', {
+    style: 'font-size:11px;color:#cfd6f0;margin-top:3px;line-height:1.1;' +
+           'white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:100%;'
+  }, w.opts.title || '');
+
+  body.append(dot, labelEl);
+
+  // Right-click → settings (and Delete). Double-click → settings.
+  // We attach to the box (not body) so the menu fires anywhere in the widget.
+  box.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _showIndicatorContextMenu(w, e.clientX, e.clientY);
+  });
+  body.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    openWidgetSettings(w);
+  });
+
+  // Live update loop — recompute state, repaint dot every frame.
+  //
+  // CAREFUL: mountIndicator() runs inside renderWidget() BEFORE the widget
+  // box is appended to the canvas, so on the very first call dot.isConnected
+  // is false. We must NOT short-circuit on that — if we do, no frame ever
+  // schedules and the dot stays an empty <div> with no width/height/color
+  // (which is what "I see text but no dot" looked like). Instead we paint
+  // unconditionally, then only stop scheduling once the dot HAS been in the
+  // DOM and is no longer (i.e. the widget was actually removed).
+  let _everConnected = false;
+  const update = () => {
+    if (dot.isConnected) _everConnected = true;
+    else if (_everConnected) return;  // widget was removed — stop the loop
+
+    const size = Math.max(6, Number(w.opts.size) || 14);
+    const shape = (w.opts.shape === 'rect') ? 'rect' : 'round';
+
+    // Decide which color to show. condA wins ties (it's priority 1).
+    let color = w.opts.colorOff || '#3b425e';
+    if (_indicatorEvalCondition(w.opts.condA)) {
+      color = w.opts.colorA || '#2faa60';
+    } else if (_indicatorEvalCondition(w.opts.condB)) {
+      color = w.opts.colorB || '#d84a4a';
+    }
+
+    // No border, no glow — just a clean colored dot or rectangle.
+    dot.style.cssText =
+      `width:${size}px;height:${size}px;background:${color};` +
+      `border-radius:${shape === 'round' ? '50%' : '3px'};flex-shrink:0;`;
+
+    // Title might have been edited via Settings — reflect it.
+    const desiredLabel = (w.opts.showLabel === false) ? '' : (w.opts.title || '');
+    if (labelEl.textContent !== desiredLabel) labelEl.textContent = desiredLabel;
+    labelEl.style.display = desiredLabel ? '' : 'none';
+
+    requestAnimationFrame(update);
+  };
+  update();
+}
+
+/**
+ * Small custom context menu for indicators (Edit / Delete).
+ * We can't reuse a generic browser menu since right-click is preventDefaulted
+ * to keep the page's default menu out of the way.
+ */
+function _showIndicatorContextMenu(w, x, y) {
+  // Remove any existing one
+  document.querySelectorAll('.indicator-ctxmenu').forEach(n => n.remove());
+
+  const menu = el('div', {
+    className: 'indicator-ctxmenu',
+    style: `position:fixed;left:${x}px;top:${y}px;z-index:99999;` +
+           'background:#1a1d2e;border:1px solid #2c3150;border-radius:6px;' +
+           'box-shadow:0 4px 16px rgba(0,0,0,0.5);padding:4px;min-width:140px;font-size:13px;'
+  });
+  const mkItem = (label, onClick, danger) => {
+    const it = el('div', {
+      style: 'padding:6px 12px;cursor:pointer;border-radius:4px;color:' +
+             (danger ? '#f0caca' : '#cfd6f0') + ';',
+      onmouseenter: e => e.currentTarget.style.background = '#262b44',
+      onmouseleave: e => e.currentTarget.style.background = 'transparent',
+      onclick: () => { menu.remove(); onClick(); }
+    }, label);
+    return it;
+  };
+  menu.append(
+    mkItem('⚙ Edit Settings', () => openWidgetSettings(w)),
+    mkItem('🗑 Delete',        () => removeWidget(w.id), true)
+  );
+  document.body.append(menu);
+
+  // Dismiss on any click outside
+  const dismiss = (e) => {
+    if (!menu.contains(e.target)) {
+      menu.remove();
+      document.removeEventListener('mousedown', dismiss, true);
+    }
+  };
+  // Defer one tick so the right-click that opened the menu doesn't immediately close it
+  setTimeout(() => document.addEventListener('mousedown', dismiss, true), 0);
+}
+
 /* ------------------------ tick / read / drag ---------------------------- */
 function onTick(){
   if (replayMode !== null) {
@@ -6621,25 +6972,31 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'le' || w.type === 'mathop') minW = 140;  // 50% of default 280
   else if (w.type === 'pidpanel') minW = 168;  // 60% of default 280
   else if (w.type === 'staticvar') minW = 196;  // 70% of default 280
+  else if (w.type === 'indicator') minW = 20;   // small dot+label allowance
   
   let minH = 180;
   if (w.type === 'dobutton') minH = 45;
   else if (w.type === 'le' || w.type === 'mathop') minH = 10;  // Half of default 20
   else if (w.type === 'staticvar') minH = 90;  // Half of default 180
+  else if (w.type === 'indicator') minH = 16;  // dot only, no label
   
   // Bring to front when clicking anywhere on widget
   node.addEventListener('mousedown', (e)=>{
     bringToFront(node);
   });
   
-  header.addEventListener('mousedown', (e)=>{
-    const tag=(e.target.tagName||'').toUpperCase();
-    // Allow clicking on icon spans (settings/close buttons)
-    if (e.target.classList && e.target.classList.contains('icon')) return;
-    if (['INPUT','SELECT','BUTTON','TEXTAREA','LABEL','OPTION'].includes(tag)) return;
-    dragging=true; ox=w.x; oy=w.y; sx=e.clientX; sy=e.clientY; e.preventDefault();
-  });
-  handle.addEventListener('mousedown', (e)=>{ resizing=true; ow=w.w; oh=w.h; sx=e.clientX; sy=e.clientY; e.preventDefault(); });
+  if (header) {
+    header.addEventListener('mousedown', (e)=>{
+      const tag=(e.target.tagName||'').toUpperCase();
+      // Allow clicking on icon spans (settings/close buttons)
+      if (e.target.classList && e.target.classList.contains('icon')) return;
+      if (['INPUT','SELECT','BUTTON','TEXTAREA','LABEL','OPTION'].includes(tag)) return;
+      dragging=true; ox=w.x; oy=w.y; sx=e.clientX; sy=e.clientY; e.preventDefault();
+    });
+  }
+  if (handle) {
+    handle.addEventListener('mousedown', (e)=>{ resizing=true; ow=w.w; oh=w.h; sx=e.clientX; sy=e.clientY; e.preventDefault(); });
+  }
   window.addEventListener('mousemove',(e)=>{
     if(dragging){ w.x=ox+(e.clientX-sx); w.y=oy+(e.clientY-sy); node.style.left=w.x+'px'; node.style.top=w.y+'px'; }
     if(resizing){ w.w=Math.max(minW,ow+(e.clientX-sx)); w.h=Math.max(minH,oh+(e.clientY-sy)); node.style.width=w.w+'px'; node.style.height=w.h+'px'; }
@@ -6713,6 +7070,46 @@ function normalizeLayoutPages(pages){
         w.opts.title         = w.opts.title || w.opts.varName || 'Static Var';
         w.opts.decimalPlaces = Number.isInteger(w.opts.decimalPlaces) ? w.opts.decimalPlaces : 3;
         break;
+      case 'indicator': {
+        // Indicator: small two-color status dot/rect with two priority-ordered
+        // conditions. Each condition has an op and two operands (signal-or-fixed).
+        // Normalize defensively so older saved layouts get sensible defaults.
+        const defOpA = {
+          op: '>',
+          lhs: { mode: 'signal', sel: { kind: 'ai', index: 0 } },
+          rhs: { mode: 'fixed', value: 0 }
+        };
+        const defOpB = {
+          op: '<',
+          lhs: { mode: 'signal', sel: { kind: 'ai', index: 0 } },
+          rhs: { mode: 'fixed', value: 0 }
+        };
+        const fixCond = (c, def) => {
+          if (!c || typeof c !== 'object') return JSON.parse(JSON.stringify(def));
+          if (!['>','<','=','!='].includes(c.op)) c.op = def.op;
+          if (!c.lhs || typeof c.lhs !== 'object') c.lhs = JSON.parse(JSON.stringify(def.lhs));
+          if (!c.rhs || typeof c.rhs !== 'object') c.rhs = JSON.parse(JSON.stringify(def.rhs));
+          for (const side of ['lhs','rhs']) {
+            const s = c[side];
+            if (s.mode !== 'signal' && s.mode !== 'fixed') s.mode = 'fixed';
+            if (s.mode === 'signal' && (!s.sel || typeof s.sel !== 'object')) {
+              s.sel = { kind: 'ai', index: 0 };
+            }
+            if (s.mode === 'fixed' && !Number.isFinite(s.value)) s.value = 0;
+          }
+          return c;
+        };
+        w.opts.title    = w.opts.title || 'Indicator';
+        w.opts.shape    = (w.opts.shape === 'rect') ? 'rect' : 'round';
+        w.opts.size     = Number.isFinite(w.opts.size) && w.opts.size >= 6 ? w.opts.size : 14;
+        w.opts.colorA   = (typeof w.opts.colorA === 'string') ? w.opts.colorA : '#2faa60';
+        w.opts.colorB   = (typeof w.opts.colorB === 'string') ? w.opts.colorB : '#d84a4a';
+        w.opts.colorOff = (typeof w.opts.colorOff === 'string') ? w.opts.colorOff : '#3b425e';
+        w.opts.showLabel= (w.opts.showLabel !== false);
+        w.opts.condA    = fixCond(w.opts.condA, defOpA);
+        w.opts.condB    = fixCond(w.opts.condB, defOpB);
+        break;
+      }
     }
     // ensure position/size exist so renderPage doesn’t choke
     w.x = Number.isFinite(w.x) ? w.x : 40;

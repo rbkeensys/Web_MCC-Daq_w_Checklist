@@ -2,13 +2,13 @@
   "boards1608": [
     {
       "boardNum": 0,
-      "sampleRateHz": 100.0,
+      "sampleRateHz": 160.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
       "analogs": [
         {
-          "name": "LOX P",
+          "name": "AI0",
           "slope": 25.0,
           "offset": -12.486343383789062,
           "cutoffHz": 0.2,
@@ -16,7 +16,7 @@
           "include": true
         },
         {
-          "name": "Fuel P",
+          "name": "AI1",
           "slope": 37.5,
           "offset": -18.777809143066406,
           "cutoffHz": 0.2,
@@ -24,7 +24,7 @@
           "include": true
         },
         {
-          "name": "Unused1",
+          "name": "AI2",
           "slope": 1.0,
           "offset": 0.0,
           "cutoffHz": 1.0,
@@ -32,7 +32,7 @@
           "include": true
         },
         {
-          "name": "Unused2",
+          "name": "AI3",
           "slope": 1.0,
           "offset": 0.0,
           "cutoffHz": 1.0,
@@ -74,7 +74,7 @@
       ],
       "digitalOutputs": [
         {
-          "name": "LOXVent",
+          "name": "S5_MIXNearVent",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
@@ -83,7 +83,7 @@
           "mode": "toggle"
         },
         {
-          "name": "LOXOUT",
+          "name": "S1_LOXOUT",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
@@ -92,7 +92,7 @@
           "mode": "toggle"
         },
         {
-          "name": "FuelVent",
+          "name": "S6_LN2In",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
@@ -101,7 +101,7 @@
           "mode": "toggle"
         },
         {
-          "name": "FuelOUT",
+          "name": "S2_FuelOUT",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
@@ -110,7 +110,7 @@
           "mode": "toggle"
         },
         {
-          "name": "LOX Press",
+          "name": "S7_NearMIXOut",
           "normallyOpen": false,
           "momentary": true,
           "actuationTime": 0.0,
@@ -119,7 +119,7 @@
           "mode": "momentary"
         },
         {
-          "name": "EductorAir",
+          "name": "S9_LOXChill",
           "normallyOpen": false,
           "momentary": true,
           "actuationTime": 0.0,
@@ -128,7 +128,7 @@
           "mode": "momentary"
         },
         {
-          "name": "PURGE",
+          "name": "S8_PURGE",
           "normallyOpen": false,
           "momentary": true,
           "actuationTime": 0.0,
@@ -148,7 +148,7 @@
       ],
       "analogOutputs": [
         {
-          "name": "Servo Cmd",
+          "name": "AO0",
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
@@ -171,7 +171,7 @@
     },
     {
       "boardNum": 2,
-      "sampleRateHz": 100.0,
+      "sampleRateHz": 160.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -252,7 +252,7 @@
           "mode": "toggle"
         },
         {
-          "name": "RunTankVent",
+          "name": "S4_RunTankVent",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
@@ -261,7 +261,7 @@
           "mode": "toggle"
         },
         {
-          "name": "PropMixLoad",
+          "name": "S3_PropMixLoad",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
@@ -270,7 +270,7 @@
           "mode": "toggle"
         },
         {
-          "name": "DO23",
+          "name": "S10_LN2CondVent",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
@@ -349,7 +349,7 @@
         {
           "include": true,
           "ch": 0,
-          "name": "Condense Out",
+          "name": "TC0",
           "type": "K",
           "offset": 0.0,
           "cutoffHz": 0.1
@@ -357,7 +357,7 @@
         {
           "include": true,
           "ch": 1,
-          "name": "Boil In",
+          "name": "TC1",
           "type": "K",
           "offset": 0.0,
           "cutoffHz": 0.1
@@ -365,7 +365,7 @@
         {
           "include": true,
           "ch": 2,
-          "name": "Boil Out",
+          "name": "TC2",
           "type": "K",
           "offset": 0.0,
           "cutoffHz": 0.1
@@ -373,7 +373,7 @@
         {
           "include": true,
           "ch": 3,
-          "name": "Element",
+          "name": "TC3",
           "type": "K",
           "offset": 0.0,
           "cutoffHz": 0.1

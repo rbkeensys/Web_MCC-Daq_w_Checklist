@@ -38,6 +38,17 @@ body.fullscreen #exitFullscreenBtn { display: block; }
 .widget.pidpanel-widget { min-width:168px; }
 .widget.bars-widget { min-width:100px; } /* Allow very narrow bars */
 .widget.staticvar-widget { min-width:120px; min-height:70px; } /* Compact static var display */
+/* Indicator widget — chromeless small dot/rect with no header or resize.
+   The body itself is the drag handle (cursor:grab set inline by mountIndicator).
+   No border, no card background — just the dot/rect and (optionally) a label. */
+.widget.indicator-widget {
+  min-width: 20px;
+  min-height: 16px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.widget.indicator-widget .body { padding: 4px; }
 .widget header { display:flex; align-items:flex-start; gap:8px; padding:8px; cursor:grab; }
 .widget.le-widget header, .widget.mathop-widget header { padding:2px 4px; min-height:14px; font-size:9px; }
 .widget header .title { font-weight:600; }
