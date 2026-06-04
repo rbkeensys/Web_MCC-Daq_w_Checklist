@@ -49,6 +49,18 @@ body.fullscreen #exitFullscreenBtn { display: block; }
   box-shadow: none;
 }
 .widget.indicator-widget .body { padding: 4px; }
+/* Label widget — completely chromeless text. Like the indicator, no header
+   and no resize, but with its own background/border policy. Background is
+   set inline (default 'transparent' so the main window color shows through);
+   the rules here just ensure nothing else paints on top. */
+.widget.label-widget {
+  min-width: 24px;
+  min-height: 14px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.widget.label-widget .body { padding: 4px; }
 .widget header { display:flex; align-items:flex-start; gap:8px; padding:8px; cursor:grab; }
 .widget.le-widget header, .widget.mathop-widget header { padding:2px 4px; min-height:14px; font-size:9px; }
 .widget header .title { font-weight:600; }

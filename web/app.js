@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.12";  // 2026-06-03: Indicator dot was invisible — first update() bailed on dot.isConnected before the widget was attached. Also dropped border/glow per request
+const UI_VERSION = "2.1.13";  // 2026-06-04: New Label widget — text, font, size, fg/bg color, alignment; chromeless like indicator, right-click to edit. Refactored context menu helper to be reusable across chromeless widgets.
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -2357,6 +2357,10 @@ function addWidget(type){
     // Tiny by default — just enough for a small dot + a one-line label.
     defaultW = 60;
     defaultH = 40;
+  } else if (type === 'label') {
+    // Wide enough for a few words at default 16px font.
+    defaultW = 120;
+    defaultH = 36;
   }
   
   const w={ id:crypto.randomUUID(), type, x:40, y:40, w:defaultW, h:defaultH, opts:defaultsFor(type) };
@@ -2715,6 +2719,16 @@ function defaultsFor(type){
         lhs: { mode: 'signal', sel: { kind: 'ai', index: 0 } },
         rhs: { mode: 'fixed', value: 0 }
       }
+    };
+    case 'label': return {
+      text: 'Label',
+      fontFamily: 'system-ui',
+      fontSize: 16,
+      fontWeight: 'normal',    // 'normal' | 'bold'
+      fontStyle: 'normal',     // 'normal' | 'italic'
+      fgColor: '#e6e6e6',      // matches --fg
+      bgColor: 'transparent',  // transparent = inherits main window color
+      align: 'left'            // 'left' | 'center' | 'right'
     };
   }
   return {};
@@ -3843,6 +3857,130 @@ function openWidgetSettings(w) {
     );
   }
 
+  if (w.type === 'label') {
+    // ===== Label settings =====
+    // Text, font family (curated list), font size, bold/italic toggles,
+    // foreground + background color (background defaults to transparent so
+    // the main window color shows through), and horizontal alignment.
+
+    // Multi-line text input so users can paste in a longer label if they want.
+    const textInp = el('textarea', {
+      style: 'width:100%;min-height:54px;resize:vertical;' +
+             'background:#1a1d2e;color:#cfd6f0;border:1px solid #2c3150;' +
+             'border-radius:4px;padding:6px;font:13px/1.4 system-ui'
+    });
+    textInp.value = w.opts.text || '';
+    textInp.oninput = () => { w.opts.text = textInp.value; };
+
+    // Curated font list. Keeping it short avoids the "pick from 200 system
+    // fonts" problem; the stacks here render on every platform we target.
+    const FONTS = [
+      { id: 'system-ui',  label: 'System UI (default)' },
+      { id: '"Segoe UI", system-ui, sans-serif', label: 'Segoe UI' },
+      { id: '"Helvetica Neue", Helvetica, Arial, sans-serif', label: 'Helvetica / Arial' },
+      { id: 'Georgia, "Times New Roman", serif', label: 'Georgia (serif)' },
+      { id: '"Times New Roman", Times, serif', label: 'Times New Roman' },
+      { id: 'Consolas, "Courier New", monospace', label: 'Consolas (monospace)' },
+      { id: '"Courier New", monospace', label: 'Courier New' },
+      { id: 'Impact, "Arial Black", sans-serif', label: 'Impact (heavy)' }
+    ];
+    const fontSel = el('select', {style:'min-width:200px'});
+    for (const f of FONTS) {
+      const opt = el('option', {value: f.id}, f.label);
+      fontSel.append(opt);
+    }
+    // If the saved family isn't in the list (older layout / custom value),
+    // add it as a one-off option so the picker reflects reality.
+    if (!FONTS.find(f => f.id === w.opts.fontFamily) && w.opts.fontFamily) {
+      fontSel.append(el('option', {value: w.opts.fontFamily}, `(custom) ${w.opts.fontFamily}`));
+    }
+    fontSel.value = w.opts.fontFamily || 'system-ui';
+    fontSel.onchange = () => { w.opts.fontFamily = fontSel.value; };
+
+    const sizeInp = el('input', {
+      type:'number', min:'6', max:'200', step:'1',
+      value: Number(w.opts.fontSize) || 16,
+      style:'width:70px'
+    });
+    sizeInp.oninput = () => {
+      const v = parseInt(sizeInp.value, 10);
+      if (Number.isFinite(v) && v >= 6) w.opts.fontSize = v;
+    };
+
+    const boldChk = el('input', {type:'checkbox'});
+    boldChk.checked = (w.opts.fontWeight === 'bold');
+    boldChk.onchange = () => { w.opts.fontWeight = boldChk.checked ? 'bold' : 'normal'; };
+
+    const italicChk = el('input', {type:'checkbox'});
+    italicChk.checked = (w.opts.fontStyle === 'italic');
+    italicChk.onchange = () => { w.opts.fontStyle = italicChk.checked ? 'italic' : 'normal'; };
+
+    const alignSel = el('select', {});
+    [['left','Left'],['center','Center'],['right','Right']].forEach(([v,l]) => {
+      alignSel.append(el('option', {value:v}, l));
+    });
+    alignSel.value = w.opts.align || 'left';
+    alignSel.onchange = () => { w.opts.align = alignSel.value; };
+
+    // Color pickers: foreground always a real color; background can be the
+    // sentinel 'transparent' (which the user gets by clicking the
+    // "Use window background" button).
+    const fgSwatch = el('div', {
+      style:`width:32px;height:24px;border-radius:4px;border:1px solid var(--border);` +
+            `cursor:pointer;background:${w.opts.fgColor || '#e6e6e6'};`,
+      title: 'Click to choose text color'
+    });
+    fgSwatch.onclick = (e) => {
+      e.stopPropagation();
+      createColorPicker(w.opts.fgColor || '#e6e6e6', (newColor) => {
+        w.opts.fgColor = newColor;
+        fgSwatch.style.background = newColor;
+      });
+    };
+
+    const bgSwatch = el('div', {
+      style: `width:32px;height:24px;border-radius:4px;border:1px solid var(--border);` +
+             `cursor:pointer;` +
+             // Show a checkerboard when transparent so it's visibly distinct
+             // from a real dark color.
+             ((w.opts.bgColor && w.opts.bgColor !== 'transparent')
+                ? `background:${w.opts.bgColor};`
+                : `background:repeating-conic-gradient(#333 0% 25%, #555 0% 50%) 50%/8px 8px;`),
+      title: 'Click to choose background color'
+    });
+    bgSwatch.onclick = (e) => {
+      e.stopPropagation();
+      const cur = (w.opts.bgColor && w.opts.bgColor !== 'transparent') ? w.opts.bgColor : '#0f1115';
+      createColorPicker(cur, (newColor) => {
+        w.opts.bgColor = newColor;
+        bgSwatch.style.background = newColor;
+      });
+    };
+
+    const bgTransparentBtn = el('button', {
+      className: 'btn',
+      style: 'padding:3px 8px;font-size:12px',
+      onclick: () => {
+        w.opts.bgColor = 'transparent';
+        bgSwatch.style.background = 'repeating-conic-gradient(#333 0% 25%, #555 0% 50%) 50%/8px 8px';
+      }
+    }, 'Use window bg');
+
+    root.append(
+      tableForm([
+        ['Text',          textInp],
+        ['Font',          fontSel],
+        ['Size (px)',     sizeInp],
+        ['Bold',          boldChk],
+        ['Italic',        italicChk],
+        ['Align',         alignSel],
+        ['Text color',    fgSwatch],
+        ['Background',    el('span', {style:'display:inline-flex;gap:6px;align-items:center'},
+                            [bgSwatch, bgTransparentBtn])]
+      ])
+    );
+  }
+
   showModal(root, () => {
     renderPage();
   });
@@ -3857,9 +3995,10 @@ function renderPage(){
     node.style.width=(w.w||300)+'px';
     node.style.height=(w.h||200)+'px';
     cv.append(node);
-    // Indicators have no header/resize — drag from the body itself, and
-    // skip the resize wiring entirely (size is set in Settings, not by drag).
-    if (w.type === 'indicator') {
+    // Indicators and labels have no header/resize — drag from the body
+    // itself, and skip the resize wiring entirely (size is set in
+    // Settings, not by drag).
+    if (w.type === 'indicator' || w.type === 'label') {
       makeDragResize(node, w, node.querySelector('.body'), null);
     } else {
       makeDragResize(node, w, node.querySelector('header'), node.querySelector('.resize'));
@@ -3878,16 +4017,18 @@ function renderWidget(w){
   if (w.type === 'expr') classList += ' expr-widget';
   if (w.type === 'staticvar') classList += ' staticvar-widget';
   if (w.type === 'indicator') classList += ' indicator-widget';
+  if (w.type === 'label') classList += ' label-widget';
   const box=el('div',{className:classList, id:'w_'+w.id});
 
-  // Indicators are intentionally chromeless: no header bar, no settings/close
-  // icons, no resize grabber. The whole body is the drag handle, and a
-  // right-click (or double-click) opens settings; a context menu lets you
-  // delete it without a visible × button.
-  if (w.type === 'indicator') {
+  // Indicators and labels are intentionally chromeless: no header bar, no
+  // settings/close icons, no resize grabber. The whole body is the drag
+  // handle, and a right-click (or double-click) opens settings; a context
+  // menu lets you delete them without a visible × button.
+  if (w.type === 'indicator' || w.type === 'label') {
     const body = el('div', {className: 'body'});
     box.append(body);
-    mountIndicator(w, body, box);
+    if (w.type === 'indicator') mountIndicator(w, body, box);
+    else                        mountLabel(w, body, box);
     return box;
   }
   
@@ -6794,7 +6935,7 @@ function mountIndicator(w, body, box) {
   box.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    _showIndicatorContextMenu(w, e.clientX, e.clientY);
+    _showChromelessContextMenu(w, e.clientX, e.clientY);
   });
   body.addEventListener('dblclick', (e) => {
     e.preventDefault();
@@ -6842,16 +6983,18 @@ function mountIndicator(w, body, box) {
 }
 
 /**
- * Small custom context menu for indicators (Edit / Delete).
- * We can't reuse a generic browser menu since right-click is preventDefaulted
- * to keep the page's default menu out of the way.
+ * Small custom context menu (Edit / Delete) for chromeless widgets like
+ * indicators and labels — anything that lacks a visible header bar with
+ * settings/close icons. We can't reuse a generic browser menu since
+ * right-click is preventDefaulted to keep the page's default menu out
+ * of the way.
  */
-function _showIndicatorContextMenu(w, x, y) {
+function _showChromelessContextMenu(w, x, y) {
   // Remove any existing one
-  document.querySelectorAll('.indicator-ctxmenu').forEach(n => n.remove());
+  document.querySelectorAll('.chromeless-ctxmenu').forEach(n => n.remove());
 
   const menu = el('div', {
-    className: 'indicator-ctxmenu',
+    className: 'chromeless-ctxmenu',
     style: `position:fixed;left:${x}px;top:${y}px;z-index:99999;` +
            'background:#1a1d2e;border:1px solid #2c3150;border-radius:6px;' +
            'box-shadow:0 4px 16px rgba(0,0,0,0.5);padding:4px;min-width:140px;font-size:13px;'
@@ -6881,6 +7024,60 @@ function _showIndicatorContextMenu(w, x, y) {
   };
   // Defer one tick so the right-click that opened the menu doesn't immediately close it
   setTimeout(() => document.addEventListener('mousedown', dismiss, true), 0);
+}
+
+/* -------------------------------- label --------------------------------- */
+
+/**
+ * Label widget — plain text with adjustable font, foreground and
+ * background colors. No border, no chrome; drag from the body, right-click
+ * (or double-click) for Edit/Delete.
+ *
+ * Re-renders on demand whenever Settings closes (openWidgetSettings's
+ * showModal callback calls renderPage(), which rebuilds the widget).
+ * No animation frame loop needed — labels are static between edits.
+ */
+function mountLabel(w, body, box) {
+  body.style.cssText =
+    'display:flex;align-items:center;justify-content:center;' +
+    'padding:4px;cursor:grab;user-select:none;overflow:hidden;' +
+    'width:100%;height:100%;box-sizing:border-box;';
+
+  const justify = (w.opts.align === 'center') ? 'center'
+                : (w.opts.align === 'right')  ? 'flex-end'
+                : 'flex-start';
+  body.style.justifyContent = justify;
+
+  // Background applies to the whole widget shell so it fills the box even
+  // when the text doesn't reach the edges. 'transparent' inherits the main
+  // window background, which is the user's requested default.
+  box.style.background = w.opts.bgColor || 'transparent';
+  box.style.border = 'none';
+  box.style.boxShadow = 'none';
+
+  const span = el('span', {
+    style:
+      `color:${w.opts.fgColor || '#e6e6e6'};` +
+      `font-family:${w.opts.fontFamily || 'system-ui'};` +
+      `font-size:${Math.max(6, Number(w.opts.fontSize) || 16)}px;` +
+      `font-weight:${w.opts.fontWeight === 'bold' ? 'bold' : 'normal'};` +
+      `font-style:${w.opts.fontStyle === 'italic' ? 'italic' : 'normal'};` +
+      'line-height:1.2;white-space:pre-wrap;word-break:break-word;' +
+      `text-align:${w.opts.align || 'left'};`
+  }, w.opts.text || '');
+
+  body.append(span);
+
+  // Right-click → settings (and Delete). Double-click → settings.
+  box.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _showChromelessContextMenu(w, e.clientX, e.clientY);
+  });
+  body.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    openWidgetSettings(w);
+  });
 }
 
 /* ------------------------ tick / read / drag ---------------------------- */
@@ -6973,12 +7170,14 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'pidpanel') minW = 168;  // 60% of default 280
   else if (w.type === 'staticvar') minW = 196;  // 70% of default 280
   else if (w.type === 'indicator') minW = 20;   // small dot+label allowance
+  else if (w.type === 'label') minW = 24;       // narrow but not invisible
   
   let minH = 180;
   if (w.type === 'dobutton') minH = 45;
   else if (w.type === 'le' || w.type === 'mathop') minH = 10;  // Half of default 20
   else if (w.type === 'staticvar') minH = 90;  // Half of default 180
   else if (w.type === 'indicator') minH = 16;  // dot only, no label
+  else if (w.type === 'label') minH = 14;      // about one line at 12px
   
   // Bring to front when clicking anywhere on widget
   node.addEventListener('mousedown', (e)=>{
@@ -7108,6 +7307,19 @@ function normalizeLayoutPages(pages){
         w.opts.showLabel= (w.opts.showLabel !== false);
         w.opts.condA    = fixCond(w.opts.condA, defOpA);
         w.opts.condB    = fixCond(w.opts.condB, defOpB);
+        break;
+      }
+      case 'label': {
+        // Simple text label — no border, no chrome. Defensive normalize so
+        // older layouts don't crash on missing fields.
+        w.opts.text       = (typeof w.opts.text === 'string') ? w.opts.text : 'Label';
+        w.opts.fontFamily = (typeof w.opts.fontFamily === 'string' && w.opts.fontFamily) ? w.opts.fontFamily : 'system-ui';
+        w.opts.fontSize   = (Number.isFinite(w.opts.fontSize) && w.opts.fontSize >= 6) ? w.opts.fontSize : 16;
+        w.opts.fontWeight = (w.opts.fontWeight === 'bold') ? 'bold' : 'normal';
+        w.opts.fontStyle  = (w.opts.fontStyle === 'italic') ? 'italic' : 'normal';
+        w.opts.fgColor    = (typeof w.opts.fgColor === 'string') ? w.opts.fgColor : '#e6e6e6';
+        w.opts.bgColor    = (typeof w.opts.bgColor === 'string') ? w.opts.bgColor : 'transparent';
+        w.opts.align      = (['left','center','right'].includes(w.opts.align)) ? w.opts.align : 'left';
         break;
       }
     }
