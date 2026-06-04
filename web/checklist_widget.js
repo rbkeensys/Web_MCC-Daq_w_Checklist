@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.12.0';  // 2026-04-03: Auto-save chk.json snapshot on every change; restore on load
+window.CHECKLIST_VERSION = '1.14.0';  // 2026-06-04: Row count is now authoritative. _clRefitWindow measures real row height (from rendered <tr>) and locks dock height to exactly numRows*rowH + chrome. Font changes and Rows changes resize the dock proportionally; dragging the dock corner snaps to a clean numRows-aligned height.
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -119,6 +119,8 @@ function buildChecklistPanel() {
       <button class="btn cl-btn" id="clReturnBtn" title="Return to saved pos (Ctrl+R)">↩ Return</button>
       <button class="btn cl-btn" id="clSetRetBtn" title="Set return point (Ctrl+[)">📌 Set Ret</button>
       <button class="btn cl-btn" id="clRowsBtn"   title="Set visible rows (Ctrl+N)">≡ Rows</button>
+      <button class="btn cl-btn" id="clFontDownBtn" title="Smaller font">A−</button>
+      <button class="btn cl-btn" id="clFontUpBtn"   title="Larger font">A+</button>
       <button class="btn cl-btn" id="clInsBtn"   title="Insert item below active (Ins)">⤵ Insert</button>
       <span class="cl-status" id="clStatus">No checklist loaded</span>
     </div>
@@ -149,7 +151,13 @@ function buildChecklistPanel() {
   panel.querySelector('#clReturnBtn').onclick = clReturn;
   panel.querySelector('#clSetRetBtn').onclick = clSetReturn;
   panel.querySelector('#clRowsBtn').onclick   = clSetRows;
+  panel.querySelector('#clFontDownBtn').onclick = () => clNudgeFont(-0.1);
+  panel.querySelector('#clFontUpBtn').onclick   = () => clNudgeFont(+0.1);
   panel.querySelector('#clInsBtn').onclick    = clInsertBelow;
+
+  // Restore the user's preferred font scale from a previous session.
+  // Must run after the panel is in the DOM so clApplyFontScale can find it.
+  clRestoreFontScale();
 
   // Key events on the panel itself
   panel.addEventListener('keydown', clKeyHandler);
@@ -219,12 +227,117 @@ function _updateStatus() {
 }
 
 function _scrollToActive() {
-  const wrap = _clPanel?.querySelector('#clTableWrap');
-  if (!wrap) return;
-  const rh = 40;
-  wrap.style.maxHeight = (window.checklistNumRows * rh + 36) + 'px';
+  // Just scroll to the active row — the actual sizing is handled by
+  // _clRefitWindow which is called whenever numRows or font scale changes.
+  _clRefitWindow();
   const tr = _clTbody?.querySelector(`tr[data-row="${window.checklistActiveRow}"]`);
   if (tr) tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+/**
+ * Resize the checklist dock so that exactly checklistNumRows rows are
+ * visible. Triggered when:
+ *   - rows count changes (clSetRows)
+ *   - font scale changes (clNudgeFont / clRestoreFontScale)
+ *   - the checklist is (re)loaded
+ *   - the user drags the dock corner (we recompute numRows from the new
+ *     height — keeping the two ways of controlling row count consistent)
+ *
+ * "Row count is authoritative." Whatever causes a change, the resulting
+ * state is: dockHeight = chromeHeight + headerRowHeight + numRows * rowHeight.
+ * That guarantees the visible row count matches numRows regardless of
+ * font scale, and that font/row changes grow or shrink the window
+ * proportionally instead of just letting the visible row count drift.
+ */
+function _clRefitWindow() {
+  const dock = document.getElementById('clDock');
+  const wrap = _clPanel?.querySelector('#clTableWrap');
+  if (!dock || !wrap) return;
+  const table = wrap.querySelector('table.cl-table');
+  if (!table) return;
+
+  // Measure actual row height by inspecting a real <tr> in the tbody.
+  // If the table is empty (no checklist loaded), fall back to a font-scale
+  // weighted estimate that matches what the rules in styles.css produce
+  // at the current --cl-scale. 24px at scale 1.0 lines up with the
+  // table's font-size:12px + 5px top/bottom padding from .cl-td.
+  const tbody = table.querySelector('tbody');
+  const sampleRow = tbody && tbody.querySelector('tr');
+  const scale = parseFloat(getComputedStyle(dock).getPropertyValue('--cl-scale')) || 1;
+  let rowH = sampleRow ? sampleRow.getBoundingClientRect().height : 0;
+  if (!rowH || rowH < 6) rowH = 24 * scale;
+
+  // Header row (<thead><tr>) — measure if visible, otherwise estimate.
+  const headRow = table.querySelector('thead tr');
+  let headH = headRow ? headRow.getBoundingClientRect().height : 0;
+  if (!headH || headH < 6) headH = 22 * scale;
+
+  // Chrome around the wrap inside the dock: drag handle + toolbar + hint
+  // footer + borders. Measured from the rendered elements so it stays
+  // accurate if any of those are re-styled or scaled later.
+  const handle  = dock.querySelector('.cl-drag-handle');
+  const toolbar = _clPanel?.querySelector('.cl-toolbar');
+  const hint    = _clPanel?.querySelector('.cl-hint');
+  const handleH  = handle  ? handle.getBoundingClientRect().height  : 30;
+  const toolbarH = toolbar ? toolbar.getBoundingClientRect().height : 36;
+  const hintH    = hint    ? hint.getBoundingClientRect().height    : 22;
+  // A few pixels for dock border + flexbox math fudge.
+  const chromeH = handleH + toolbarH + hintH + 6;
+
+  const n = Math.max(1, Math.min(15, window.checklistNumRows | 0 || 5));
+  const wrapH = headH + n * rowH + 2;       // +2 for the thin border row
+  const dockH = chromeH + wrapH;
+
+  // Lock the wrap to exactly N rows worth of space (not maxHeight — using
+  // explicit height makes the row count visible-rows-exactly, not
+  // up-to-N-depending-on-other-content).
+  wrap.style.height    = wrapH + 'px';
+  wrap.style.maxHeight = wrapH + 'px';
+  // Signal the ResizeObserver that the dock height change about to fire
+  // came from us, not from the user dragging the corner. Without this
+  // the observer would convert our refit-computed height back into a
+  // numRows value (possibly off-by-one due to sub-pixel rounding) and
+  // we'd be stuck in a refit/observe loop.
+  window._clProgrammaticResize = true;
+  dock.style.height    = dockH + 'px';
+}
+
+/**
+ * Convert a user-dragged dock height back into a numRows value, so the
+ * two controls stay consistent. Called from the ResizeObserver in the
+ * dock's self-mount path. Returns true if numRows actually changed.
+ */
+function _clNumRowsFromDockHeight() {
+  const dock = document.getElementById('clDock');
+  const wrap = _clPanel?.querySelector('#clTableWrap');
+  if (!dock || !wrap) return false;
+  const table = wrap.querySelector('table.cl-table');
+  if (!table) return false;
+
+  const tbody = table.querySelector('tbody');
+  const sampleRow = tbody && tbody.querySelector('tr');
+  const scale = parseFloat(getComputedStyle(dock).getPropertyValue('--cl-scale')) || 1;
+  let rowH = sampleRow ? sampleRow.getBoundingClientRect().height : 0;
+  if (!rowH || rowH < 6) rowH = 24 * scale;
+
+  const headRow = table.querySelector('thead tr');
+  let headH = headRow ? headRow.getBoundingClientRect().height : 22 * scale;
+
+  const handle  = dock.querySelector('.cl-drag-handle');
+  const toolbar = _clPanel?.querySelector('.cl-toolbar');
+  const hint    = _clPanel?.querySelector('.cl-hint');
+  const chromeH = (handle  ? handle.getBoundingClientRect().height  : 30)
+                + (toolbar ? toolbar.getBoundingClientRect().height : 36)
+                + (hint    ? hint.getBoundingClientRect().height    : 22) + 6;
+
+  const dockH = dock.getBoundingClientRect().height;
+  const wrapH = dockH - chromeH;
+  const n = Math.max(1, Math.min(15, Math.round((wrapH - headH) / rowH)));
+  if (n !== window.checklistNumRows) {
+    window.checklistNumRows = n;
+    return true;
+  }
+  return false;
 }
 
 function _clTickDuration() {
@@ -514,6 +627,80 @@ function clSetRows() {
   if (n>=1 && n<=15) { window.checklistNumRows = n; _scrollToActive(); }
 }
 
+/* ---------------------------------------------------------------- font size
+   The checklist panel uses CSS custom property --cl-scale to scale all
+   font-sizes and row padding together (see styles.css .cl-panel block).
+   We persist the user's chosen scale to localStorage so it survives reloads.
+   The store key is intentionally namespaced ('mcc.checklist.fontScale') so
+   it doesn't collide with anything else the app might want to remember. */
+const CL_FONT_SCALE_KEY = 'mcc.checklist.fontScale';
+const CL_FONT_SCALE_MIN  = 0.7;
+const CL_FONT_SCALE_MAX  = 2.0;
+const CL_FONT_SCALE_STEP = 0.1;
+window.clFontScale = 1.0;
+
+function clApplyFontScale() {
+  // Silent — just sets the CSS variable. Called both on user nudges and
+  // on session-restore at mount. The toast notification is separate
+  // (clAnnounceFontScale) so first-load doesn't flash an unsolicited
+  // "Font 100%" message at the user.
+  const panel = document.querySelector('.cl-panel');
+  if (panel) panel.style.setProperty('--cl-scale', String(window.clFontScale));
+}
+
+function clAnnounceFontScale() {
+  // Temporary status-bar toast showing the current scale percentage.
+  // Auto-restores the normal status text after ~900ms.
+  const status = document.getElementById('clStatus');
+  if (!status) return;
+  const pct = Math.round(window.clFontScale * 100);
+  // Stash the current text once so repeated nudges all restore to the
+  // same baseline rather than chaining "Font 110%" → "Font 120%" forever.
+  if (!status.dataset.origText) status.dataset.origText = status.textContent;
+  status.textContent = `Font ${pct}%`;
+  clearTimeout(window._clFontScaleToast);
+  window._clFontScaleToast = setTimeout(() => {
+    if (typeof _updateStatus === 'function') {
+      _updateStatus();
+    } else if (status.dataset.origText) {
+      status.textContent = status.dataset.origText;
+    }
+    delete status.dataset.origText;
+  }, 900);
+}
+
+function clNudgeFont(delta) {
+  const next = Math.max(CL_FONT_SCALE_MIN,
+                        Math.min(CL_FONT_SCALE_MAX,
+                                 Math.round((window.clFontScale + delta) * 100) / 100));
+  if (next === window.clFontScale) return;
+  window.clFontScale = next;
+  clApplyFontScale();
+  // After the browser has applied the new --cl-scale, the rendered row
+  // height has changed — refit the dock so numRows visible stays correct.
+  requestAnimationFrame(() => {
+    if (typeof _clRefitWindow === 'function') _clRefitWindow();
+  });
+  clAnnounceFontScale();
+  try { localStorage.setItem(CL_FONT_SCALE_KEY, String(next)); }
+  catch (e) { /* localStorage may be disabled — non-fatal */ }
+}
+
+function clRestoreFontScale() {
+  try {
+    const v = parseFloat(localStorage.getItem(CL_FONT_SCALE_KEY));
+    if (Number.isFinite(v) && v >= CL_FONT_SCALE_MIN && v <= CL_FONT_SCALE_MAX) {
+      window.clFontScale = v;
+    }
+  } catch (e) { /* no localStorage — keep default 1.0 */ }
+  // Apply silently — no toast for the restore-on-mount path.
+  clApplyFontScale();
+  // Same dance as clNudgeFont — refit after the browser applies the var.
+  requestAnimationFrame(() => {
+    if (typeof _clRefitWindow === 'function') _clRefitWindow();
+  });
+}
+
 function clInsertBelow() {
   if (!window.checklistLoaded) return;
   const items  = window.checklistItems;
@@ -658,9 +845,24 @@ function _clSelfMount() {
   // Load saved layout (position, size, visibility)
   _clLoadLayout(dock);
 
-  // Save layout when resized (CSS resize:both on .cl-dock)
+  // Save layout when resized (CSS resize:both on .cl-dock).
+  // ALSO: convert a user-drag resize into a numRows change so the prompt-
+  // based "Rows" control and direct dragging stay in sync. We use the
+  // _clProgrammaticResize flag to ignore size changes that _clRefitWindow
+  // caused itself — otherwise we'd loop: refit → resize event → recompute
+  // numRows → refit → ...
   if (window.ResizeObserver) {
     const resizeObserver = new ResizeObserver(() => {
+      if (window._clProgrammaticResize) {
+        window._clProgrammaticResize = false;
+        _clSaveLayout(dock);
+        return;
+      }
+      // User-driven resize: figure out which numRows this height implies
+      // and then refit cleanly to lock the visible rows exactly.
+      if (_clNumRowsFromDockHeight()) {
+        _clRefitWindow();  // snaps the dock to a clean rows-aligned height
+      }
       _clSaveLayout(dock);
     });
     resizeObserver.observe(dock);
@@ -676,7 +878,16 @@ function _clSelfMount() {
   function toggleDock() {
     const vis = dock.style.display !== 'none';
     dock.style.display = vis ? 'none' : 'flex';
-    if (!vis) { panel.focus(); }
+    if (!vis) {
+      panel.focus();
+      // Dock just became visible — give the browser a beat to lay it out,
+      // then size to exactly numRows rows. Without this the dock would
+      // show with its last saved pixel height which won't match the
+      // current font scale or numRows setting.
+      requestAnimationFrame(() => {
+        if (typeof _clRefitWindow === 'function') _clRefitWindow();
+      });
+    }
     _clSaveLayout(dock);  // Save visibility state
   }
 

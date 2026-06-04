@@ -340,6 +340,13 @@ table.form input[type="checkbox"] { width:auto; }
   flex-direction: column;
   width: 100%;
   outline: none;
+  /* Master scale factor for all checklist text/padding. JS toggles this
+     via the A−/A+ toolbar buttons (see clNudgeFont in checklist_widget.js).
+     Default 1.0; clamped to 0.7..2.0 in JS. Every font-size and padding
+     value below multiplies through this variable so the table, header,
+     toolbar status, hint footer, and active-row highlight all grow
+     together proportionally. */
+  --cl-scale: 1;
 }
 .cl-toolbar {
   display: flex;
@@ -360,26 +367,31 @@ table.form input[type="checkbox"] { width:auto; }
   text-overflow: ellipsis;
 }
 .cl-table-wrap { overflow: auto; flex: 1; min-height: 80px; }
-.cl-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.cl-table { width: 100%; border-collapse: collapse; font-size: calc(12px * var(--cl-scale)); table-layout: fixed; }
 .cl-th {
   background: #1a1d2e;
   color: #a8b3cf;
   font-style: italic;
-  font-size: 11px;
-  padding: 4px 5px;
+  font-size: calc(11px * var(--cl-scale));
+  padding: calc(4px * var(--cl-scale)) 5px;
   border-bottom: 1px solid #252a3f;
   white-space: nowrap;
   text-align: center;
 }
 .cl-th.cl-item { text-align: left; }
-.cl-num  { width: 38px; }
-.cl-dest { width: 46px; }
-.cl-item { width: auto; }
-.cl-chk  { width: 28px; }
-.cl-dur  { width: 52px; }
-.cl-time { width: 70px; }
+/* Column widths are em-based so they track the table's font-size, which
+   itself scales through var(--cl-scale). This means "PAD3" still fits in
+   the DEST column at A+ font: the column grows together with the text.
+   The values are tuned for the largest expected content in each column
+   (e.g. "ABORT" or "PAD3" in dest, "999.9" in dur). */
+.cl-num  { width: 3em;   }   /* item number, up to 3 digits */
+.cl-dest { width: 4.5em; }   /* destination label, e.g. "PAD3", "ABORT" */
+.cl-item { width: auto;  }   /* takes the remaining width */
+.cl-chk  { width: 2.5em; }   /* ✓ or ○ */
+.cl-dur  { width: 4.5em; }   /* "999.9" */
+.cl-time { width: 6em;   }   /* "HH:MM:SS"-ish */
 .cl-td {
-  padding: 5px 5px;
+  padding: calc(5px * var(--cl-scale)) 5px;
   text-align: center;
   border-bottom: 1px solid #1b1e2e;
   overflow: hidden;
@@ -390,7 +402,7 @@ table.form input[type="checkbox"] { width:auto; }
 .cl-td.cl-comment-text { text-align: left; color: #7a8199; font-style: italic; }
 .cl-tr.cl-active td {
   font-weight: 700;
-  font-size: 14px;
+  font-size: calc(14px * var(--cl-scale));
   background: #1a1f35;
   color: #e8e0b0;
 }
@@ -401,7 +413,7 @@ table.form input[type="checkbox"] { width:auto; }
 }
 .cl-tr.cl-active.cl-checked td {
   font-weight: 700;
-  font-size: 14px;
+  font-size: calc(14px * var(--cl-scale));
   font-style: normal;
   text-decoration: line-through;
   color: #7a8a6a;
@@ -409,9 +421,9 @@ table.form input[type="checkbox"] { width:auto; }
 }
 .cl-tr:hover td { background: rgba(255,255,255,0.03); }
 .cl-comment { background: #111420; }
-.cl-comment td { font-size: 11px; }
+.cl-comment td { font-size: calc(11px * var(--cl-scale)); }
 .cl-hint {
-  font-size: 10px;
+  font-size: calc(10px * var(--cl-scale));
   color: #555c73;
   padding: 3px 6px;
   border-top: 1px solid #1b1e2e;

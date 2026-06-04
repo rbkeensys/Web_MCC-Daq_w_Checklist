@@ -31,8 +31,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.8"
-__updated__ = "2026-06-04"  # Acq loop isolates session_logger.write() — a logger exception no longer halts data acquisition
+__version__ = "2.8.9"
+__updated__ = "2026-06-04"  # Serve popout.html for widget pop-out windows
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # DLL versioning for hot-reload
@@ -126,7 +126,7 @@ app = FastAPI()
 async def _no_cache(request, call_next):
     resp = await call_next(request)
     # disable caching for our UI assets and APIs
-    if request.url.path in ("/", "/index.html", "/app.js", "/styles.css") or request.url.path.startswith("/api/"):
+    if request.url.path in ("/", "/index.html", "/app.js", "/styles.css", "/popout.html") or request.url.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store, max-age=0"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
@@ -217,6 +217,15 @@ def _app_js():
 @app.get("/styles.css")
 def _styles_css():
     return FileResponse(str(WEB_DIR / "styles.css"))
+
+@app.get("/popout.html", response_class=HTMLResponse)
+def _popout_html():
+    """
+    The popout window template. Renders a single widget chromeless and
+    full-bleed, using ?popout=<id> to identify which widget belongs to it.
+    See app.js POPOUT_ID detection for the rest of the flow.
+    """
+    return (WEB_DIR / "popout.html").read_text(encoding="utf-8")
 
 @app.get("/checklist_widget.js")
 def _checklist_widget():

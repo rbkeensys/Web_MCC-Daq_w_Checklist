@@ -1,4 +1,21 @@
-const UI_VERSION = "2.1.13";  // 2026-06-04: New Label widget — text, font, size, fg/bg color, alignment; chromeless like indicator, right-click to edit. Refactored context menu helper to be reusable across chromeless widgets.
+const UI_VERSION = "2.1.17";  // 2026-06-04: Settings dialog now works inside popout windows. showModal lazily creates #modal if missing (popout.html doesn't declare one) instead of dereferencing null.
+
+/* ----------------------------- popout mode ------------------------------ */
+/* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
+   init that:
+     - skips the toolbar / sidebar / page-tabs UI
+     - pulls the widget config from window.opener
+     - opens its own WebSocket
+     - renders just that one widget filling the entire window
+   The main page sets a .popoutId field on the widget to remember which
+   window owns it, hides the widget from its page renderer, and re-docks
+   automatically when the popout window closes.
+   Same code, different entry point — keeps the renderers DRY.            */
+const POPOUT_ID = (() => {
+  try { return new URLSearchParams(location.search).get('popout'); }
+  catch { return null; }
+})();
+const IS_POPOUT = !!POPOUT_ID;
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -2019,6 +2036,10 @@ window.addEventListener('tick', (ev)=>{
 
 /* ------------------------ boot / wiring --------------------------------- */
 document.addEventListener('DOMContentLoaded', () => {
+  if (IS_POPOUT) {
+    initPopout();
+    return;
+  }
   wireUI();
   ensureStarterPage();
   showVersions();
@@ -2027,6 +2048,90 @@ document.addEventListener('DOMContentLoaded', () => {
   hookLogButtons();
   hookScriptButtons();
 });
+
+/**
+ * Pop-out window init. Runs in /popout.html?popout=<widgetId>. We:
+ *   1. Wait for the opener to expose the widget via window.getPopoutWidget(id).
+ *      The opener calls postMessage('popout-ready') back to confirm; we also
+ *      poll briefly in case the message races.
+ *   2. Stuff state.pages with that single widget so updateChartBuffers /
+ *      updateDOButtons / etc. find it the way they normally would.
+ *   3. Render it into #popout-canvas.
+ *   4. Open a WebSocket like the main app and let feedTick drive updates.
+ *   5. Tell the opener when the window closes so the widget re-docks.
+ */
+async function initPopout() {
+  // Title once we know which widget — set a placeholder for now
+  document.title = 'Widget (loading…)';
+
+  let widget = null;
+  // Strategy: try the opener's getter immediately, then poll for up to 5s
+  // in case the opener hasn't finished its own DOMContentLoaded yet (e.g.
+  // if the user opened the popout from a freshly-restored layout).
+  const deadline = performance.now() + 5000;
+  while (!widget && performance.now() < deadline) {
+    try {
+      if (window.opener && typeof window.opener.getPopoutWidget === 'function') {
+        widget = window.opener.getPopoutWidget(POPOUT_ID);
+      }
+    } catch { /* cross-origin or opener gone — give up */ }
+    if (!widget) await new Promise(r => setTimeout(r, 100));
+  }
+
+  if (!widget) {
+    document.getElementById('popout-canvas').innerHTML =
+      '<div style="padding:24px;color:#cfd6f0;font:14px/1.4 system-ui">' +
+      '<h2 style="color:#ff6b6b">Popout failed</h2>' +
+      '<p>Could not find widget data from the main window. ' +
+      'This usually means the main window was closed or reloaded. ' +
+      'Close this window and re-create the popout from the main app.</p>' +
+      '</div>';
+    document.title = 'Popout failed';
+    return;
+  }
+
+  document.title = (widget.opts && widget.opts.title) || widget.type;
+
+  // Minimal page model so the existing renderers find what they expect.
+  // activePageIndex stays at 0; state.pages has exactly the one widget.
+  state.pages = [{ id: 'popout-page', name: '', widgets: [widget] }];
+  activePageIndex = 0;
+
+  // Render into the popout canvas, not the main canvas. We reuse the same
+  // renderWidget() so everything — chart, gauge, indicator, label, etc. —
+  // works identically to the main page.
+  const canvas = document.getElementById('popout-canvas');
+  const node = renderWidget(widget);
+  canvas.append(node);
+  // Initial widget node sizing — the popout.html CSS forces
+  //   #popout-canvas > .widget { width: 100% !important; height: 100% !important; }
+  // so the widget visually fills the window regardless of these inline
+  // values. We set them anyway as defensive defaults in case that CSS
+  // stops applying for any reason. We do NOT update widget.w / widget.h
+  // on resize — those represent the widget's dock-back size on the main
+  // page, and the user resizing the popout shouldn't change how big the
+  // widget is when it returns home.
+  const fit = () => {
+    node.style.left = '0px';
+    node.style.top = '0px';
+    node.style.width = window.innerWidth + 'px';
+    node.style.height = window.innerHeight + 'px';
+  };
+  fit();
+  window.addEventListener('resize', fit);
+
+  // Open a WebSocket and feed ticks just like the main app.
+  connect();
+
+  // Tell the opener we're closing so it can re-dock the widget.
+  window.addEventListener('beforeunload', () => {
+    try {
+      if (window.opener && typeof window.opener.notifyPopoutClosed === 'function') {
+        window.opener.notifyPopoutClosed(POPOUT_ID);
+      }
+    } catch { /* opener gone */ }
+  });
+}
 
 function wireUI(){
   $('#connectBtn')?.addEventListener('click', connect);
@@ -2921,7 +3026,19 @@ async function createSignalSelector(kind, currentIndex, onChange) {
 }
 
 function saveLayoutToFile() {
-  const layout = {pages: state.pages};
+  // Deep-clone state.pages so we can strip transient fields (popoutId)
+  // without mutating the live state. JSON round-trip is the easiest
+  // safe clone for plain widget data.
+  const pagesClone = JSON.parse(JSON.stringify(state.pages));
+  for (const p of pagesClone) {
+    for (const w of (p.widgets || [])) {
+      // popoutId is only meaningful for an open browser window and can't
+      // survive a save/load cycle. Strip it so reloads don't pretend
+      // widgets are still popped out.
+      if (w && w.popoutId) delete w.popoutId;
+    }
+  }
+  const layout = {pages: pagesClone};
   
   // Save checklist position, filename, and content if it exists
   const dock = document.querySelector('.cl-dock');
@@ -3055,6 +3172,32 @@ function openWidgetSettings(w) {
   };
   const nameRow = tableForm([['Title', titleInput]]);
   root.append(el('div', {}, [titleHeader]), nameRow, el('hr', {className: 'soft'}));
+
+  // Pop-out action — lives in Settings (not on the widget header) so that
+  // the toolbar icon strip doesn't grow per-widget and shove existing
+  // layouts around. Action button, not a config value, so we close the
+  // dialog after popping out (otherwise the user would be left looking
+  // at a settings panel for a widget that just vanished from the page).
+  // Suppressed inside an already-popped-out window for obvious reasons.
+  if (!IS_POPOUT) {
+    const popoutBtn = el('button', {
+      className: 'btn',
+      style: 'margin: 8px 0; padding: 6px 14px; font-size: 13px; ' +
+             'background: #1e2235; color: #cfd6f0; ' +
+             'border: 1px solid #4c5170; border-radius: 4px; cursor: pointer;',
+      title: 'Open this widget in a separate browser window — drag it to another monitor',
+      onclick: () => {
+        // Close the settings dialog before popping out so the user
+        // isn't left staring at a panel for a widget that just left
+        // the page. popOutWidget() already calls renderPage() to remove
+        // the widget from view, so we don't need a second renderPage()
+        // here — pass an empty callback to closeModal.
+        closeModal();
+        popOutWidget(w);
+      }
+    }, '⤴ Pop out to separate window');
+    root.append(popoutBtn, el('hr', {className: 'soft'}));
+  }
 
   if (w.type === 'chart' || w.type === 'bars' || w.type === 'gauge') {
     const list = el('div', {});
@@ -3986,9 +4129,29 @@ function openWidgetSettings(w) {
   });
 }
 function renderPage(){
+  // In the popout window we don't render at all from this entry point —
+  // the popout has its own canvas and a single widget that was mounted
+  // once at init time. Widget types with per-frame RAF loops (chart,
+  // gauge, bars, indicator) pick up settings changes naturally because
+  // their draw routines read w.opts every frame. One-shot widgets like
+  // label only refresh on a fresh mount, so settings changes there won't
+  // be visible until the popout is closed and re-opened. Acceptable
+  // trade-off for keeping the popout init path simple — full re-rendering
+  // would also need to tear down chart RAF loops cleanly to avoid leaks.
+  if (IS_POPOUT) return;
+
   const cv=$('#canvas'); cv.innerHTML='';
   const page=state.pages[activePageIndex];
   for(const w of page.widgets){
+    if (w.popoutId) {
+      // Widget is currently displayed in a separate popout window. Skip
+      // rendering it here entirely so the main page has no visual trace
+      // of it. The widget data still lives in state.pages, so closing
+      // the popout window automatically docks it back into its original
+      // slot (see notifyPopoutClosed).
+      continue;
+    }
+
     const node=renderWidget(w);
     node.style.left=(w.x||0)+'px';
     node.style.top=(w.y||0)+'px';
@@ -4036,15 +4199,23 @@ function renderWidget(w){
   
   let toolButtons;
   if (w.type === 'le') {
-    toolButtons = [el('span',{className:'icon', title:'Close', onclick:()=>removeWidget(w.id)}, '×')];
+    toolButtons = IS_POPOUT ? [] :
+      [el('span',{className:'icon', title:'Close', onclick:()=>removeWidget(w.id)}, '×')];
   } else if (w.type === 'expr') {
-    toolButtons = [
+    // Inside a popout, drop × (would only modify the popout's own state.pages
+    // copy). Pop-out lives in Settings, not on the header.
+    toolButtons = IS_POPOUT ? [
+      el('span',{className:'icon', title:'Debug View', onclick:()=>openExpressionDebug(w)}, '🔍'),
+      el('span',{className:'icon', title:'Settings', onclick:()=>openWidgetSettings(w)}, '⚙'),
+    ] : [
       el('span',{className:'icon', title:'Debug View', onclick:()=>openExpressionDebug(w)}, '🔍'),
       el('span',{className:'icon', title:'Settings', onclick:()=>openWidgetSettings(w)}, '⚙'),
       el('span',{className:'icon', title:'Close',    onclick:()=>removeWidget(w.id)}, '×')
     ];
   } else {
-    toolButtons = [
+    toolButtons = IS_POPOUT ? [
+      el('span',{className:'icon', title:'Settings', onclick:()=>openWidgetSettings(w)}, '⚙'),
+    ] : [
       el('span',{className:'icon', title:'Settings', onclick:()=>openWidgetSettings(w)}, '⚙'),
       el('span',{className:'icon', title:'Close',    onclick:()=>removeWidget(w.id)}, '×')
     ];
@@ -4102,6 +4273,123 @@ function removeWidget(id){
   const idx=page.widgets.findIndex(x=>x.id===id);
   if(idx>=0){ page.widgets.splice(idx,1); renderPage(); }
 }
+
+/* ----------------------------- pop-out --------------------------------- */
+// Map of popoutId -> { window, widget, ownerPageIndex }. Used to find a
+// widget by its popout id when the popout window calls back to us, and to
+// clean up if the user closes the popout via the OS close button.
+const _popouts = new Map();
+
+/**
+ * Pop a widget out into its own browser window. Called from the widget's
+ * header (or for chromeless widgets, from their context menu). The widget
+ * stays in state.pages (so layout save/load still includes it), but gets
+ * a popoutId and is skipped by the main page renderer.
+ *
+ * Note: window.open() must be called from a direct user gesture (click)
+ * to bypass popup blockers — don't call this from any deferred path.
+ */
+function popOutWidget(w){
+  if (IS_POPOUT) return;  // can't pop out from within a popout
+  if (w.popoutId) {
+    // Already popped — try to focus its window instead.
+    const existing = _popouts.get(w.popoutId);
+    if (existing && existing.window && !existing.window.closed) {
+      existing.window.focus();
+      return;
+    }
+    // Stale reference — clear it and re-pop.
+    delete w.popoutId;
+  }
+
+  const id = crypto.randomUUID();
+  w.popoutId = id;
+
+  // Size the window to match the widget's current size, so it pops out
+  // looking the same size as the user remembers.
+  const winW = Math.max(320, Math.min(2000, (w.w || 600) + 16));
+  const winH = Math.max(200, Math.min(1500, (w.h || 400) + 39));
+  // Window features:
+  //   * No 'popup' flag — that's what was making the OS window non-resizable.
+  //     Even with width/height set, some browsers honor 'popup' as "this is
+  //     a fixed-size kiosk window, don't let the user drag the border."
+  //     Without it, we still get a separate window (because width/height
+  //     are specified), but the user can drag the borders to any size and
+  //     the widget reflows via CSS (.widget canvas is width/height: 100%).
+  //   * resizable=yes — legacy hint, ignored by modern browsers but harmless,
+  //     and Firefox/Safari may still honor it in some configs.
+  //   * menubar/toolbar/location/status no — keep the chrome minimal so the
+  //     widget gets as much of the window as possible.
+  const features = `width=${winW},height=${winH},resizable=yes,menubar=no,toolbar=no,location=no,status=no`;
+
+  let popWin;
+  try {
+    popWin = window.open(`/popout.html?popout=${encodeURIComponent(id)}`, '_blank', features);
+  } catch (e) {
+    console.warn('[popout] window.open failed:', e);
+    popWin = null;
+  }
+  if (!popWin) {
+    delete w.popoutId;
+    alert('Could not open popout window — please allow popups for this site, then try again.');
+    return;
+  }
+
+  // Find which page the widget lives on, since renderPage uses
+  // activePageIndex and we need to render the right page when the popout
+  // closes (which might not be the page that's active at the time).
+  let ownerPageIndex = activePageIndex;
+  for (let i = 0; i < state.pages.length; i++) {
+    if (state.pages[i].widgets.some(x => x.id === w.id)) {
+      ownerPageIndex = i;
+      break;
+    }
+  }
+  _popouts.set(id, { window: popWin, widget: w, ownerPageIndex });
+
+  // Best-effort cleanup if the popout window gets closed but for some
+  // reason doesn't fire its beforeunload notification (e.g. browser quit).
+  const watcher = setInterval(() => {
+    if (popWin.closed) {
+      clearInterval(watcher);
+      notifyPopoutClosed(id);
+    }
+  }, 1000);
+
+  // Re-render the main page so this widget disappears from it.
+  renderPage();
+}
+
+/**
+ * Called by a popout window during its init to grab its widget config.
+ * Returns the LIVE widget object (not a clone) so any changes to its
+ * `opts` made via Settings in the main window are visible to the popout's
+ * per-frame draw code.
+ */
+window.getPopoutWidget = function(popoutId) {
+  const entry = _popouts.get(popoutId);
+  if (!entry) return null;
+  return entry.widget;
+};
+
+/**
+ * Called by the popout window's beforeunload (or by our polling watcher
+ * when window.closed flips true). Re-docks the widget into its original
+ * page by clearing the popoutId and re-rendering.
+ */
+window.notifyPopoutClosed = function(popoutId) {
+  const entry = _popouts.get(popoutId);
+  if (!entry) return;
+  _popouts.delete(popoutId);
+  const w = entry.widget;
+  if (w && w.popoutId === popoutId) {
+    delete w.popoutId;
+  }
+  // If the user is currently looking at the owner page, refresh it.
+  if (activePageIndex === entry.ownerPageIndex) {
+    renderPage();
+  }
+};
 
 function widgetOptions(w){
   const opts=[];
@@ -7009,10 +7297,18 @@ function _showChromelessContextMenu(w, x, y) {
     }, label);
     return it;
   };
-  menu.append(
+  const items = [
     mkItem('⚙ Edit Settings', () => openWidgetSettings(w)),
-    mkItem('🗑 Delete',        () => removeWidget(w.id), true)
-  );
+  ];
+  // Pop out / Delete only make sense in the main window — inside a popout
+  // the widget IS the window, so popping out again would be nonsense and
+  // "Delete" would only remove the widget from the popout's minimal state
+  // copy (and leave the main window thinking it's still popped out).
+  if (!IS_POPOUT) {
+    items.push(mkItem('⤴ Pop out', () => popOutWidget(w)));
+    items.push(mkItem('🗑 Delete',  () => removeWidget(w.id), true));
+  }
+  menu.append(...items);
   document.body.append(menu);
 
   // Dismiss on any click outside
@@ -7206,6 +7502,12 @@ function makeDragResize(node, w, header, handle){
 function normalizeLayoutPages(pages){
   const norm = (w) => {
     w.opts = w.opts || {};
+    // A popoutId is only meaningful for the lifetime of an open popout
+    // window. Reloading the page or loading a saved layout invalidates
+    // any previously-recorded popout — clear it so the widget docks
+    // back into the main page rather than showing a "popped out"
+    // placeholder forever.
+    if (w.popoutId) delete w.popoutId;
     switch (w.type) {
       case 'chart':
         w.opts.title      = w.opts.title ?? 'Chart';
@@ -7337,8 +7639,27 @@ function normalizeLayoutPages(pages){
 }
 
 /* -------------------------- modal / editors ----------------------------- */
+function _ensureModalRoot() {
+  // The main index.html declares <div id="modal" class="modal hidden"></div>
+  // up front, but popout.html doesn't (it's a stripped-down template that
+  // hosts a single widget). Without this lazy creation, clicking the ⚙
+  // gear in a popped-out widget would hit `null.classList.remove(...)`
+  // and silently fail (with PyCharm's JS debugger or browser dev tools
+  // attached, that null deref might trigger a breakpoint). Returning a
+  // ready-to-use modal element here means showModal works in any context
+  // that loads app.js.
+  let m = document.getElementById('modal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'modal';
+    m.className = 'modal hidden';
+    document.body.append(m);
+  }
+  return m;
+}
+
 function showModal(content, onClose){
-  const m=$('#modal'); m.classList.remove('hidden'); m.innerHTML='';
+  const m=_ensureModalRoot(); m.classList.remove('hidden'); m.innerHTML='';
   const panel=el('div',{className:'panel'});
   const closeBtn=el('button',{className:'btn',onclick:()=>{ closeModal(onClose); }},'Close');
   const close=el('div',{style:'text-align:right;margin-bottom:8px;'}, closeBtn);
@@ -7346,8 +7667,8 @@ function showModal(content, onClose){
 }
 
 function closeModal(onClose){
-  const m=$('#modal'); 
-  m.classList.add('hidden'); 
+  const m=document.getElementById('modal');
+  if (m) m.classList.add('hidden');
   if (typeof onClose==='function') onClose();
 }
 function openJsonEditor(title,url){
