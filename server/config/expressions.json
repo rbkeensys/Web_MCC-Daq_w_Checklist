@@ -117,7 +117,7 @@
     {
       "name": "S5_LineVent_Control",
       "enabled": true,
-      "expression": "// Controls the S5 Valve\n\nbackFlush = static.backFlush\n\"DO:S5_MIXNearVent\" = backFlush\n    ",
+      "expression": "// Controls the S5 Valve\nChillS7  = buttonVars.ChillS7\nbackFlush = static.backFlush\n\n\"DO:S5_MIXNearVent\" = backFlush or ChillS7\n    ",
       "execution_rate_hz": null
     },
     {
@@ -129,7 +129,7 @@
     {
       "name": "S7_MixOut_Control",
       "enabled": true,
-      "expression": "// Controls the S7 Valve\n\nS7_Control = static.loadProp\n\"DO:S7_NearMIXOut\" = S7_Control\n",
+      "expression": "// Controls the S7 Valve\n\nChillS7  = buttonVars.ChillS7\nloadProp = static.loadProp\n\n\n\nS7_Control = loadProp or ChillS7\n\"DO:S7_NearMIXOut\" = S7_Control\n",
       "execution_rate_hz": null
     },
     {
@@ -147,7 +147,7 @@
     {
       "name": "BackFlush",
       "enabled": true,
-      "expression": "// Back Flush Sequencer\n\nstatic.backFlushDuration = 1000\nstate    = static.backFlushState\ntimer    = static.backFlushLoopTimer\nbutton   = buttonVars.BackFlush\nloadProp = static.loadProp\n\nIDLE        = 0\nOPENVALVES  = 1\nFLUSHING    = 2\nCLOSEVALVES = 3\n\nbackFlush = 0\n\nif (loadProp == 0) then\n  if ( state == IDLE ) then\n    static.backFlushLoopTimer = 0\n    if ( button ) then\n        state = OPENVALVES\n    endif\n  else if ( state == OPENVALVES ) then\n    backFlush = 1\n    state = FLUSHING\n  else if ( state == FLUSHING ) then\n    backFlush = 1\n    if ( timer > static.backFlushDuration ) then\n        state = CLOSEVALVES\n    endif\n  else if ( state == CLOSEVALVES ) then\n    backFlush = 0\n    state = IDLE\n  endif\nendif\n\nstatic.backFlush = backFlush\nstatic.backFlushState = state\n\nif ( state ) then\n    static.backFlushLoopTimer = static.backFlushLoopTimer + static.timeIncPerLoop\nendif\n\n",
+      "expression": "// Back Flush Sequencer\n\nstatic.backFlushDuration = 1500\nstate    = static.backFlushState\ntimer    = static.backFlushLoopTimer\nbutton   = buttonVars.BackFlush\nloadProp = static.loadProp\n\nIDLE        = 0\nOPENVALVES  = 1\nFLUSHING    = 2\nCLOSEVALVES = 3\n\nbackFlush = 0\n\nif (loadProp == 0) then\n  if ( state == IDLE ) then\n    static.backFlushLoopTimer = 0\n    if ( button ) then\n        state = OPENVALVES\n    endif\n  else if ( state == OPENVALVES ) then\n    backFlush = 1\n    state = FLUSHING\n  else if ( state == FLUSHING ) then\n    backFlush = 1\n    if ( timer > static.backFlushDuration ) then\n        state = CLOSEVALVES\n    endif\n  else if ( state == CLOSEVALVES ) then\n    backFlush = 0\n    state = IDLE\n  endif\nendif\n\nstatic.backFlush = backFlush\nstatic.backFlushState = state\n\nif ( state ) then\n    static.backFlushLoopTimer = static.backFlushLoopTimer + static.timeIncPerLoop\nendif\n\n",
       "execution_rate_hz": null
     },
     {
