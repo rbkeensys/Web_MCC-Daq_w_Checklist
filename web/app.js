@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.17";  // 2026-06-04: Settings dialog now works inside popout windows. showModal lazily creates #modal if missing (popout.html doesn't declare one) instead of dereferencing null.
+const UI_VERSION = "2.1.18";  // 2026-06-04: Checklist pop-out support — popout.html loads checklist_widget.js too, ?popout=checklist routes to the checklist init path.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -2063,6 +2063,19 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initPopout() {
   // Title once we know which widget — set a placeholder for now
   document.title = 'Widget (loading…)';
+
+  // Special case: ?popout=checklist isn't a widget id, it's a sentinel
+  // meaning "this popout window hosts the checklist dock." The checklist
+  // owns its DOM and state via checklist_widget.js; all we need to do
+  // here is open the WebSocket so state.lastT keeps updating (the
+  // checklist's TIME column reads it). The actual mount happens in
+  // _clBootChecklistPopout, dispatched from checklist_widget.js's own
+  // DOMContentLoaded path.
+  if (POPOUT_ID === 'checklist') {
+    document.title = 'Checklist';
+    connect();
+    return;
+  }
 
   let widget = null;
   // Strategy: try the opener's getter immediately, then poll for up to 5s

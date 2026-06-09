@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.14.0';  // 2026-06-04: Row count is now authoritative. _clRefitWindow measures real row height (from rendered <tr>) and locks dock height to exactly numRows*rowH + chrome. Font changes and Rows changes resize the dock proportionally; dragging the dock corner snaps to a clean numRows-aligned height.
+window.CHECKLIST_VERSION = '1.15.0';  // 2026-06-04: Pop-out support via 📤 Pop button. Popout mode: dock fills the window, takes state copy from opener, copies back on close. ?popout=checklist sentinel distinguishes from regular widget popouts.
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -121,6 +121,7 @@ function buildChecklistPanel() {
       <button class="btn cl-btn" id="clRowsBtn"   title="Set visible rows (Ctrl+N)">≡ Rows</button>
       <button class="btn cl-btn" id="clFontDownBtn" title="Smaller font">A−</button>
       <button class="btn cl-btn" id="clFontUpBtn"   title="Larger font">A+</button>
+      <button class="btn cl-btn" id="clPopBtn"      title="Pop out checklist to a separate window">📤 Pop</button>
       <button class="btn cl-btn" id="clInsBtn"   title="Insert item below active (Ins)">⤵ Insert</button>
       <span class="cl-status" id="clStatus">No checklist loaded</span>
     </div>
@@ -153,6 +154,17 @@ function buildChecklistPanel() {
   panel.querySelector('#clRowsBtn').onclick   = clSetRows;
   panel.querySelector('#clFontDownBtn').onclick = () => clNudgeFont(-0.1);
   panel.querySelector('#clFontUpBtn').onclick   = () => clNudgeFont(+0.1);
+  // The Pop button only makes sense in the main window — inside a popout
+  // it'd mean "pop out the popout" which is nonsense. Hide it in the
+  // popout window itself.
+  const popBtn = panel.querySelector('#clPopBtn');
+  if (popBtn) {
+    if (_CL_IS_CHECKLIST_POPOUT) {
+      popBtn.style.display = 'none';
+    } else {
+      popBtn.onclick = clPopOutChecklist;
+    }
+  }
   panel.querySelector('#clInsBtn').onclick    = clInsertBelow;
 
   // Restore the user's preferred font scale from a previous session.
@@ -701,6 +713,136 @@ function clRestoreFontScale() {
   });
 }
 
+/* ============================================================== pop-out ===
+
+   Move the checklist to a separate browser window for multi-monitor
+   layouts. Ownership semantics (intentionally simple):
+   
+     - While popped out: the popout window owns the state and the user
+       interacts there. The main window's dock is hidden and its duration
+       timer is paused so it doesn't double-tick the durations.
+     - On close: the popout copies its state back to the opener's globals
+       so the main window can resume cleanly.
+     - State copying is one-shot at popout open / popout close. This
+       deliberately avoids the synchronization complexity of "both windows
+       editing the same data live"; the main window's dock is invisible
+       while popped out anyway, so the user doesn't lose anything.        */
+
+const _CL_POPOUT_STATE_KEYS = [
+  // Primitive globals that need to round-trip explicitly. Arrays/objects
+  // can pass by reference, but primitives need copy semantics.
+  'checklistActiveRow', 'checklistShowRow', 'checklistLoaded',
+  'checklistFilename', 'checklistNumRows', 'clFontScale',
+];
+
+function clPopOutChecklist() {
+  // Already open? Just focus it.
+  if (window._clPopoutWindow && !window._clPopoutWindow.closed) {
+    window._clPopoutWindow.focus();
+    return;
+  }
+
+  const features = 'width=720,height=520,resizable=yes,menubar=no,toolbar=no,location=no,status=no';
+  const popWin = window.open('/popout.html?popout=checklist', '_blank', features);
+  if (!popWin) {
+    alert('Could not open popout window — please allow popups for this site.');
+    return;
+  }
+  window._clPopoutWindow = popWin;
+
+  // Pause our timer and hide our dock. The popout will mount its own
+  // dock + timer when it loads.
+  if (_clDurTimer) {
+    clearInterval(_clDurTimer);
+    _clDurTimer = null;
+  }
+  window.checklistPoppedOut = true;
+  const dock = document.getElementById('clDock');
+  if (dock) dock.style.display = 'none';
+
+  // Fallback close detection in case the popout fails to fire its
+  // beforeunload notification (e.g. browser quit). The popout's normal
+  // close path calls window.opener._clChecklistPopoutClosed() directly.
+  const watcher = setInterval(() => {
+    if (popWin.closed) {
+      clearInterval(watcher);
+      _clChecklistPopoutClosed();
+    }
+  }, 1000);
+}
+
+/**
+ * Called from the popout window's beforeunload (or by our 1Hz watcher if
+ * the popout was closed without firing beforeunload). Pulls the popout's
+ * state back into our globals and re-shows the dock.
+ *
+ * The popout calls this on us via window.opener._clChecklistPopoutClosed()
+ * BEFORE its own globals get torn down. So at the moment we run, the
+ * popout's window is still alive and we can read from it.
+ */
+window._clChecklistPopoutClosed = function _clChecklistPopoutClosed() {
+  const popWin = window._clPopoutWindow;
+  if (popWin && !popWin.closed) {
+    // Copy primitive globals back from the popout.
+    try {
+      for (const k of _CL_POPOUT_STATE_KEYS) {
+        if (k in popWin) window[k] = popWin[k];
+      }
+      // Arrays passed by reference shouldn't need to be copied — but
+      // if the popout reassigned the array (e.g. via clLoadFile),
+      // we need to pick up the new reference.
+      if (Array.isArray(popWin.checklistItems)) {
+        window.checklistItems = popWin.checklistItems;
+      }
+    } catch (e) {
+      console.warn('[Checklist popout] State copy-back failed:', e);
+    }
+  }
+  window._clPopoutWindow = null;
+  window.checklistPoppedOut = false;
+
+  // Re-show the dock if a checklist is still loaded; restart the timer.
+  const dock = document.getElementById('clDock');
+  if (dock && window.checklistLoaded) dock.style.display = 'flex';
+  if (!_clDurTimer) _clDurTimer = setInterval(_clTickDuration, 100);
+
+  // Re-render with the popout's possibly-mutated state.
+  _renderTable();
+  if (typeof _clRefitWindow === 'function') {
+    requestAnimationFrame(_clRefitWindow);
+  }
+};
+
+/**
+ * Called by the popout window's own DOMContentLoaded init path. Sets up
+ * the popout's globals by copying from the opener, then runs the normal
+ * self-mount + auto-load path.
+ *
+ * Returns true on success so the popout's init code can know whether the
+ * state arrived. Returns false if the opener isn't reachable (in which
+ * case the popout init should show an error and not try to mount).
+ */
+window._clInitChecklistPopout = function _clInitChecklistPopout() {
+  try {
+    if (!window.opener) return false;
+    // Copy primitives in.
+    for (const k of _CL_POPOUT_STATE_KEYS) {
+      if (k in window.opener) window[k] = window.opener[k];
+    }
+    // Adopt the opener's array reference. Mutations to individual items
+    // in the popout will be visible to the opener via the shared reference,
+    // BUT the opener won't react (it's not rendering); the dock-back path
+    // re-renders on close.
+    if (Array.isArray(window.opener.checklistItems)) {
+      window.checklistItems = window.opener.checklistItems;
+    }
+    return true;
+  } catch (e) {
+    console.warn('[Checklist popout] Init failed:', e);
+    return false;
+  }
+};
+
 function clInsertBelow() {
   if (!window.checklistLoaded) return;
   const items  = window.checklistItems;
@@ -818,7 +960,30 @@ function _makeDraggable(dock, handle) {
 }
 
 /* ================================================================ self-mount */
+/* Detect what kind of window we're in. Done inline rather than reading
+   constants from app.js because checklist_widget.js loads first in
+   popout.html. Three states:
+     null           — regular main window; full self-mount as before.
+     'checklist'    — popout window dedicated to the checklist; mount and
+                      take over from the opener's dock.
+     any other      — popout window for some other widget (chart, gauge,
+                      etc.); do NOT self-mount, we have no business
+                      creating a checklist dock in someone else's popout. */
+const _CL_POPOUT_ID = (() => {
+  try { return new URLSearchParams(location.search).get('popout'); }
+  catch { return null; }
+})();
+const _CL_IS_OTHER_POPOUT = _CL_POPOUT_ID !== null && _CL_POPOUT_ID !== 'checklist';
+const _CL_IS_CHECKLIST_POPOUT = _CL_POPOUT_ID === 'checklist';
+
 function _clSelfMount() {
+  if (_CL_IS_OTHER_POPOUT) {
+    // We're loaded inside a popout window for some unrelated widget
+    // (e.g. a chart). Skip self-mount entirely — there should be no
+    // checklist dock in those windows.
+    return;
+  }
+
   // --- Floating dock ---
   const dock = document.createElement('div');
   dock.id = 'clDock';
@@ -830,8 +995,14 @@ function _clSelfMount() {
   handle.innerHTML = '<span>📋 Checklist</span>';
   const closeX = document.createElement('button');
   closeX.className = 'cl-drag-close'; closeX.textContent = '✕'; closeX.title = 'Close';
-  closeX.onclick = () => { 
-    dock.style.display = 'none'; 
+  closeX.onclick = () => {
+    if (_CL_IS_CHECKLIST_POPOUT) {
+      // Dock IS the window in popout mode — close the window. The
+      // beforeunload handler will fire and re-dock to the main window.
+      window.close();
+      return;
+    }
+    dock.style.display = 'none';
     _clSaveLayout(dock);  // Save visibility state
   };
   handle.appendChild(closeX);
@@ -876,6 +1047,20 @@ function _clSelfMount() {
   dock.addEventListener('mouseenter', () => panel.focus());
 
   function toggleDock() {
+    // While the checklist is popped out, the main-window dock stays hidden
+    // and trying to show it would give us two visible checklists racing
+    // on the same data. Bring the popout to the front instead.
+    if (window.checklistPoppedOut) {
+      if (window._clPopoutWindow && !window._clPopoutWindow.closed) {
+        window._clPopoutWindow.focus();
+      } else {
+        // Stale flag — popout was closed without us noticing. Recover.
+        window.checklistPoppedOut = false;
+        window._clPopoutWindow = null;
+      }
+      return;
+    }
+
     const vis = dock.style.display !== 'none';
     dock.style.display = vis ? 'none' : 'flex';
     if (!vis) {
@@ -938,10 +1123,58 @@ function _clAutoLoad() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => { _clSelfMount(); _clAutoLoad(); });
+  document.addEventListener('DOMContentLoaded', () => {
+    if (_CL_IS_CHECKLIST_POPOUT) { _clBootChecklistPopout(); }
+    else                          { _clSelfMount(); _clAutoLoad(); }
+  });
 } else {
+  if (_CL_IS_CHECKLIST_POPOUT) { _clBootChecklistPopout(); }
+  else                          { _clSelfMount(); _clAutoLoad(); }
+}
+
+/* ------------------------------------- checklist popout boot sequence ----
+   Runs in /popout.html?popout=checklist. Mounts the dock, copies state
+   from the opener, makes the dock fill the window, wires the close-handoff
+   back to the opener.
+
+   Note we still call _clSelfMount() here — it builds the dock DOM and
+   wires the panel buttons + timer. We then override the dock's CSS class
+   to fill the window and skip the load-layout step (the popout's geometry
+   comes from the window, not from saved layout). */
+function _clBootChecklistPopout() {
+  // 1. Mount the dock DOM (creates #clDock, panel, buttons, timer).
   _clSelfMount();
-  _clAutoLoad();
+
+  // 2. Copy state from the opener (active row, items array, font scale, ...).
+  if (!window._clInitChecklistPopout()) {
+    document.body.innerHTML =
+      '<div style="padding:24px;color:#cfd6f0;font:14px/1.4 system-ui">' +
+      '<h2 style="color:#ff6b6b">Popout failed</h2>' +
+      '<p>Could not reach the main window. Close this and re-open from the main app.</p>' +
+      '</div>';
+    return;
+  }
+
+  // 3. Mark the body so the popout CSS rule fills the dock to the window.
+  document.body.classList.add('cl-popout');
+
+  // 4. Show the dock and render. _clSelfMount started it hidden.
+  const dock = document.getElementById('clDock');
+  if (dock) dock.style.display = 'flex';
+  _renderTable();
+  // Apply the font scale that came from the opener.
+  clApplyFontScale();
+
+  // 5. Notify the opener on close so it can dock back and resume its timer.
+  window.addEventListener('beforeunload', () => {
+    try {
+      if (window.opener && typeof window.opener._clChecklistPopoutClosed === 'function') {
+        window.opener._clChecklistPopoutClosed();
+      }
+    } catch { /* opener gone */ }
+  });
+
+  document.title = 'Checklist';
 }
 
 // Expose save/load for main layout to trigger
