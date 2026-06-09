@@ -21,6 +21,7 @@
     </div>
     <div class="right">
       <button id="fullscreenBtn" class="btn" title="Toggle Fullscreen (F11)">⛶</button>
+      <button id="gridBtn" class="btn" title="Layout grid settings (snap-to-grid for widget placement)">⊞ Grid</button>
       <button id="editConfig" class="btn">Config</button>
       <button id="zeroAI" class="btn" title="Zero AI Channels" onclick="openZeroAIDialog()">⚡ Zero</button>
       <button id="calibrateAI" class="btn" title="Calibrate AI Channels" onclick="openCalibrateAIDialog()">📐 Calibrate</button>
@@ -85,6 +86,11 @@
   </div>
 </div>
   <main class="workspace">
+    <!-- Click to slide the widgets/pages panel in or out. The chevron flips
+         to indicate the action (◄ when palette is open, ► when collapsed).
+         Position follows the palette's right edge via the .palette-collapsed
+         class on <main>. -->
+    <button id="paletteToggle" class="palette-toggle" title="Hide widgets panel" aria-label="Toggle panel">◄</button>
     <aside class="palette">
       <h3>Widgets</h3>
       <button class="btn" data-add="chart">Chart</button>
@@ -100,6 +106,8 @@
       <button class="btn" data-add="staticvar">📊 Static Var</button>
       <button class="btn" data-add="indicator" title="Small status dot/rect (right-click to edit)">🔘 Indicator</button>
       <button class="btn" data-add="label" title="Plain text label — pick font, size, colors (right-click to edit)">🏷️ Label</button>
+      <button class="btn" data-add="shape" title="Drawing aid: lines, circles, polygons (right-click to edit)">▱ Shape</button>
+      <button class="btn" data-add="console" title="Mirror of server stdout/stderr">🖥 Console</button>
       <button class="btn" id="clOpenDockBtn" title="Open Checklist Widget">📋 Checklist</button>
       <h3>Pages</h3>
       <div id="pages"></div>

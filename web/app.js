@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.18";  // 2026-06-04: Checklist pop-out support — popout.html loads checklist_widget.js too, ?popout=checklist routes to the checklist init path.
+const UI_VERSION = "2.1.29";  // 2026-06-09: Console widget fixes — (1) fetches /api/console/snapshot on mount so the buffer history shows immediately (previously the widget was empty until new lines arrived). (2) Fixed MutationObserver race that would unregister the controller after renderPage rebuilds, orphaning the widget so subsequent broadcasts never appeared. Pair with server.py 2.8.12+ which adds the snapshot endpoint.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -1962,7 +1962,10 @@ const state = {
   tc: [],
   pid: [],
   motors: [],
-  le: []  // Logic Elements
+  le: [],  // Logic Elements
+  // Layout grid: see gridState/_loadGridState below. The actual values live
+  // here so saveLayoutToFile / loadLayoutFromFile can round-trip them.
+  grid: { enabled: false, size: 10, show: false, color: '#3a4055' },
 };
 
 // Z-index management for bringing widgets to front
@@ -2041,7 +2044,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
   wireUI();
+  _loadGridState();
+  _wirePaletteToggle();
   ensureStarterPage();
+  // Apply grid visual after pages render so #canvas exists.
+  _applyGridVisual();
   showVersions();
   loadConfigCache();
   connect();
@@ -2151,6 +2158,7 @@ function wireUI(){
   $('#setRate')?.addEventListener('click', setRate);
   $('#fullscreenBtn')?.addEventListener('click', toggleFullscreen);
   $('#exitFullscreenBtn')?.addEventListener('click', toggleFullscreen);
+  $('#gridBtn')?.addEventListener('click', openGridDialog);
   $('#editConfig')?.addEventListener('click', ()=>openConfigForm());
   $('#editPID')?.addEventListener('click', ()=>openPidForm());
   $('#editMotor')?.addEventListener('click', ()=>openMotorEditor());
@@ -2295,6 +2303,7 @@ function connect(){
     const msg=JSON.parse(ev.data);
     if(msg.type==='session'){ sessionDir=msg.dir; $('#session').textContent=sessionDir; }
     if (msg.type === 'tick') feedTick(msg);
+    if (msg.type === 'console') _onConsoleMessage(msg);
   };
   updateConnectBtn();
 }
@@ -2327,6 +2336,242 @@ async function applyInitialsFromConfig(){
       }).catch(()=>{});
     }
   }catch(e){ console.warn('applyInitialsFromConfig failed', e); }
+}
+
+/* ----------------------------- grid ------------------------------------- */
+/* Layout grid for widget placement. When enabled, dragging or resizing a
+   widget snaps its origin / size to the nearest gridSize-pixel boundary.
+   Visibility (the dot pattern overlay) is independent of snap behavior —
+   the user might want snap-on with a clean canvas, or visible grid while
+   measuring alignment without enforcing snap.
+
+   Preferences are persisted in localStorage (not the layout file) since
+   they're a UI preference: two operators sharing the same layout file
+   might prefer different grid settings.                                  */
+
+/* ----------------------------- grid ------------------------------------- */
+/* Layout grid for widget placement. When enabled, dragging or resizing a
+   widget snaps its origin / size to the nearest gridSize-pixel boundary.
+   Visibility (the dot pattern overlay) is independent of snap behavior —
+   the user might want snap-on with a clean canvas, or visible grid while
+   measuring alignment without enforcing snap.
+
+   Storage model:
+     - The live values are state.grid (a peer of state.pages).
+     - saveLayoutToFile() / loadLayoutFromFile() round-trip them so
+       a saved layout remembers its intended grid (you designed a layout
+       against a 20px grid, the next session inherits that).
+     - localStorage is a per-browser FALLBACK only: applied at startup
+       before any layout loads, so a fresh session opens with the user's
+       prior preference. Once a layout is loaded that overrides.       */
+
+const GRID_KEYS = {
+  enabled: 'mcc.grid.enabled',
+  size:    'mcc.grid.size',
+  show:    'mcc.grid.show',
+  color:   'mcc.grid.color',
+};
+
+// Convenience alias for the in-state grid object. NOT a separate copy —
+// any mutation to gridState fields directly mutates state.grid.
+const gridState = state.grid;
+
+function _loadGridState() {
+  // Pull defaults from localStorage so a brand-new session opens with the
+  // user's previous preference. A subsequent layout load may overwrite.
+  try {
+    const e = localStorage.getItem(GRID_KEYS.enabled);
+    if (e !== null) gridState.enabled = (e === 'true');
+    const s = parseInt(localStorage.getItem(GRID_KEYS.size), 10);
+    if (Number.isFinite(s) && s >= 5 && s <= 100) gridState.size = s;
+    const sh = localStorage.getItem(GRID_KEYS.show);
+    if (sh !== null) gridState.show = (sh === 'true');
+    const c = localStorage.getItem(GRID_KEYS.color);
+    if (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)) gridState.color = c;
+  } catch { /* localStorage may be disabled — keep defaults */ }
+}
+
+function _saveGridState() {
+  // Mirror to localStorage so the next fresh session inherits these,
+  // and we don't have to wait for a layout-save to "remember" them.
+  try {
+    localStorage.setItem(GRID_KEYS.enabled, String(gridState.enabled));
+    localStorage.setItem(GRID_KEYS.size,    String(gridState.size));
+    localStorage.setItem(GRID_KEYS.show,    String(gridState.show));
+    localStorage.setItem(GRID_KEYS.color,   gridState.color);
+  } catch { /* non-fatal */ }
+}
+
+// Defensive normaliser for grid blobs coming out of a saved layout.
+function _normalizeGridBlob(g) {
+  const out = { enabled:false, size:10, show:false, color:'#3a4055' };
+  if (!g || typeof g !== 'object') return out;
+  if (typeof g.enabled === 'boolean') out.enabled = g.enabled;
+  if (Number.isFinite(g.size) && g.size >= 5 && g.size <= 100) out.size = g.size | 0;
+  if (typeof g.show === 'boolean') out.show = g.show;
+  if (typeof g.color === 'string' && /^#[0-9a-f]{6}$/i.test(g.color)) out.color = g.color;
+  return out;
+}
+
+/**
+ * Snap a pixel coordinate to the nearest grid line when grid is enabled.
+ * Returns the input unchanged when grid is off. Used by makeDragResize
+ * for both x/y (drag) and w/h (resize).
+ *
+ * Math.round (not floor) so dragging halfway between two grid lines snaps
+ * to whichever is closer — feels more natural than always biasing left.
+ */
+function gridSnap(px) {
+  if (!gridState.enabled) return px;
+  const g = Math.max(1, gridState.size | 0);
+  return Math.round(px / g) * g;
+}
+// Expose for checklist_widget.js (separate <script>; can't import).
+// Both files use the same in-memory state.grid via this shared function.
+window.gridSnap = gridSnap;
+
+/* ----------------------- palette toggle --------------------------------- */
+/* Lets the user hide the left widgets/pages panel to free up canvas space.
+   State is persisted in localStorage so the preference survives reloads.
+   Per-browser only — not bound to a layout file (the panel is chrome,
+   not part of the layout design). */
+const PALETTE_KEY = 'mcc.paletteCollapsed';
+function _wirePaletteToggle() {
+  const btn = document.getElementById('paletteToggle');
+  const ws  = document.querySelector('.workspace');
+  if (!btn || !ws) return;
+  // Restore previous state. Default: expanded.
+  let collapsed = false;
+  try { collapsed = (localStorage.getItem(PALETTE_KEY) === 'true'); } catch {}
+  const apply = () => {
+    ws.classList.toggle('palette-collapsed', collapsed);
+    // Chevron direction reflects the action the click will perform — when
+    // expanded show ◄ ("click to close"), when collapsed show ► ("click
+    // to open"). Title text matches.
+    btn.textContent = collapsed ? '►' : '◄';
+    btn.title = collapsed ? 'Show widgets panel' : 'Hide widgets panel';
+  };
+  apply();
+  btn.addEventListener('click', () => {
+    collapsed = !collapsed;
+    try { localStorage.setItem(PALETTE_KEY, String(collapsed)); } catch {}
+    apply();
+  });
+}
+
+/**
+ * Repaint the dotted grid overlay on the active canvas (or remove it).
+ * Uses a CSS background pattern so we don't have to create any DOM —
+ * just toggling backgroundImage on/off. The dots are 1px radial gradients
+ * tiled at the grid spacing.
+ */
+function _applyGridVisual() {
+  const cv = document.getElementById('canvas');
+  if (!cv) return;
+  if (gridState.show && gridState.enabled) {
+    const g = Math.max(1, gridState.size | 0);
+    // Color is fed via CSS-friendly hex; radial-gradient dot in the
+    // top-left corner of each gridSize x gridSize tile, transparent
+    // everywhere else.
+    cv.style.backgroundImage =
+      `radial-gradient(circle, ${gridState.color} 1px, transparent 1.5px)`;
+    cv.style.backgroundSize = `${g}px ${g}px`;
+    cv.style.backgroundPosition = '0 0';
+  } else {
+    cv.style.backgroundImage = 'none';
+  }
+}
+
+function openGridDialog() {
+  const root = el('div');
+  root.append(el('div', { style:'font-size:16px;font-weight:600;margin-bottom:10px' }, '⊞ Layout Grid'));
+
+  // --- Snap enabled checkbox ---
+  const enabledChk = el('input', { type:'checkbox' });
+  enabledChk.checked = gridState.enabled;
+  enabledChk.onchange = () => {
+    gridState.enabled = enabledChk.checked;
+    _saveGridState();
+    _applyGridVisual();
+    // Update enabled-state of dependent controls.
+    sizeRange.disabled = !gridState.enabled;
+    sizeNum.disabled   = !gridState.enabled;
+    showChk.disabled   = !gridState.enabled;
+    colorSwatch.style.pointerEvents = gridState.enabled && gridState.show ? 'auto' : 'none';
+    colorSwatch.style.opacity = gridState.enabled && gridState.show ? '1' : '0.35';
+  };
+
+  // --- Grid size: slider + number for precision ---
+  const sizeRange = el('input', {
+    type:'range', min:'5', max:'100', step:'1',
+    value: String(gridState.size),
+    style:'width:200px;vertical-align:middle'
+  });
+  const sizeNum = el('input', {
+    type:'number', min:'5', max:'100', step:'1',
+    value: String(gridState.size),
+    style:'width:60px;margin-left:8px'
+  });
+  const onSizeChange = (newVal) => {
+    const v = Math.max(5, Math.min(100, parseInt(newVal, 10) || gridState.size));
+    gridState.size = v;
+    sizeRange.value = String(v);
+    sizeNum.value   = String(v);
+    _saveGridState();
+    _applyGridVisual();
+  };
+  sizeRange.oninput = () => onSizeChange(sizeRange.value);
+  sizeNum.oninput   = () => onSizeChange(sizeNum.value);
+
+  // --- Show grid checkbox ---
+  const showChk = el('input', { type:'checkbox' });
+  showChk.checked = gridState.show;
+  showChk.onchange = () => {
+    gridState.show = showChk.checked;
+    _saveGridState();
+    _applyGridVisual();
+    colorSwatch.style.pointerEvents = gridState.enabled && gridState.show ? 'auto' : 'none';
+    colorSwatch.style.opacity = gridState.enabled && gridState.show ? '1' : '0.35';
+  };
+
+  // --- Dot color picker ---
+  const colorSwatch = el('div', {
+    style:
+      `width:32px;height:24px;border-radius:4px;border:1px solid var(--border);` +
+      `cursor:pointer;background:${gridState.color};` +
+      (gridState.enabled && gridState.show ? '' : 'pointer-events:none;opacity:0.35;'),
+    title: 'Click to choose grid dot color'
+  });
+  colorSwatch.onclick = (e) => {
+    e.stopPropagation();
+    createColorPicker(gridState.color, (newColor) => {
+      gridState.color = newColor;
+      colorSwatch.style.background = newColor;
+      _saveGridState();
+      _applyGridVisual();
+    });
+  };
+
+  // Apply initial disabled state.
+  sizeRange.disabled = !gridState.enabled;
+  sizeNum.disabled   = !gridState.enabled;
+  showChk.disabled   = !gridState.enabled;
+
+  root.append(
+    tableForm([
+      ['Snap to grid',  enabledChk],
+      ['Grid size (px)', el('span', {}, [sizeRange, sizeNum])],
+      ['Show grid',     showChk],
+      ['Dot color',     colorSwatch],
+    ]),
+    el('div', { style:'margin-top:10px;color:#7a7f8f;font-size:11px;line-height:1.5' },
+      'When "Snap to grid" is on, dragging or resizing widgets snaps the upper-left corner ' +
+      'and the lower-right (resize) handle to the nearest grid intersection. ' +
+      'Showing the grid is optional and independent of snap behavior. ' +
+      'Settings are stored per-browser, not in the layout file.')
+  );
+
+  showModal(root);
 }
 
 /* ---------------------------- pages ------------------------------------- */
@@ -2479,9 +2724,35 @@ function addWidget(type){
     // Wide enough for a few words at default 16px font.
     defaultW = 120;
     defaultH = 36;
+  } else if (type === 'shape') {
+    // Reasonable visible default for a circle/polygon. Lines will look
+    // proportionally good across this square bounding box too.
+    defaultW = 100;
+    defaultH = 100;
+  } else if (type === 'console') {
+    // Wide enough to show server log lines without too much wrapping; tall
+    // enough to see ~25 lines at the default 12px font.
+    defaultW = 520;
+    defaultH = 280;
   }
   
   const w={ id:crypto.randomUUID(), type, x:40, y:40, w:defaultW, h:defaultH, opts:defaultsFor(type) };
+  // For a fresh line shape, anchor its endpoints to the actual placement
+  // position so the line spans the visible area instead of relying on
+  // stale x1/y1/x2/y2 defaults.
+  if (type === 'shape' && w.opts.kind === 'line') {
+    w.opts.x1 = w.x;
+    w.opts.y1 = w.y;
+    w.opts.x2 = w.x + defaultW;
+    w.opts.y2 = w.y + defaultH;
+    _recomputeLineBounds(w);
+  }
+  if (type === 'shape' && w.opts.kind === 'polygon') {
+    // Generate the initial regular-polygon vertices now so the widget
+    // has its truth data before mount (mountShape would do it lazily,
+    // but doing it here makes the widget's state consistent earlier).
+    _regenerateRegularPolygon(w);
+  }
   state.pages[activePageIndex].widgets.push(w);
   renderPage();
 }
@@ -2848,6 +3119,43 @@ function defaultsFor(type){
       bgColor: 'transparent',  // transparent = inherits main window color
       align: 'left'            // 'left' | 'center' | 'right'
     };
+    case 'shape': return {
+      // Drawing primitive used as a layout visual aid. Three sub-kinds
+      // share common stroke/fill options; each has a few extra knobs.
+      kind: 'circle',          // 'line' | 'circle' | 'polygon'
+      strokeColor: '#79c0ff',  // matches --accent
+      strokeWidth: 2,
+      fillColor: 'transparent',
+      // line-specific: absolute page coords of the two endpoints. The
+      // bounding box (w.x/y/w/h) is derived from these; see
+      // _recomputeLineBounds. addWidget sets sensible initial values
+      // since defaults here are static.
+      x1: 40, y1: 40, x2: 140, y2: 140,
+      arrowStart: false,
+      arrowEnd:   false,
+      // polygon-specific
+      sides: 4,
+      cornerRadius: 0,         // 0 = sharp corners; up to ~min(w,h)/2 = circle-ish
+      rotation: 0,             // user rotation in degrees, added on top of the
+                               // side-count-dependent "normal" orientation so
+                               // rotation=0 always looks right (flat-top square,
+                               // point-up triangle, etc.)
+      constrainAngles: true,   // when true, vertex drags preserve the polygon's
+                               // angular relationships (rectangle stretches as
+                               // a rectangle, hexagon scales uniformly, etc.).
+                               // Turn off for freeform vertex-by-vertex editing.
+    };
+    case 'console': return {
+      // Mirror of the server's stdout/stderr — shows whatever the user
+      // would see in the terminal or PyCharm console where the server was
+      // launched. Output is push-streamed via WebSocket.
+      title: 'Console',
+      fontSize: 12,
+      wrap: false,             // word-wrap long lines
+      autoscroll: true,        // stick to bottom unless user has scrolled up
+      maxLines: 5000,          // hard cap on rendered lines to bound memory
+      showStream: 'both',      // 'stdout' | 'stderr' | 'both'
+    };
   }
   return {};
 }
@@ -3052,6 +3360,10 @@ function saveLayoutToFile() {
     }
   }
   const layout = {pages: pagesClone};
+
+  // Grid prefs round-trip with the layout so reopening a saved layout
+  // restores the same snap/show/size/color the layout was designed for.
+  layout.grid = { ...state.grid };
   
   // Save checklist position, filename, and content if it exists
   const dock = document.querySelector('.cl-dock');
@@ -3089,6 +3401,16 @@ function loadLayoutFromFile() {
         const obj = JSON.parse(rd.result);
         if (!obj.pages || !Array.isArray(obj.pages)) throw new Error('Invalid layout file');
         state.pages = normalizeLayoutPages(obj.pages);
+
+        // Restore grid prefs from the loaded layout if present, falling
+        // through to whatever's already in state.grid (from localStorage
+        // at startup) when the layout was saved before grid existed.
+        if (obj.grid) {
+          Object.assign(state.grid, _normalizeGridBlob(obj.grid));
+          _saveGridState();    // mirror into localStorage so next session inherits
+          _applyGridVisual();
+        }
+
         refreshPages();
         setActivePage(0);
         
@@ -4137,6 +4459,303 @@ function openWidgetSettings(w) {
     );
   }
 
+  if (w.type === 'shape') {
+    // Helper used by every shape control to live-preview changes. Re-renders
+    // just this one widget instead of calling renderPage() on every slider
+    // tick (which would rebuild the whole page 30+ times per drag).
+    const liveUpdate = () => {
+      const node = document.getElementById('w_' + w.id);
+      if (!node) return;
+      const body = node.querySelector('.body');
+      if (!body) return;
+      body.innerHTML = '';
+      mountShape(w, body, node);
+    };
+
+    // Kind picker — re-renders the dialog when changed so the kind-specific
+    // controls (arrow toggles for line, sides/cornerRadius for polygon)
+    // appear/disappear cleanly.
+    const kindSel = el('select');
+    [['line','Line'],['circle','Circle / Ellipse'],['polygon','Polygon']].forEach(([v,l]) =>
+      kindSel.append(el('option', {value:v}, l)));
+    kindSel.value = w.opts.kind;
+    kindSel.onchange = () => {
+      const prevKind = w.opts.kind;
+      w.opts.kind = kindSel.value;
+      // When switching TO line, make sure endpoints are anchored to the
+      // widget's current bounding box. Otherwise the line might appear far
+      // from where the user expects it (or zero-length).
+      if (prevKind !== 'line' && w.opts.kind === 'line') {
+        w.opts.x1 = w.x;
+        w.opts.y1 = w.y;
+        w.opts.x2 = w.x + (w.w || 100);
+        w.opts.y2 = w.y + (w.h || 100);
+      }
+      if (prevKind !== 'polygon' && w.opts.kind === 'polygon') {
+        // Fresh polygon — regenerate from sides/rotation in the current
+        // bounding box. Without this, mountShape's lazy generation would
+        // still produce vertices, but doing it here means w.opts.vertices
+        // is present before liveUpdate runs.
+        _regenerateRegularPolygon(w);
+      }
+      liveUpdate();
+      // Re-open the dialog to refresh the kind-specific section. Close
+      // first so the modal infrastructure doesn't get two roots.
+      closeModal();
+      openWidgetSettings(w);
+    };
+
+    // Stroke color
+    const strokeSwatch = el('div', {
+      style:`width:32px;height:24px;border-radius:4px;border:1px solid var(--border);` +
+            `cursor:pointer;background:${w.opts.strokeColor};`,
+      title: 'Outline color'
+    });
+    strokeSwatch.onclick = (e) => {
+      e.stopPropagation();
+      createColorPicker(w.opts.strokeColor, c => {
+        w.opts.strokeColor = c;
+        strokeSwatch.style.background = c;
+        liveUpdate();
+      });
+    };
+
+    // Stroke width
+    const strokeInp = el('input', {
+      type:'number', min:'0', max:'40', step:'1',
+      value: String(w.opts.strokeWidth),
+      style:'width:70px'
+    });
+    strokeInp.oninput = () => {
+      const v = parseInt(strokeInp.value, 10);
+      if (Number.isFinite(v) && v >= 0) {
+        w.opts.strokeWidth = v;
+        liveUpdate();
+      }
+    };
+
+    // Fill color — supports transparent (with checkerboard swatch like Label)
+    const fillSwatch = el('div', {
+      style: `width:32px;height:24px;border-radius:4px;border:1px solid var(--border);` +
+             `cursor:pointer;` +
+             ((w.opts.fillColor && w.opts.fillColor !== 'transparent')
+                ? `background:${w.opts.fillColor};`
+                : `background:repeating-conic-gradient(#333 0% 25%, #555 0% 50%) 50%/8px 8px;`),
+      title: 'Click to choose fill color'
+    });
+    fillSwatch.onclick = (e) => {
+      e.stopPropagation();
+      const cur = (w.opts.fillColor && w.opts.fillColor !== 'transparent') ? w.opts.fillColor : '#79c0ff';
+      createColorPicker(cur, c => {
+        w.opts.fillColor = c;
+        fillSwatch.style.background = c;
+        liveUpdate();
+      });
+    };
+    const fillTransBtn = el('button', {
+      className: 'btn',
+      style: 'padding:3px 8px;font-size:12px',
+      onclick: () => {
+        w.opts.fillColor = 'transparent';
+        fillSwatch.style.background = 'repeating-conic-gradient(#333 0% 25%, #555 0% 50%) 50%/8px 8px';
+        liveUpdate();
+      }
+    }, 'No fill');
+
+    const rows = [
+      ['Kind',         kindSel],
+      ['Outline color', strokeSwatch],
+      ['Outline width', strokeInp],
+      ['Fill color',   el('span', {style:'display:inline-flex;gap:6px;align-items:center'},
+                          [fillSwatch, fillTransBtn])],
+    ];
+
+    if (w.opts.kind === 'line') {
+      // Line endpoints are draggable directly on the canvas via the small
+      // circle handles at each end — no Direction picker needed anymore.
+
+      const arrStart = el('input', {type:'checkbox'});
+      arrStart.checked = w.opts.arrowStart;
+      arrStart.onchange = () => { w.opts.arrowStart = arrStart.checked; liveUpdate(); };
+
+      const arrEnd = el('input', {type:'checkbox'});
+      arrEnd.checked = w.opts.arrowEnd;
+      arrEnd.onchange = () => { w.opts.arrowEnd = arrEnd.checked; liveUpdate(); };
+
+      rows.push(
+        ['Arrow at start', arrStart],
+        ['Arrow at end',   arrEnd],
+      );
+    } else if (w.opts.kind === 'polygon') {
+      // Sides slider + number. 3 = triangle, 4 = square/rect, etc.
+      const sidesRange = el('input', {
+        type:'range', min:'3', max:'24', step:'1',
+        value: String(w.opts.sides),
+        style:'width:160px;vertical-align:middle'
+      });
+      const sidesNum = el('input', {
+        type:'number', min:'3', max:'24', step:'1',
+        value: String(w.opts.sides),
+        style:'width:60px;margin-left:8px'
+      });
+      const onSidesChange = (v) => {
+        const n = Math.max(3, Math.min(24, parseInt(v,10) || w.opts.sides));
+        w.opts.sides = n;
+        sidesRange.value = String(n); sidesNum.value = String(n);
+        // Changing the side count rebuilds the regular polygon from
+        // scratch, discarding any freeform vertex edits the user made.
+        // (You can't really preserve "freeform with 5 vertices" when
+        // switching to "freeform with 7 vertices" without ambiguity.)
+        _regenerateRegularPolygon(w);
+        liveUpdate();
+      };
+      sidesRange.oninput = () => onSidesChange(sidesRange.value);
+      sidesNum.oninput   = () => onSidesChange(sidesNum.value);
+
+      // Corner radius slider — clamped to half the shorter side at draw
+      // time, but settable up to ~100 here so the user can experiment.
+      const cornerRange = el('input', {
+        type:'range', min:'0', max:'100', step:'1',
+        value: String(w.opts.cornerRadius),
+        style:'width:160px;vertical-align:middle'
+      });
+      const cornerNum = el('input', {
+        type:'number', min:'0', max:'500', step:'1',
+        value: String(w.opts.cornerRadius),
+        style:'width:70px;margin-left:8px'
+      });
+      const onCornerChange = (v) => {
+        const r = Math.max(0, parseFloat(v) || 0);
+        w.opts.cornerRadius = r;
+        cornerRange.value = String(Math.min(100, r)); cornerNum.value = String(r);
+        liveUpdate();
+      };
+      cornerRange.oninput = () => onCornerChange(cornerRange.value);
+      cornerNum.oninput   = () => onCornerChange(cornerNum.value);
+
+      // Rotation: in degrees on top of the "normal" orientation. 0 = looks
+      // right for the chosen sides (flat-top square, point-up triangle, etc).
+      // Range -180..180 covers everything; with a slider this is enough
+      // for fine control.
+      const rotRange = el('input', {
+        type:'range', min:'-180', max:'180', step:'1',
+        value: String(w.opts.rotation || 0),
+        style:'width:160px;vertical-align:middle'
+      });
+      const rotNum = el('input', {
+        type:'number', min:'-360', max:'360', step:'1',
+        value: String(w.opts.rotation || 0),
+        style:'width:70px;margin-left:8px'
+      });
+      const onRotChange = (v) => {
+        const r = Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0;
+        w.opts.rotation = r;
+        rotRange.value = String(Math.max(-180, Math.min(180, r)));
+        rotNum.value   = String(r);
+        // Rotation only makes sense for regular polygons. Rebuild from
+        // scratch — this discards any freeform vertex edits but that's
+        // expected since "rotate freeform shape" is ambiguous.
+        _regenerateRegularPolygon(w);
+        liveUpdate();
+      };
+      rotRange.oninput = () => onRotChange(rotRange.value);
+      rotNum.oninput   = () => onRotChange(rotNum.value);
+      const rotResetBtn = el('button', {
+        className:'btn',
+        style:'padding:3px 8px;font-size:12px;margin-left:8px',
+        onclick: () => onRotChange(0)
+      }, '0°');
+
+      // "Reset to regular polygon" — discards any freeform vertex
+      // dragging and regenerates a regular N-sided polygon with the
+      // current sides/rotation settings, fitted to the current bounding
+      // box. Lets the user recover from accidental vertex drags.
+      const resetShapeBtn = el('button', {
+        className:'btn',
+        style:'padding:3px 10px;font-size:12px',
+        onclick: () => {
+          _regenerateRegularPolygon(w);
+          liveUpdate();
+        }
+      }, 'Reset to regular polygon');
+
+      // Constrain-angles toggle. When on, dragging a vertex preserves the
+      // polygon's angular relationships (rectangle stretches as a
+      // rectangle, hexagon scales uniformly). When off, vertices move
+      // independently — full freeform.
+      const constrainChk = el('input', { type:'checkbox' });
+      constrainChk.checked = (w.opts.constrainAngles !== false);
+      constrainChk.onchange = () => {
+        w.opts.constrainAngles = constrainChk.checked;
+      };
+
+      rows.push(
+        ['Constrain angles', constrainChk],
+        ['Sides',          el('span', {}, [sidesRange, sidesNum])],
+        ['Corner radius',  el('span', {}, [cornerRange, cornerNum])],
+        ['Rotation (°)',   el('span', {}, [rotRange, rotNum, rotResetBtn])],
+        ['',               resetShapeBtn],
+      );
+    }
+
+    root.append(tableForm(rows));
+    root.append(el('div', { style:'margin-top:8px;color:#7a7f8f;font-size:11px;line-height:1.5' },
+      'Shapes are drawing aids: they\'re not connected to any signals and ' +
+      'don\'t update during acquisition. Use Move forward / backward from ' +
+      'the right-click menu to control which shapes paint on top of others.'));
+  }
+
+  if (w.type === 'console') {
+    // Console widget settings — font size, wrapping, line cap, stream
+    // filter. The pause/clear/autoscroll/stream controls are also in the
+    // widget's own toolbar; the dialog exposes the persistent prefs.
+    const fontInp = el('input', {
+      type:'number', min:'8', max:'24', step:'1',
+      value: String(w.opts.fontSize),
+      style:'width:70px'
+    });
+    fontInp.oninput = () => {
+      const v = parseInt(fontInp.value, 10);
+      if (Number.isFinite(v) && v >= 8 && v <= 24) w.opts.fontSize = v;
+    };
+
+    const wrapChk = el('input', { type:'checkbox' });
+    wrapChk.checked = !!w.opts.wrap;
+    wrapChk.onchange = () => { w.opts.wrap = wrapChk.checked; };
+
+    const autoChk = el('input', { type:'checkbox' });
+    autoChk.checked = (w.opts.autoscroll !== false);
+    autoChk.onchange = () => { w.opts.autoscroll = autoChk.checked; };
+
+    const maxInp = el('input', {
+      type:'number', min:'100', max:'50000', step:'100',
+      value: String(w.opts.maxLines),
+      style:'width:90px'
+    });
+    maxInp.oninput = () => {
+      const v = parseInt(maxInp.value, 10);
+      if (Number.isFinite(v) && v >= 100) w.opts.maxLines = v;
+    };
+
+    const streamSel2 = el('select');
+    [['both','stdout + stderr'], ['stdout','stdout only'], ['stderr','stderr only']]
+      .forEach(([v,l]) => streamSel2.append(el('option', {value:v}, l)));
+    streamSel2.value = w.opts.showStream || 'both';
+    streamSel2.onchange = () => { w.opts.showStream = streamSel2.value; };
+
+    root.append(tableForm([
+      ['Font size (px)',  fontInp],
+      ['Word wrap',       wrapChk],
+      ['Auto-scroll',     autoChk],
+      ['Max lines',       maxInp],
+      ['Show streams',    streamSel2],
+    ]));
+    root.append(el('div', { style:'margin-top:8px;color:#7a7f8f;font-size:11px;line-height:1.5' },
+      'Mirrors the server\'s stdout/stderr. The buffer is shared across all ' +
+      'console widgets; Clear empties only this widget, not the server\'s ' +
+      'history (a fresh connection still shows the last ~1000 lines).'));
+  }
+
   showModal(root, () => {
     renderPage();
   });
@@ -4171,11 +4790,14 @@ function renderPage(){
     node.style.width=(w.w||300)+'px';
     node.style.height=(w.h||200)+'px';
     cv.append(node);
-    // Indicators and labels have no header/resize — drag from the body
-    // itself, and skip the resize wiring entirely (size is set in
-    // Settings, not by drag).
+    // Chromeless widgets fall into two camps:
+    //   - indicator/label have no resize handle at all (size is a setting).
+    //   - shape does have a corner-drag handle so the user can size the
+    //     bounding box, since the rendered drawing fills it.
     if (w.type === 'indicator' || w.type === 'label') {
       makeDragResize(node, w, node.querySelector('.body'), null);
+    } else if (w.type === 'shape') {
+      makeDragResize(node, w, node.querySelector('.body'), node.querySelector('.shape-resize'));
     } else {
       makeDragResize(node, w, node.querySelector('header'), node.querySelector('.resize'));
     }
@@ -4194,17 +4816,19 @@ function renderWidget(w){
   if (w.type === 'staticvar') classList += ' staticvar-widget';
   if (w.type === 'indicator') classList += ' indicator-widget';
   if (w.type === 'label') classList += ' label-widget';
+  if (w.type === 'shape') classList += ' shape-widget';
   const box=el('div',{className:classList, id:'w_'+w.id});
 
-  // Indicators and labels are intentionally chromeless: no header bar, no
-  // settings/close icons, no resize grabber. The whole body is the drag
-  // handle, and a right-click (or double-click) opens settings; a context
-  // menu lets you delete them without a visible × button.
-  if (w.type === 'indicator' || w.type === 'label') {
+  // Indicators, labels, and shapes are intentionally chromeless: no header
+  // bar, no settings/close icons, no resize grabber. The whole body is
+  // the drag handle, and a right-click (or double-click) opens settings;
+  // a context menu lets you delete or reorder them without a visible ×.
+  if (w.type === 'indicator' || w.type === 'label' || w.type === 'shape') {
     const body = el('div', {className: 'body'});
     box.append(body);
-    if (w.type === 'indicator') mountIndicator(w, body, box);
-    else                        mountLabel(w, body, box);
+    if      (w.type === 'indicator') mountIndicator(w, body, box);
+    else if (w.type === 'label')     mountLabel(w, body, box);
+    else                             mountShape(w, body, box);
     return box;
   }
   
@@ -4276,6 +4900,7 @@ function renderWidget(w){
     case 'mathop':   mountMathOpWidget(w,body); break;
     case 'expr':     mountExprWidget(w,body); break;
     case 'staticvar': mountStaticVarWidget(w,body); break;
+    case 'console':  mountConsole(w,body); break;
     // 'indicator' is handled by the early-return branch at the top of
     // renderWidget (no header / no resize) — don't list it here.
   }
@@ -4285,6 +4910,65 @@ function removeWidget(id){
   const page=state.pages[activePageIndex];
   const idx=page.widgets.findIndex(x=>x.id===id);
   if(idx>=0){ page.widgets.splice(idx,1); renderPage(); }
+}
+
+/**
+ * Move a widget one position later in its page's widgets array. Since
+ * renderPage iterates the array in order and each subsequent widget is
+ * appended on top (later DOM order = later in the paint stack), "later
+ * in the array" means "in front of" earlier widgets.
+ */
+function moveWidgetForward(id) {
+  const page = state.pages[activePageIndex];
+  const idx = page.widgets.findIndex(x => x.id === id);
+  if (idx >= 0 && idx < page.widgets.length - 1) {
+    const w = page.widgets.splice(idx, 1)[0];
+    page.widgets.splice(idx + 1, 0, w);
+    renderPage();
+  }
+}
+
+/**
+ * Move a widget one position earlier in its page's widgets array — i.e.
+ * one step further behind the others in paint order.
+ */
+function moveWidgetBackward(id) {
+  const page = state.pages[activePageIndex];
+  const idx = page.widgets.findIndex(x => x.id === id);
+  if (idx > 0) {
+    const w = page.widgets.splice(idx, 1)[0];
+    page.widgets.splice(idx - 1, 0, w);
+    renderPage();
+  }
+}
+
+/**
+ * Move a widget to the very back of its page — drawn first, everything
+ * else paints on top of it. Useful for shapes that act as background
+ * highlights behind groups of widgets.
+ */
+function sendWidgetToBack(id) {
+  const page = state.pages[activePageIndex];
+  const idx = page.widgets.findIndex(x => x.id === id);
+  if (idx > 0) {
+    const w = page.widgets.splice(idx, 1)[0];
+    page.widgets.unshift(w);
+    renderPage();
+  }
+}
+
+/**
+ * Move a widget to the very front of its page — drawn last, in front of
+ * everything else on this page.
+ */
+function sendWidgetToFront(id) {
+  const page = state.pages[activePageIndex];
+  const idx = page.widgets.findIndex(x => x.id === id);
+  if (idx >= 0 && idx < page.widgets.length - 1) {
+    const w = page.widgets.splice(idx, 1)[0];
+    page.widgets.push(w);
+    renderPage();
+  }
 }
 
 /* ----------------------------- pop-out --------------------------------- */
@@ -4323,17 +5007,18 @@ function popOutWidget(w){
   const winW = Math.max(320, Math.min(2000, (w.w || 600) + 16));
   const winH = Math.max(200, Math.min(1500, (w.h || 400) + 39));
   // Window features:
-  //   * No 'popup' flag — that's what was making the OS window non-resizable.
-  //     Even with width/height set, some browsers honor 'popup' as "this is
-  //     a fixed-size kiosk window, don't let the user drag the border."
-  //     Without it, we still get a separate window (because width/height
-  //     are specified), but the user can drag the borders to any size and
-  //     the widget reflows via CSS (.widget canvas is width/height: 100%).
-  //   * resizable=yes — legacy hint, ignored by modern browsers but harmless,
-  //     and Firefox/Safari may still honor it in some configs.
-  //   * menubar/toolbar/location/status no — keep the chrome minimal so the
-  //     widget gets as much of the window as possible.
-  const features = `width=${winW},height=${winH},resizable=yes,menubar=no,toolbar=no,location=no,status=no`;
+  //   * popup — strips the browser chrome (no address bar, no tab strip,
+  //     no menu, no status bar). The user wanted a clean widget-only
+  //     window for multi-monitor layouts.
+  //   * resizable=yes — explicitly allow the OS window border to be
+  //     dragged. In modern Chrome/Edge this is the default for popups
+  //     anyway, but specifying it is harmless and protects against older
+  //     browsers or restrictive OS-level policies that would lock the
+  //     window to its initial size.
+  //   * menubar/toolbar/location/status=no — same goal, belt and braces:
+  //     ignored by most modern browsers (popup covers them) but kept for
+  //     Firefox and edge cases.
+  const features = `popup,width=${winW},height=${winH},resizable=yes,menubar=no,toolbar=no,location=no,status=no`;
 
   let popWin;
   try {
@@ -4453,7 +5138,10 @@ function widgetOptions(w){
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
     yGrid.oninput=()=>{ w.opts.yGridLines=parseInt(yGrid.value)||5; };
 
-    const pause=el('button',{className:'btn', onclick:()=>{
+    const pause=el('button',{
+      className:'btn',
+      style:'padding:3px 7px;font-size:11px',
+      onclick:()=>{
       if (replayMode === 'playing') {
         // In replay playback: pause the whole playback
         pauseReplay();
@@ -7103,6 +7791,278 @@ function mountExprWidget(w, body){
   })();
 }
 
+/* =========================== console widget ============================ */
+/* Mirror of the server's stdout/stderr. The server pushes new lines via
+   {type:'console'} WebSocket messages; we route them through
+   _onConsoleMessage which fans out to every mounted console widget on
+   the active page.
+
+   Each console widget maintains its own DOM (a scrolling <div> of lines)
+   so layout/font settings are independent per widget. Filtering by stream
+   ('stdout'/'stderr'/'both') is also per-widget.
+
+   Sticky scroll: if the user is within 4px of the bottom when a new line
+   arrives, we keep scrolling them along. If they've scrolled up to read
+   something, we leave them alone — but a small "▼ N new" badge appears
+   so they know more lines arrived. Clicking the badge jumps to bottom.
+
+   The widget registry is keyed by widget id and points at a `controller`
+   object with append/replace/clear methods. When a widget is replaced
+   by renderPage (rebuild), the old controller is naturally orphaned —
+   its DOM is gone — and a fresh one replaces it in the registry. */
+
+const _consoleControllers = new Map();   // widget.id → controller
+
+/**
+ * Dispatch a {type:'console'} WS message to every mounted console widget
+ * on the active page. Called from the WebSocket onmessage handler.
+ */
+function _onConsoleMessage(msg) {
+  if (!msg || !Array.isArray(msg.lines)) return;
+  for (const ctrl of _consoleControllers.values()) {
+    try {
+      if (msg.replace) ctrl.replace(msg.lines);
+      else             ctrl.append(msg.lines);
+    } catch (e) {
+      console.warn('console widget feed failed:', e);
+    }
+  }
+}
+
+function mountConsole(w, body) {
+  // Use a clean monospace layout. The "screen" div is where lines render;
+  // its scroll position drives sticky-scroll detection. A small toolbar
+  // sits above with pause/clear/autoscroll controls.
+  body.style.cssText = 'display:flex;flex-direction:column;padding:0;background:#0c0e16;overflow:hidden;';
+
+  // Toolbar — minimal, monochrome so it doesn't compete with log content.
+  const toolbar = el('div', {
+    style: 'display:flex;align-items:center;gap:6px;padding:4px 6px;background:#11141d;' +
+           'border-bottom:1px solid #1f2330;flex-shrink:0;font-size:11px;color:#7a8199;'
+  });
+
+  const pauseBtn = el('button', {
+    className:'btn',
+    style:'padding:3px 7px;font-size:11px',
+    title:'Pause line appending (does not stop server output)'
+  }, '⏸ Pause');
+  let _paused = false;            // transient: pause is per-mount, not saved
+  pauseBtn.onclick = () => {
+    _paused = !_paused;
+    pauseBtn.textContent = _paused ? '▶ Resume' : '⏸ Pause';
+    if (!_paused) flushQueued();
+  };
+
+  const clearBtn = el('button', {
+    className:'btn',
+    style:'padding:3px 7px;font-size:11px',
+    title:'Clear this widget (server buffer is unaffected)'
+  }, '🗑 Clear');
+  clearBtn.onclick = () => {
+    screen.innerHTML = '';
+    _lineCount = 0;
+    _hideNewBadge();
+  };
+
+  const asLabel = el('label', { style:'display:inline-flex;align-items:center;gap:4px;cursor:pointer' });
+  const asChk = el('input', { type:'checkbox' });
+  asChk.checked = (w.opts.autoscroll !== false);
+  asChk.onchange = () => {
+    w.opts.autoscroll = asChk.checked;
+    if (asChk.checked) {
+      screen.scrollTop = screen.scrollHeight;
+      _hideNewBadge();
+    }
+  };
+  asLabel.append(asChk, document.createTextNode('Auto-scroll'));
+
+  // Stream filter — quick toggle without opening settings.
+  const streamSel = el('select', {
+    style:'background:#1a1d2e;color:#cfd3e0;border:1px solid #2b2f45;border-radius:3px;font-size:11px;padding:1px 4px;'
+  });
+  [['both','stdout+stderr'],['stdout','stdout only'],['stderr','stderr only']]
+    .forEach(([v,l]) => streamSel.append(el('option', {value:v}, l)));
+  streamSel.value = w.opts.showStream || 'both';
+  streamSel.onchange = () => {
+    w.opts.showStream = streamSel.value;
+    // Re-apply visibility for already-rendered lines without rebuilding
+    // the entire DOM (the lines are tagged with their stream label).
+    for (const node of screen.children) {
+      const s = node.dataset.stream;
+      node.style.display = _streamVisible(s) ? '' : 'none';
+    }
+    if (asChk.checked) screen.scrollTop = screen.scrollHeight;
+  };
+
+  const spacer = el('span', { style:'flex:1' });
+  const seqLabel = el('span', { style:'font-family:monospace;color:#5a6075' }, '');
+
+  toolbar.append(pauseBtn, clearBtn, asLabel, streamSel, spacer, seqLabel);
+
+  // The screen where lines render. White-space mode honors opts.wrap.
+  const screen = el('div', {
+    style: 'flex:1;overflow:auto;padding:4px 6px;font-family:Consolas,Menlo,monospace;' +
+           `font-size:${w.opts.fontSize || 12}px;line-height:1.35;color:#cfd3e0;` +
+           (w.opts.wrap ? 'white-space:pre-wrap;word-break:break-all;'
+                        : 'white-space:pre;') +
+           'background:#0c0e16;'
+  });
+
+  // "▼ N new lines" badge that appears when autoscroll is off and the
+  // user has scrolled up. Click to jump to bottom.
+  const newBadge = el('div', {
+    style: 'position:absolute;right:14px;bottom:10px;background:#79c0ff;color:#0c0e16;' +
+           'padding:3px 8px;border-radius:11px;font-size:11px;font-family:system-ui;' +
+           'cursor:pointer;font-weight:600;display:none;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:5;'
+  }, '');
+  newBadge.onclick = () => {
+    screen.scrollTop = screen.scrollHeight;
+    _hideNewBadge();
+  };
+
+  body.style.position = 'relative';   // so the absolute-positioned badge anchors here
+  body.append(toolbar, screen, newBadge);
+
+  // --- internal state -----------------------------------------------------
+  let _lineCount  = 0;            // current rendered line count (DOM children)
+  let _queued     = [];           // lines arriving while paused
+  let _newCount   = 0;            // unseen lines while scrolled up
+  let _userScrolledUp = false;    // sticky-scroll state
+
+  function _streamVisible(s) {
+    const f = w.opts.showStream || 'both';
+    if (f === 'both') return true;
+    return s === f;
+  }
+  function _isAtBottom() {
+    // Within 4px counts as "at bottom" — accounts for sub-pixel scroll quirks.
+    return (screen.scrollHeight - screen.scrollTop - screen.clientHeight) < 4;
+  }
+  function _showNewBadge() {
+    newBadge.style.display = '';
+    newBadge.textContent = `▼ ${_newCount} new`;
+  }
+  function _hideNewBadge() {
+    newBadge.style.display = 'none';
+    _newCount = 0;
+  }
+
+  // Track user scroll so we know whether to auto-scroll on append.
+  screen.addEventListener('scroll', () => {
+    _userScrolledUp = !_isAtBottom();
+    if (!_userScrolledUp) _hideNewBadge();
+  });
+
+  function _appendOne(seq, stream, text) {
+    const node = document.createElement('div');
+    node.dataset.stream = stream;
+    node.dataset.seq    = String(seq);
+    // Tag stderr lines with a distinguishing color so error output stands
+    // out from regular output (matches how PyCharm/terminal usually
+    // differentiate). stdout uses the default body color.
+    if (stream === 'stderr') node.style.color = '#ff8b8b';
+    node.textContent = text;
+    if (!_streamVisible(stream)) node.style.display = 'none';
+    screen.appendChild(node);
+    _lineCount++;
+    // Cap rendered lines to bound DOM size. Remove from the top
+    // (oldest) when over the limit.
+    const cap = Math.max(100, w.opts.maxLines | 0 || 5000);
+    while (_lineCount > cap && screen.firstChild) {
+      screen.removeChild(screen.firstChild);
+      _lineCount--;
+    }
+  }
+
+  function appendLines(lines) {
+    if (!lines || !lines.length) return;
+    const wasAtBottom = _isAtBottom();
+    for (const t of lines) {
+      // Each tuple is [seq, stream_label, text]; fail-soft on malformed.
+      if (!Array.isArray(t) || t.length < 3) continue;
+      _appendOne(t[0], t[1], t[2]);
+    }
+    seqLabel.textContent = `#${lines[lines.length - 1][0]}`;
+    // Scroll handling:
+    //   - autoscroll off → never scroll; show badge with count
+    //   - autoscroll on, was at bottom → follow to new bottom
+    //   - autoscroll on, user scrolled up → leave alone; show badge
+    if (!asChk.checked || _userScrolledUp) {
+      // Count only visible (filtered) lines for the badge
+      const visibleAdded = lines.filter(t => _streamVisible(t[1])).length;
+      if (visibleAdded > 0) {
+        _newCount += visibleAdded;
+        _showNewBadge();
+      }
+    } else if (wasAtBottom || asChk.checked) {
+      screen.scrollTop = screen.scrollHeight;
+    }
+  }
+
+  function flushQueued() {
+    if (_queued.length) {
+      appendLines(_queued);
+      _queued = [];
+    }
+  }
+
+  // --- controller API exposed via the registry ---------------------------
+  const controller = {
+    append(lines) {
+      if (_paused) { _queued.push(...lines); return; }
+      appendLines(lines);
+    },
+    replace(lines) {
+      // Full re-sync (e.g. on initial WS connect). Clear and load.
+      screen.innerHTML = '';
+      _lineCount = 0;
+      _hideNewBadge();
+      _queued = [];
+      appendLines(lines);
+    },
+  };
+  _consoleControllers.set(w.id, controller);
+
+  // Pull the buffered server-side history so this widget shows recent
+  // output immediately, not only lines that arrive AFTER mount. The WS
+  // 'replace' message that gets sent on connect doesn't help here because
+  // by then the widget didn't exist yet — this fetch fills the gap.
+  fetch('/api/console/snapshot')
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (!data || !Array.isArray(data.lines)) return;
+      // Only apply if this widget is still mounted (user might have
+      // deleted it between mount and fetch completion).
+      if (_consoleControllers.get(w.id) === controller) {
+        controller.replace(data.lines);
+      }
+    })
+    .catch(err => console.warn('console snapshot fetch failed:', err));
+
+  // Clean up the registry entry when this DOM node disappears. We use a
+  // MutationObserver on the canvas to notice when our widget gets removed
+  // by renderPage. Cheaper alternative would be a hook in renderPage,
+  // but the observer keeps this module self-contained.
+  //
+  // Identity check is critical: renderPage rebuilds the widget, mounting
+  // a fresh controller before our old observer fires. If we deleted
+  // unconditionally by id, we'd wipe out the fresh controller. So we
+  // only delete when the registry still points at OUR (now-stale)
+  // controller — meaning no replacement has been installed yet.
+  const cv = document.getElementById('canvas');
+  if (cv && cv !== body) {
+    const obs = new MutationObserver(() => {
+      if (!body.isConnected) {
+        if (_consoleControllers.get(w.id) === controller) {
+          _consoleControllers.delete(w.id);
+        }
+        obs.disconnect();
+      }
+    });
+    obs.observe(cv, { childList: true, subtree: true });
+  }
+}
+
 function mountStaticVarWidget(w, body) {
   body.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;';
 
@@ -7313,13 +8273,31 @@ function _showChromelessContextMenu(w, x, y) {
   const items = [
     mkItem('⚙ Edit Settings', () => openWidgetSettings(w)),
   ];
-  // Pop out / Delete only make sense in the main window — inside a popout
-  // the widget IS the window, so popping out again would be nonsense and
-  // "Delete" would only remove the widget from the popout's minimal state
-  // copy (and leave the main window thinking it's still popped out).
+  // For shape widgets: a toggle between "editing" mode (handles visible,
+  // shape is malleable) and "fixed" mode (handles hidden, shape looks
+  // clean). Hidden for non-shape chromeless widgets (indicator, label).
+  if (w.type === 'shape') {
+    if (w._editing) {
+      items.push(mkItem('🔒 Fix shape',  () => _setShapeEditing(w, false)));
+    } else {
+      items.push(mkItem('✏ Edit shape',  () => _setShapeEditing(w, true)));
+    }
+  }
+  // Pop out / Move forward / Move backward / Delete only apply in the
+  // main window — inside a popout the widget IS the window, so reordering
+  // and deletion only affect a temporary minimal state-copy.
   if (!IS_POPOUT) {
-    items.push(mkItem('⤴ Pop out', () => popOutWidget(w)));
-    items.push(mkItem('🗑 Delete',  () => removeWidget(w.id), true));
+    if (w.type !== 'shape') {
+      // Static shapes don't need their own window. Indicators and labels
+      // could still be useful as standalone status displays on a separate
+      // monitor, so they keep pop-out.
+      items.push(mkItem('⤴ Pop out',       () => popOutWidget(w)));
+    }
+    items.push(mkItem('⬆ Move forward',    () => moveWidgetForward(w.id)));
+    items.push(mkItem('⬇ Move backward',   () => moveWidgetBackward(w.id)));
+    items.push(mkItem('⬆⬆ Send to front',  () => sendWidgetToFront(w.id)));
+    items.push(mkItem('⬇⬇ Send to back',   () => sendWidgetToBack(w.id)));
+    items.push(mkItem('🗑 Delete',          () => removeWidget(w.id), true));
   }
   menu.append(...items);
   document.body.append(menu);
@@ -7387,6 +8365,732 @@ function mountLabel(w, body, box) {
     e.preventDefault();
     openWidgetSettings(w);
   });
+}
+
+/* ------------------------------ shape ----------------------------------- */
+/* Layout drawing aids: lines, circles, and N-sided polygons with optional
+   rounded corners. Chromeless like indicator/label (no header), but with
+   a small bottom-right corner grabber so the user can size the bounding
+   box. Rendered as inline SVG so the strokes stay crisp at any zoom and
+   we don't need a canvas / RAF loop — repainted only on Settings change
+   or window resize.                                                       */
+
+/**
+ * Returns the rotation (radians) that makes an N-sided polygon look "normal"
+ * to a person — a flat top edge for even-sided polygons (square, hexagon,
+ * octagon), and a single point at the top for odd-sided polygons (triangle,
+ * pentagon).
+ *
+ * Without this offset, _shapeRoundedPolyPath puts vertex 0 at the top of the
+ * box, which is right for odd N (point up) but wrong for even N (vertex up =
+ * diamond instead of flat-topped square). Adding π/N for even N rotates the
+ * polygon by half a side-arc, putting the midpoint of an edge at the top.
+ */
+function _polygonNormalRotation(sides) {
+  const n = Math.max(3, sides | 0);
+  return (n % 2 === 0) ? (Math.PI / n) : 0;
+}
+
+/**
+ * Build a path string for an N-sided polygon inscribed in a (w x h) bounding
+ * box, with optional corner rounding. cornerRadius is clamped to
+ * min(w,h)/2 so a large radius just yields a smooth circle-ish shape.
+ *
+ * Algorithm: for each vertex v(i) at angle θ_i, find unit vectors toward
+ * the previous and next vertices. The actual drawing points are v(i) shifted
+ * by r along each direction (so the corner is "cut" by r). We draw straight
+ * segments between adjacent cut points and a quadratic curve through v(i)
+ * to round the corner.
+ */
+/**
+ * Build a path string for an arbitrary polygon defined by an explicit
+ * vertex list, with optional corner rounding. This is the general
+ * helper used at render time — _shapeRoundedPolyPath wraps it for the
+ * "regular polygon inscribed in an ellipse" case used by the polygon
+ * regenerator.
+ *
+ * cornerRadius is clamped to half the shortest side so the corner
+ * offset points never cross each other.
+ */
+function _polygonPathFromVertices(pts, cornerRadius) {
+  const n = pts.length;
+  if (n < 3) return '';
+
+  // Side lengths to clamp cornerRadius.
+  let minSide = Infinity;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < minSide) minSide = len;
+  }
+  const r = Math.max(0, Math.min(cornerRadius, minSide / 2));
+
+  if (r === 0) {
+    let d = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 1; i < n; i++) d += ` L ${pts[i].x} ${pts[i].y}`;
+    return d + ' Z';
+  }
+
+  // Rounded: for each vertex v, walk r along the edge toward the prev
+  // vertex (pre-corner point), then draw a quadratic curve through v to
+  // a post-corner point r toward the next vertex.
+  const post = [], pre = [];
+  for (let i = 0; i < n; i++) {
+    const v    = pts[i];
+    const prev = pts[(i - 1 + n) % n];
+    const next = pts[(i + 1) % n];
+    const dPrev = { x: prev.x - v.x, y: prev.y - v.y };
+    const dNext = { x: next.x - v.x, y: next.y - v.y };
+    const lP = Math.hypot(dPrev.x, dPrev.y) || 1;
+    const lN = Math.hypot(dNext.x, dNext.y) || 1;
+    pre.push({  x: v.x + (dPrev.x / lP) * r, y: v.y + (dPrev.y / lP) * r });
+    post.push({ x: v.x + (dNext.x / lN) * r, y: v.y + (dNext.y / lN) * r });
+  }
+
+  let d = `M ${post[0].x} ${post[0].y}`;
+  for (let i = 1; i <= n; i++) {
+    const idx = i % n;
+    d += ` L ${pre[idx].x} ${pre[idx].y}`;
+    d += ` Q ${pts[idx].x} ${pts[idx].y} ${post[idx].x} ${post[idx].y}`;
+  }
+  return d + ' Z';
+}
+
+function _shapeRoundedPolyPath(cx, cy, rx, ry, sides, cornerRadius, rotationRad) {
+  const n = Math.max(3, sides | 0);
+  const rot = Number.isFinite(rotationRad) ? rotationRad : 0;
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2 + rot;
+    pts.push({ x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a) });
+  }
+  return _polygonPathFromVertices(pts, cornerRadius);
+}
+
+/**
+ * For a line widget, derive (w.x, w.y, w.w, w.h) from the two endpoint
+ * coordinates stored in opts. A pad is added on every side so the
+ * endpoint drag handles have room to sit inside the bounding box even
+ * for nearly-horizontal or nearly-vertical lines. The actual <line>
+ * inside the SVG is drawn from (x1-w.x, y1-w.y) to (x2-w.x, y2-w.y).
+ */
+const _LINE_BOUNDS_PAD = 16;
+function _recomputeLineBounds(w) {
+  const x1 = +w.opts.x1, y1 = +w.opts.y1, x2 = +w.opts.x2, y2 = +w.opts.y2;
+  const minX = Math.min(x1, x2), minY = Math.min(y1, y2);
+  const maxX = Math.max(x1, x2), maxY = Math.max(y1, y2);
+  const P = _LINE_BOUNDS_PAD;
+  w.x = minX - P;
+  w.y = minY - P;
+  w.w = Math.max(2 * P, maxX - minX + 2 * P);
+  w.h = Math.max(2 * P, maxY - minY + 2 * P);
+}
+
+/**
+ * For a polygon widget, derive (w.x, w.y, w.w, w.h) from its vertex
+ * list (absolute page coords in opts.vertices). Same padding model
+ * as lines so the vertex handles stay clickable even when one vertex
+ * sits right on the edge of the bounding box.
+ */
+const _POLY_BOUNDS_PAD = 16;
+function _recomputePolygonBounds(w) {
+  const v = w.opts.vertices;
+  if (!Array.isArray(v) || v.length < 1) return;
+  let minX =  Infinity, minY =  Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of v) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+  }
+  if (!Number.isFinite(minX)) return;
+  const P = _POLY_BOUNDS_PAD;
+  w.x = minX - P;
+  w.y = minY - P;
+  w.w = Math.max(2 * P, maxX - minX + 2 * P);
+  w.h = Math.max(2 * P, maxY - minY + 2 * P);
+}
+
+/**
+ * Regenerate opts.vertices for a regular polygon based on the current
+ * sides/rotation values, fitting it inside the current bounding box.
+ * Called when:
+ *   - the polygon is first created (no vertices yet)
+ *   - the user changes 'sides' in settings (the freeform shape is
+ *     discarded in favor of a fresh regular polygon)
+ *   - the user adjusts 'rotation' (same — regenerate)
+ *
+ * Corner-radius is NOT a generator input — it stays as a render-time
+ * effect that works on any vertex list, regular or freeform.
+ */
+function _regenerateRegularPolygon(w) {
+  const sides = Math.max(3, Math.min(24, (w.opts.sides | 0) || 4));
+  const userRot = (Number(w.opts.rotation) || 0) * Math.PI / 180;
+  const totalRot = _polygonNormalRotation(sides) + userRot;
+  // Fit inside the CURRENT bounding box so regenerating doesn't move
+  // the polygon visually. The box itself was set when the widget was
+  // first added (default 100x100 at the placement point).
+  const cx = (Number.isFinite(w.x) ? w.x : 40) + (Number.isFinite(w.w) ? w.w : 100) / 2;
+  const cy = (Number.isFinite(w.y) ? w.y : 40) + (Number.isFinite(w.h) ? w.h : 100) / 2;
+  const rx = Math.max(8, (Number.isFinite(w.w) ? w.w : 100) / 2 - _POLY_BOUNDS_PAD);
+  const ry = Math.max(8, (Number.isFinite(w.h) ? w.h : 100) / 2 - _POLY_BOUNDS_PAD);
+  const v = [];
+  for (let i = 0; i < sides; i++) {
+    const a = (i / sides) * Math.PI * 2 - Math.PI / 2 + totalRot;
+    v.push({ x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a) });
+  }
+  w.opts.vertices = v;
+  _recomputePolygonBounds(w);
+}
+
+/**
+ * Constrained vertex drag for polygons. Updates w.opts.vertices in place
+ * so the polygon's "shape" is preserved while the dragged vertex follows
+ * the cursor.
+ *
+ * Two behaviors depending on side count:
+ *
+ *   For sides === 4 (rectangle): the opposite corner is the anchor and
+ *   stays put. The two adjacent corners slide along the rectangle's two
+ *   edge axes (which were perpendicular by construction). The dragged
+ *   vertex lands at the cursor; the dimensions of the rectangle (in its
+ *   own local frame) become (proj_u, proj_v) where proj_* is the cursor
+ *   position decomposed onto the rectangle's local axes. The rectangle's
+ *   rotation is preserved.
+ *
+ *   For other side counts: similarity transform (uniform scale + rotation)
+ *   around the dragged vertex's *opposite point*. For odd-sided polygons,
+ *   the opposite point is the midpoint of the opposite edge. The transform
+ *   takes the dragged vertex from its old position to the cursor; all
+ *   other vertices follow the same transform, keeping the anchor fixed
+ *   and preserving all interior angles.
+ */
+function _polygonDragConstrained(w, vidx, cursor) {
+  const vs = w.opts.vertices;
+  const n = vs.length;
+  if (n < 3) return;
+
+  if (n === 4) {
+    // ----- Rectangle case -----
+    // Anchor is the diagonally-opposite corner.
+    const iA = (vidx + 2) % 4;             // anchor
+    const iU = (vidx + 1) % 4;             // adjacent via the "u" edge
+    const iV = (vidx + 3) % 4;             // adjacent via the "v" edge
+    const A = vs[iA];
+
+    // Local axes: unit vectors along the two edges from anchor.
+    // (anchor → iU) and (anchor → iV). These are perpendicular for a
+    // proper rectangle. If they've drifted from perpendicular due to a
+    // prior freeform edit, we orthogonalize by using their original
+    // directions and projecting the cursor onto them.
+    const eU = { x: vs[iU].x - A.x, y: vs[iU].y - A.y };
+    const eV = { x: vs[iV].x - A.x, y: vs[iV].y - A.y };
+    const lU = Math.hypot(eU.x, eU.y) || 1;
+    const lV = Math.hypot(eV.x, eV.y) || 1;
+    const uHat = { x: eU.x / lU, y: eU.y / lU };
+    const vHat = { x: eV.x / lV, y: eV.y / lV };
+
+    // Decompose cursor position relative to anchor onto the local axes.
+    const cx = cursor.x - A.x;
+    const cy = cursor.y - A.y;
+    const newU = cx * uHat.x + cy * uHat.y;   // signed length along u
+    const newV = cx * vHat.x + cy * vHat.y;   // signed length along v
+
+    // New corners:
+    //   anchor stays at A
+    //   adjacent-via-u (iU) sits at A + newU * uHat
+    //   adjacent-via-v (iV) sits at A + newV * vHat
+    //   dragged    (vidx) sits at A + newU * uHat + newV * vHat
+    vs[iU] = { x: A.x + newU * uHat.x, y: A.y + newU * uHat.y };
+    vs[iV] = { x: A.x + newV * vHat.x, y: A.y + newV * vHat.y };
+    vs[vidx] = { x: A.x + newU * uHat.x + newV * vHat.x,
+                 y: A.y + newU * uHat.y + newV * vHat.y };
+    return;
+  }
+
+  // ----- General case (sides ≠ 4): similarity transform around the
+  // opposite point. ------------------------------------------------------
+  // Opposite point: for even N it's the diametrically opposite vertex.
+  // For odd N (no opposite vertex) it's the midpoint of the opposite edge.
+  let anchor;
+  if (n % 2 === 0) {
+    anchor = vs[(vidx + n / 2) % n];
+  } else {
+    const a = vs[(vidx + Math.floor(n / 2)) % n];
+    const b = vs[(vidx + Math.ceil(n / 2)) % n];
+    anchor = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  // Vector from anchor to old vertex position.
+  const oldV = vs[vidx];
+  const oldDx = oldV.x - anchor.x, oldDy = oldV.y - anchor.y;
+  const oldLen = Math.hypot(oldDx, oldDy);
+  if (oldLen < 1e-6) return;               // degenerate; nothing to do
+
+  // Vector from anchor to cursor.
+  const newDx = cursor.x - anchor.x, newDy = cursor.y - anchor.y;
+  const newLen = Math.hypot(newDx, newDy);
+
+  // Similarity transform: scale = newLen / oldLen, rotation = atan2 diff.
+  // Combined as a 2D linear map represented by the complex multiplication
+  // (oldV-anchor) → (cursor-anchor). Equivalent matrix multiply works too.
+  // Let s = newVec / oldVec where both are complex numbers. Then for any
+  // point P: P' = anchor + s * (P - anchor).
+  // s = (newDx + i*newDy) / (oldDx + i*oldDy)
+  //   = ((newDx*oldDx + newDy*oldDy) + i*(newDy*oldDx - newDx*oldDy)) / (oldDx² + oldDy²)
+  const denom = oldDx * oldDx + oldDy * oldDy;
+  const sReal = (newDx * oldDx + newDy * oldDy) / denom;
+  const sImag = (newDy * oldDx - newDx * oldDy) / denom;
+
+  for (let k = 0; k < n; k++) {
+    if (k === vidx) continue;              // we'll set this one explicitly
+    const p = vs[k];
+    const dx = p.x - anchor.x, dy = p.y - anchor.y;
+    // (dx + i*dy) * (sReal + i*sImag) = (dx*sReal - dy*sImag) + i*(dx*sImag + dy*sReal)
+    vs[k] = {
+      x: anchor.x + dx * sReal - dy * sImag,
+      y: anchor.y + dx * sImag + dy * sReal,
+    };
+  }
+  vs[vidx] = { x: cursor.x, y: cursor.y };
+}
+
+function mountShape(w, body, box) {
+  // The widget itself is chromeless: no border, no background. Per the CSS
+  // rule .widget.shape-widget { background:transparent; border:none; }.
+  // The SVG inside fills the body and draws the chosen shape.
+
+  body.style.cssText =
+    'padding:0;cursor:grab;user-select:none;overflow:visible;' +
+    'width:100%;height:100%;box-sizing:border-box;position:relative;';
+  box.style.background = 'transparent';
+  box.style.border = 'none';
+  box.style.boxShadow = 'none';
+
+  // ============================== editing mode =============================
+  // Drag handles for resizing/reshaping the widget are only shown when the
+  // widget is in "editing" mode. Default state is fixed (handles hidden) so
+  // the shape looks clean. Click the shape body to enter editing; click
+  // outside the shape (or use the right-click "Fix shape" item) to exit.
+  //
+  // Each kind-specific branch below pushes its drag handles into the
+  // _editHandles array and (for circles) the corner grabber into
+  // _editGrabbers. _setShapeEditing(w, on) toggles their display.
+  //
+  // _editing is a transient runtime field; it's NOT serialized to the
+  // layout file (a saved layout always opens in "fixed" mode).
+  w._editHandles  = [];
+  w._editGrabbers = [];
+  if (typeof w._editing !== 'boolean') w._editing = false;
+
+  const NS = 'http://www.w3.org/2000/svg';
+
+  // Build SVG fresh each mount. renderPage rebuilds the widget after any
+  // settings change, so we don't need an internal update loop.
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  // Preserve aspect ratio false so SVG fills the box and stretches.
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('viewBox', `0 0 ${w.w || 100} ${w.h || 100}`);
+  svg.style.display = 'block';
+  svg.style.overflow = 'visible';
+  body.append(svg);
+
+  const W = w.w || 100, H = w.h || 100;
+  const sw = Math.max(0, Number(w.opts.strokeWidth) || 0);
+  const stroke = w.opts.strokeColor || '#79c0ff';
+  const fill   = w.opts.fillColor   || 'transparent';
+
+  if (w.opts.kind === 'line') {
+    // Lines store absolute page coordinates for each endpoint in opts. The
+    // bounding box (w.x/y/w/h) is derived from them — see
+    // _recomputeLineBounds. We draw the line into that local box and put
+    // two small circle handles at the endpoints. Dragging a handle moves
+    // that endpoint only; dragging the body moves both endpoints together.
+
+    // Arrow marker definition (shared by both possible markers).
+    const mkId = `arrow_${w.id}`;
+    const defs = document.createElementNS(NS, 'defs');
+    const mk = document.createElementNS(NS, 'marker');
+    mk.setAttribute('id', mkId);
+    mk.setAttribute('viewBox', '0 0 10 10');
+    mk.setAttribute('refX', '8');
+    mk.setAttribute('refY', '5');
+    mk.setAttribute('markerWidth', '6');
+    mk.setAttribute('markerHeight', '6');
+    mk.setAttribute('orient', 'auto-start-reverse');
+    const head = document.createElementNS(NS, 'path');
+    head.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+    head.setAttribute('fill', stroke);
+    mk.append(head);
+    defs.append(mk);
+    svg.append(defs);
+
+    const lineEl = document.createElementNS(NS, 'line');
+    lineEl.setAttribute('stroke', stroke);
+    lineEl.setAttribute('stroke-width', String(sw));
+    lineEl.setAttribute('stroke-linecap', 'round');
+    if (w.opts.arrowStart) lineEl.setAttribute('marker-start', `url(#${mkId})`);
+    if (w.opts.arrowEnd)   lineEl.setAttribute('marker-end',   `url(#${mkId})`);
+    svg.append(lineEl);
+
+    // Endpoint handles. Sized in proportion to the stroke so a thin line
+    // gets small unobtrusive dots and a thick line gets bigger, still-
+    // clickable ones. Minimum 2.5px so they stay grabbable at sw=0.
+    const handleR = Math.max(2.5, sw * 0.8 + 1);
+    const mkHandle = (which) => {
+      const h = document.createElementNS(NS, 'circle');
+      h.setAttribute('r', String(handleR));
+      h.setAttribute('fill', '#79c0ff');
+      h.setAttribute('stroke', '#0f1115');
+      h.setAttribute('stroke-width', String(Math.max(1, handleR * 0.3)));
+      h.setAttribute('cursor', 'move');
+      h.setAttribute('data-endpoint', which);
+      h.style.pointerEvents = 'all';
+      svg.append(h);
+      return h;
+    };
+    const hA = mkHandle('a');
+    const hB = mkHandle('b');
+    w._editHandles.push(hA, hB);
+
+    // Redraws the SVG geometry from opts and updates the widget's bounding
+    // box. Called on initial mount, on any drag (endpoint or body), and
+    // when settings change.
+    const redraw = () => {
+      _recomputeLineBounds(w);
+      // Update outer node so the bounding box matches new endpoints.
+      box.style.left   = w.x + 'px';
+      box.style.top    = w.y + 'px';
+      box.style.width  = w.w + 'px';
+      box.style.height = w.h + 'px';
+      svg.setAttribute('viewBox', `0 0 ${w.w} ${w.h}`);
+
+      // Endpoint positions in local coords (subtract bounds origin)
+      const ax = w.opts.x1 - w.x, ay = w.opts.y1 - w.y;
+      const bx = w.opts.x2 - w.x, by = w.opts.y2 - w.y;
+      // Inset the visible line a hair so the stroke doesn't cover the
+      // handles, which are the same color and would look fused otherwise.
+      const dx = bx - ax, dy = by - ay, dlen = Math.hypot(dx, dy) || 1;
+      const ux = dx / dlen, uy = dy / dlen;
+      const inset = Math.min(handleR - 1, dlen / 2 - 1);
+      lineEl.setAttribute('x1', ax + ux * Math.max(0, inset));
+      lineEl.setAttribute('y1', ay + uy * Math.max(0, inset));
+      lineEl.setAttribute('x2', bx - ux * Math.max(0, inset));
+      lineEl.setAttribute('y2', by - uy * Math.max(0, inset));
+      hA.setAttribute('cx', ax); hA.setAttribute('cy', ay);
+      hB.setAttribute('cx', bx); hB.setAttribute('cy', by);
+    };
+
+    // Initial draw (in case bounds weren't pre-computed by caller).
+    redraw();
+
+    // Endpoint drag. Each handle gets its own mousedown that takes over
+    // from the body drag (stopPropagation) and updates only that endpoint.
+    const startEndpointDrag = (which, evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      const move = (e) => {
+        const cv = document.getElementById('canvas');
+        if (!cv) return;
+        const r = cv.getBoundingClientRect();
+        // Mouse position in canvas-local coords (page coords for the widget
+        // model). Account for canvas scroll offset since the canvas can
+        // scroll its contents.
+        const px = e.clientX - r.left + cv.scrollLeft;
+        const py = e.clientY - r.top  + cv.scrollTop;
+        // Snap if grid is on.
+        const snap = (typeof gridSnap === 'function') ? gridSnap : (n => n);
+        if (which === 'a') {
+          w.opts.x1 = snap(px);
+          w.opts.y1 = snap(py);
+        } else {
+          w.opts.x2 = snap(px);
+          w.opts.y2 = snap(py);
+        }
+        redraw();
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    };
+    hA.addEventListener('mousedown', (e) => startEndpointDrag('a', e));
+    hB.addEventListener('mousedown', (e) => startEndpointDrag('b', e));
+
+    // Skip the corner-grabber for lines — they size from endpoints, not
+    // from a bottom-right drag. The flag is read by renderPage.
+    w._shapeNoCornerResize = true;
+
+    // When the user drags the widget body, makeDragResize moves w.x/w.y
+    // but doesn't know about our endpoints. This hook shifts both
+    // endpoints by the same delta so they stay glued to the bounding box.
+    w._onDrag = (dx, dy) => {
+      w.opts.x1 += dx; w.opts.y1 += dy;
+      w.opts.x2 += dx; w.opts.y2 += dy;
+      // No need to call redraw() — _recomputeLineBounds isn't needed
+      // because the bounds already moved as a whole, and the line's
+      // local-coord drawing inside the SVG didn't change relative to
+      // the (also-translated) box. The endpoint handles stay where they
+      // were within the SVG, which is correct.
+    };
+
+  } else if (w.opts.kind === 'circle') {
+    // Ellipse inscribed in the bounding box so non-square sizes look natural.
+    // Inset by stroke width so the line doesn't get clipped.
+    const inset = sw / 2 + 1;
+    const ell = document.createElementNS(NS, 'ellipse');
+    ell.setAttribute('cx', W / 2);
+    ell.setAttribute('cy', H / 2);
+    ell.setAttribute('rx', Math.max(1, W / 2 - inset));
+    ell.setAttribute('ry', Math.max(1, H / 2 - inset));
+    ell.setAttribute('stroke', stroke);
+    ell.setAttribute('stroke-width', String(sw));
+    ell.setAttribute('fill', fill);
+    svg.append(ell);
+
+  } else { // 'polygon'
+    // Vertex-driven model. The polygon's truth is opts.vertices — an
+    // array of absolute page coordinates, one per vertex. Sides/rotation
+    // are *generators*: changing them in Settings rebuilds opts.vertices
+    // from a regular-polygon template. Corner-radius is a render-time
+    // effect that works on any vertex list.
+    if (!Array.isArray(w.opts.vertices) || w.opts.vertices.length < 3) {
+      _regenerateRegularPolygon(w);
+    }
+
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('stroke', stroke);
+    path.setAttribute('stroke-width', String(sw));
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('fill', fill);
+    svg.append(path);
+
+    // Vertex handles. Sized to match the line-handle scaling rule so a
+    // thin polygon stroke gets small dots, a thick one gets larger.
+    const handleR = Math.max(2.5, sw * 0.8 + 1);
+    const handles = [];
+    for (let i = 0; i < w.opts.vertices.length; i++) {
+      const h = document.createElementNS(NS, 'circle');
+      h.setAttribute('r', String(handleR));
+      h.setAttribute('fill', '#79c0ff');
+      h.setAttribute('stroke', '#0f1115');
+      h.setAttribute('stroke-width', String(Math.max(1, handleR * 0.3)));
+      h.setAttribute('cursor', 'move');
+      h.setAttribute('data-vidx', String(i));
+      h.style.pointerEvents = 'all';
+      svg.append(h);
+      handles.push(h);
+      w._editHandles.push(h);
+    }
+
+    // Redraw geometry from opts.vertices. Updates bounding box, viewBox,
+    // path data, and handle positions. Called on initial mount and on
+    // every vertex drag.
+    const redraw = () => {
+      _recomputePolygonBounds(w);
+      box.style.left   = w.x + 'px';
+      box.style.top    = w.y + 'px';
+      box.style.width  = w.w + 'px';
+      box.style.height = w.h + 'px';
+      svg.setAttribute('viewBox', `0 0 ${w.w} ${w.h}`);
+
+      // Convert absolute page coords to SVG-local coords for the path.
+      const local = w.opts.vertices.map(p => ({ x: p.x - w.x, y: p.y - w.y }));
+      const d = _polygonPathFromVertices(local,
+                                         Math.max(0, +w.opts.cornerRadius || 0));
+      path.setAttribute('d', d);
+      // Position handles in local coords too.
+      for (let i = 0; i < handles.length; i++) {
+        handles[i].setAttribute('cx', local[i].x);
+        handles[i].setAttribute('cy', local[i].y);
+      }
+    };
+    redraw();
+
+    // Vertex drag. Same pattern as line endpoints: each handle's
+    // mousedown stops propagation so the body drag doesn't engage.
+    // Vertex drag. In constrained-angle mode (the default), dragging a
+    // vertex preserves the polygon's angular relationships:
+    //   - For sides=4 (rectangle): the opposite corner stays anchored;
+    //     the two adjacent corners slide along the rectangle's own two
+    //     edge axes (which were perpendicular at construction time). The
+    //     shape stretches longer/wider while keeping right angles.
+    //   - For other side counts: uniform scale + rotation around the
+    //     centroid. The polygon stays similar to itself (same interior
+    //     angles), just scaled and possibly rotated.
+    // In freeform mode, each vertex moves independently — the original
+    // behavior.
+    const startVertexDrag = (vidx, evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      const move = (e) => {
+        const cv = document.getElementById('canvas');
+        if (!cv) return;
+        const r = cv.getBoundingClientRect();
+        const px = e.clientX - r.left + cv.scrollLeft;
+        const py = e.clientY - r.top  + cv.scrollTop;
+        const snap = (typeof gridSnap === 'function') ? gridSnap : (n => n);
+        const cursor = { x: snap(px), y: snap(py) };
+
+        if (w.opts.constrainAngles !== false) {
+          _polygonDragConstrained(w, vidx, cursor);
+        } else {
+          // Freeform: move just this vertex.
+          w.opts.vertices[vidx] = cursor;
+        }
+        redraw();
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    };
+    for (let i = 0; i < handles.length; i++) {
+      const idx = i;
+      handles[i].addEventListener('mousedown', (e) => startVertexDrag(idx, e));
+    }
+
+    // Translate every vertex when the user drags the body of the widget.
+    // Same hook the line uses — keeps drag-the-whole-shape working.
+    w._onDrag = (dx, dy) => {
+      for (const p of w.opts.vertices) { p.x += dx; p.y += dy; }
+    };
+
+    // Skip the corner grabber — vertex handles drive resizing for polygons.
+    w._shapeNoCornerResize = true;
+  }
+
+  // Small resize grabber in the bottom-right (circles only — lines and
+  // polygons size from their own handles). Hidden by default; only visible
+  // in editing mode, same as the vertex/endpoint handles.
+  if (!w._shapeNoCornerResize) {
+    const grab = el('div', {
+      className: 'shape-resize',
+      title: 'Drag to resize',
+      style:
+        'position:absolute;right:0;bottom:0;width:14px;height:14px;' +
+        'cursor:nwse-resize;' +
+        'background:linear-gradient(135deg,transparent 50%,rgba(170,180,210,0.45) 50%);' +
+        'opacity:0.55;'
+    });
+    body.append(grab);
+    w._editGrabbers.push(grab);
+  }
+
+  // Right-click / double-click → settings + reorder/delete menu.
+  box.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _showChromelessContextMenu(w, e.clientX, e.clientY);
+  });
+  body.addEventListener('dblclick', (e) => {
+    if (e.target.classList && e.target.classList.contains('shape-resize')) return;
+    e.preventDefault();
+    openWidgetSettings(w);
+  });
+
+  // ===================== editing-mode wiring =============================
+  // Apply current editing state to the handles/grabber. By default they're
+  // hidden — the user clicks the shape to enter editing.
+  _applyShapeEditingVisuals(w);
+
+  // Body click (vs drag): a click without movement toggles editing mode.
+  // A drag is left to makeDragResize. We track the down-position and on
+  // mouseup measure the displacement — anything under 4px counts as a
+  // click; otherwise it was a drag and we leave editing state alone.
+  let _downX = null, _downY = null;
+  body.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;            // left button only
+    // If the click landed on a registered handle/grabber, that's a
+    // drag-handle interaction — leave editing state alone. We check by
+    // identity against w._editHandles and w._editGrabbers because the
+    // target could be any of: SVG circle (handle), .shape-resize div,
+    // the SVG itself, the body, or one of the shape primitives.
+    const isHandle =
+      (w._editHandles && w._editHandles.indexOf(e.target) >= 0) ||
+      (w._editGrabbers && w._editGrabbers.indexOf(e.target) >= 0);
+    if (isHandle) {
+      _downX = null;
+      return;
+    }
+    _downX = e.clientX;
+    _downY = e.clientY;
+  });
+  // Listen on window because the mouseup may fire outside the body if the
+  // user moved the cursor away (drag case). We compare distance to decide.
+  const onWinUp = (e) => {
+    if (_downX == null) return;
+    const dx = e.clientX - _downX, dy = e.clientY - _downY;
+    _downX = _downY = null;
+    if (Math.hypot(dx, dy) < 4) {
+      // Click, not a drag — toggle editing mode.
+      _setShapeEditing(w, !w._editing);
+    }
+  };
+  window.addEventListener('mouseup', onWinUp);
+  // Clean up the global listener when the widget node is removed by
+  // renderPage. A MutationObserver is overkill here; instead we tie the
+  // listener's lifetime to the box via a small "is the box still in the
+  // DOM" check on each invocation. (Cheaper alternative: store the
+  // function and explicitly remove on a re-mount. The check below is
+  // fine because mouseup is rare.)
+  const _checkAlive = () => {
+    if (!box.isConnected) window.removeEventListener('mouseup', onWinUp);
+  };
+  window.addEventListener('mouseup', _checkAlive);
+
+  // Click outside the shape (anywhere else on the page) → exit editing.
+  // Exception: clicks inside an open modal dialog don't count — the user
+  // is editing the shape, so clicking around in Settings shouldn't dismiss
+  // edit mode.
+  const onOutsideMouseDown = (e) => {
+    if (!w._editing) return;
+    if (box.contains(e.target)) return;     // click was on this shape
+    if (e.target.closest && e.target.closest('#modal')) return;  // inside settings
+    if (e.target.closest && e.target.closest('.chromeless-ctxmenu')) return;  // context menu
+    // Click was elsewhere — exit editing.
+    _setShapeEditing(w, false);
+  };
+  document.addEventListener('mousedown', onOutsideMouseDown, true);
+  // Same cleanup pattern.
+  const _checkAlive2 = () => {
+    if (!box.isConnected) document.removeEventListener('mousedown', onOutsideMouseDown, true);
+  };
+  window.addEventListener('mouseup', _checkAlive2);
+}
+
+/**
+ * Toggle a shape widget's editing-mode handles on or off. Updates the
+ * transient _editing flag (not persisted) and the visibility of every
+ * handle/grabber registered during mount.
+ */
+function _setShapeEditing(w, on) {
+  w._editing = !!on;
+  _applyShapeEditingVisuals(w);
+}
+
+function _applyShapeEditingVisuals(w) {
+  const visible = !!w._editing;
+  for (const h of (w._editHandles || [])) {
+    h.style.display = visible ? '' : 'none';
+  }
+  for (const g of (w._editGrabbers || [])) {
+    g.style.display = visible ? '' : 'none';
+  }
+  // Subtle outline glow on the widget node when editing, so the user can
+  // see at a glance that the shape is malleable. Done as a transient box-
+  // shadow on the widget DOM node (not the SVG) so it doesn't interfere
+  // with the SVG content.
+  const node = document.getElementById('w_' + w.id);
+  if (node) {
+    node.style.outline = visible ? '1px dashed rgba(121, 192, 255, 0.6)' : '';
+    node.style.outlineOffset = visible ? '2px' : '';
+  }
 }
 
 /* ------------------------ tick / read / drag ---------------------------- */
@@ -7480,6 +9184,8 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'staticvar') minW = 196;  // 70% of default 280
   else if (w.type === 'indicator') minW = 20;   // small dot+label allowance
   else if (w.type === 'label') minW = 24;       // narrow but not invisible
+  else if (w.type === 'shape') minW = 16;        // enough room for a tiny shape
+  else if (w.type === 'console') minW = 200;     // unreadable below this
   
   let minH = 180;
   if (w.type === 'dobutton') minH = 45;
@@ -7487,6 +9193,8 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'staticvar') minH = 90;  // Half of default 180
   else if (w.type === 'indicator') minH = 16;  // dot only, no label
   else if (w.type === 'label') minH = 14;      // about one line at 12px
+  else if (w.type === 'shape') minH = 16;
+  else if (w.type === 'console') minH = 80;
   
   // Bring to front when clicking anywhere on widget
   node.addEventListener('mousedown', (e)=>{
@@ -7506,8 +9214,35 @@ function makeDragResize(node, w, header, handle){
     handle.addEventListener('mousedown', (e)=>{ resizing=true; ow=w.w; oh=w.h; sx=e.clientX; sy=e.clientY; e.preventDefault(); });
   }
   window.addEventListener('mousemove',(e)=>{
-    if(dragging){ w.x=ox+(e.clientX-sx); w.y=oy+(e.clientY-sy); node.style.left=w.x+'px'; node.style.top=w.y+'px'; }
-    if(resizing){ w.w=Math.max(minW,ow+(e.clientX-sx)); w.h=Math.max(minH,oh+(e.clientY-sy)); node.style.width=w.w+'px'; node.style.height=w.h+'px'; }
+    if(dragging){
+      // Snap upper-left corner to the grid when enabled. gridSnap is a
+      // no-op when grid is disabled, so this branch has identical
+      // behavior to before when the user hasn't turned the grid on.
+      const nx = gridSnap(ox + (e.clientX - sx));
+      const ny = gridSnap(oy + (e.clientY - sy));
+      const dx = nx - w.x, dy = ny - w.y;
+      w.x = nx; w.y = ny;
+      node.style.left = w.x + 'px';
+      node.style.top  = w.y + 'px';
+      // Per-widget drag hook — lines use this to translate their stored
+      // endpoint coordinates so they stay in sync with the moved bounding
+      // box. Other widgets don't set _onDrag and the call is a no-op.
+      if (typeof w._onDrag === 'function') {
+        try { w._onDrag(dx, dy); } catch (e2) { console.warn(e2); }
+      }
+    }
+    if(resizing){
+      // Snap the new width/height so the lower-right resize handle lands
+      // on a grid intersection. Min-size constraints still apply: we
+      // snap first, then floor to minW/minH so the widget never gets
+      // dragged below its usable size.
+      let nw = gridSnap(ow + (e.clientX - sx));
+      let nh = gridSnap(oh + (e.clientY - sy));
+      w.w = Math.max(minW, nw);
+      w.h = Math.max(minH, nh);
+      node.style.width  = w.w + 'px';
+      node.style.height = w.h + 'px';
+    }
   });
   window.addEventListener('mouseup',()=>{ dragging=false; resizing=false; });
 }
@@ -7635,6 +9370,85 @@ function normalizeLayoutPages(pages){
         w.opts.fgColor    = (typeof w.opts.fgColor === 'string') ? w.opts.fgColor : '#e6e6e6';
         w.opts.bgColor    = (typeof w.opts.bgColor === 'string') ? w.opts.bgColor : 'transparent';
         w.opts.align      = (['left','center','right'].includes(w.opts.align)) ? w.opts.align : 'left';
+        break;
+      }
+      case 'shape': {
+        // Drawing aid. Defensive normalize for older layouts that might
+        // be missing fields. kind defaults to circle.
+        const okKind = ['line','circle','polygon'];
+        w.opts.kind = okKind.includes(w.opts.kind) ? w.opts.kind : 'circle';
+        w.opts.strokeColor = (typeof w.opts.strokeColor === 'string') ? w.opts.strokeColor : '#79c0ff';
+        w.opts.strokeWidth = (Number.isFinite(w.opts.strokeWidth) && w.opts.strokeWidth >= 0) ? w.opts.strokeWidth : 2;
+        w.opts.fillColor   = (typeof w.opts.fillColor === 'string') ? w.opts.fillColor : 'transparent';
+        // line-specific. The endpoint coords ARE the line; the bounding
+        // box is derived from them. If endpoints are missing (older
+        // layouts that stored only `direction`), synthesize them from
+        // the bounding box so the line still renders sensibly.
+        w.opts.arrowStart = (w.opts.arrowStart === true);
+        w.opts.arrowEnd   = (w.opts.arrowEnd === true);
+        const hasEndpoints =
+          Number.isFinite(w.opts.x1) && Number.isFinite(w.opts.y1) &&
+          Number.isFinite(w.opts.x2) && Number.isFinite(w.opts.y2);
+        if (!hasEndpoints) {
+          // Use the saved bounding box (w.x/y/w/h) plus direction (if any)
+          // to pick endpoint positions. Defaults give a top-left → bottom-
+          // right diagonal across the box.
+          const bx = Number.isFinite(w.x) ? w.x : 40;
+          const by = Number.isFinite(w.y) ? w.y : 40;
+          const bw = Number.isFinite(w.w) && w.w > 0 ? w.w : 100;
+          const bh = Number.isFinite(w.h) && w.h > 0 ? w.h : 100;
+          if (w.opts.direction === 'bltr') {
+            w.opts.x1 = bx;       w.opts.y1 = by + bh;
+            w.opts.x2 = bx + bw;  w.opts.y2 = by;
+          } else {
+            w.opts.x1 = bx;       w.opts.y1 = by;
+            w.opts.x2 = bx + bw;  w.opts.y2 = by + bh;
+          }
+        }
+        // `direction` is no longer used at render time — leave it in place
+        // for backcompat but don't enforce.
+        // polygon-specific. sides minimum 3 (triangle).
+        w.opts.sides = (Number.isFinite(w.opts.sides) && w.opts.sides >= 3 && w.opts.sides <= 24)
+                       ? (w.opts.sides | 0) : 4;
+        w.opts.cornerRadius = (Number.isFinite(w.opts.cornerRadius) && w.opts.cornerRadius >= 0)
+                              ? w.opts.cornerRadius : 0;
+        w.opts.rotation     = Number.isFinite(w.opts.rotation) ? w.opts.rotation : 0;
+        // Constrain-angles default is true so legacy layouts that pre-date
+        // this field get the new "preserve angles" behavior automatically.
+        w.opts.constrainAngles = (w.opts.constrainAngles !== false);
+        // Recompute the bounding box from endpoints for lines (whether
+        // they came in or we synthesized them just now).
+        if (w.opts.kind === 'line') _recomputeLineBounds(w);
+        // Polygons: clean up vertex list if present, otherwise synthesize
+        // one from generators. Older layouts without vertex data get
+        // upgraded transparently here.
+        if (w.opts.kind === 'polygon') {
+          let vs = w.opts.vertices;
+          if (Array.isArray(vs) && vs.length >= 3) {
+            vs = vs
+              .filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+              .map(p => ({ x: +p.x, y: +p.y }));
+            if (vs.length >= 3) {
+              w.opts.vertices = vs;
+              _recomputePolygonBounds(w);
+            } else {
+              _regenerateRegularPolygon(w);
+            }
+          } else {
+            _regenerateRegularPolygon(w);
+          }
+        }
+        break;
+      }
+      case 'console': {
+        // Console widget — server stdout/stderr mirror. Defensive defaults.
+        w.opts = w.opts || {};
+        w.opts.title     = (typeof w.opts.title === 'string') ? w.opts.title : 'Console';
+        w.opts.fontSize  = (Number.isFinite(w.opts.fontSize) && w.opts.fontSize >= 8 && w.opts.fontSize <= 24) ? w.opts.fontSize : 12;
+        w.opts.wrap      = (w.opts.wrap === true);
+        w.opts.autoscroll = (w.opts.autoscroll !== false);  // default true
+        w.opts.maxLines  = (Number.isFinite(w.opts.maxLines) && w.opts.maxLines >= 100) ? w.opts.maxLines | 0 : 5000;
+        w.opts.showStream = (['stdout','stderr','both'].includes(w.opts.showStream)) ? w.opts.showStream : 'both';
         break;
       }
     }

@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.15.0';  // 2026-06-04: Pop-out support via 📤 Pop button. Popout mode: dock fills the window, takes state copy from opener, copies back on close. ?popout=checklist sentinel distinguishes from regular widget popouts.
+window.CHECKLIST_VERSION = '1.16.2';  // 2026-06-09: Checklist dock now honors the main UI's grid-snap setting. Drag and corner-drag (width) snap via window.gridSnap; height already snapped through the numRows logic. window.gridSnap is exposed by app.js and is a no-op when grid is off, so this only kicks in when the user has the grid enabled.
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -123,6 +123,7 @@ function buildChecklistPanel() {
       <button class="btn cl-btn" id="clFontUpBtn"   title="Larger font">A+</button>
       <button class="btn cl-btn" id="clPopBtn"      title="Pop out checklist to a separate window">📤 Pop</button>
       <button class="btn cl-btn" id="clInsBtn"   title="Insert item below active (Ins)">⤵ Insert</button>
+      <button class="btn cl-btn" id="clRenumBtn" title="Renumber items in order and rewrite GOTO references">🔢 Renum</button>
       <span class="cl-status" id="clStatus">No checklist loaded</span>
     </div>
     <div class="cl-table-wrap" id="clTableWrap">
@@ -166,6 +167,8 @@ function buildChecklistPanel() {
     }
   }
   panel.querySelector('#clInsBtn').onclick    = clInsertBelow;
+  const renumBtn = panel.querySelector('#clRenumBtn');
+  if (renumBtn) renumBtn.onclick = clRenumber;
 
   // Restore the user's preferred font scale from a previous session.
   // Must run after the panel is in the DOM so clApplyFontScale can find it.
@@ -742,7 +745,11 @@ function clPopOutChecklist() {
     return;
   }
 
-  const features = 'width=720,height=520,resizable=yes,menubar=no,toolbar=no,location=no,status=no';
+  // 'popup' strips the browser chrome (address bar / tabs / menu) so the
+  // checklist gets the whole window. 'resizable=yes' explicitly allows
+  // dragging the OS border to resize. See the matching popOutWidget()
+  // call in app.js for fuller commentary.
+  const features = 'popup,width=720,height=520,resizable=yes,menubar=no,toolbar=no,location=no,status=no';
   const popWin = window.open('/popout.html?popout=checklist', '_blank', features);
   if (!popWin) {
     alert('Could not open popout window — please allow popups for this site.');
@@ -860,6 +867,136 @@ function clInsertBelow() {
   setTimeout(() => clEditItemText(insertAt), 50);
 }
 
+/* =========================================================== renumber ===
+
+   Renumber all checklist items in order with a user-chosen step size,
+   then rewrite any `GOTO nnnn` references in item or comment text so
+   they still point at the right line.
+
+   Design notes:
+     - Comments (type=CL_LINE_COMMENT) are skipped entirely; they keep
+       itemNum:0 and don't advance the step counter.
+     - The rewrite is atomic: we build the complete (old -> new) map
+       FIRST, then walk the items and substitute GOTO references using
+       that map. A one-at-a-time renumber-and-rewrite would risk a
+       GOTO 100 pointing at OLD item 100 accidentally picking up the
+       new item that just got numbered 100.
+     - GOTO regex /\bgoto\s+(\d+)\b/gi:
+         * \b on goto excludes "AGOTO", "GOTOS", etc.
+         * case-insensitive so GOTO / Goto / goto all match; we preserve
+           the user's original casing via the captured word.
+         * \s+ requires whitespace between word and number so "GOTO250"
+           (which is almost certainly a variable name) doesn't match.
+         * trailing \b prevents consuming part of a larger number.
+     - Unresolved references (GOTO N where no item had number N) are
+       LEFT UNTOUCHED in the text. The user gets a count so they can
+       investigate. Silent rewriting to "?" or deletion would be worse
+       than a visible bad reference.                                     */
+function clRenumber() {
+  if (!window.checklistLoaded) {
+    alert('Load a checklist first.');
+    return;
+  }
+  const items = window.checklistItems;
+  if (!items || items.length === 0) return;
+
+  // 1. Ask for step size. Default 10 (BASIC-style "renumber by tens"
+  //    leaves room for inserts without re-renumbering).
+  const stepStr = prompt(
+    'Renumber items with what step size?\n\n' +
+    '(First item gets the step value; e.g. step=10 → items become 10, 20, 30, ...)\n' +
+    'Comments are skipped.',
+    '10'
+  );
+  if (stepStr === null) return;  // cancelled
+  const step = parseInt(stepStr, 10);
+  if (!Number.isFinite(step) || step < 1 || step > 1000) {
+    alert(`Step size must be an integer between 1 and 1000 (got: ${stepStr}).`);
+    return;
+  }
+
+  // 2. Build (oldNum -> newNum) map by walking items, numbering only
+  //    real checklist items.
+  const map = new Map();
+  let next = step;
+  let renumbered = 0;
+  for (const it of items) {
+    if (it.type !== CL_LINE_CHECKLISTITEM) continue;
+    const oldNum = it.itemNum;
+    // Multiple items shouldn't share a number, but be defensive: only
+    // record the first mapping for any given old number. (If duplicates
+    // exist, all of them get renumbered correctly anyway — the map just
+    // gets used for GOTO rewriting, where the first occurrence wins.)
+    if (oldNum && !map.has(oldNum)) map.set(oldNum, next);
+    next += step;
+    renumbered++;
+  }
+
+  // 3. Preview to user with destructive-action warning. Show how many
+  //    items will be renumbered and (peek) how many GOTOs we'll touch.
+  //    We do a non-mutating scan here to get the counts.
+  const GOTO_RE = /\bgoto\s+(\d+)\b/gi;
+  let gotosFound = 0, gotosResolvable = 0, gotosUnresolved = 0;
+  for (const it of items) {
+    const text = it.itemText || '';
+    let m;
+    GOTO_RE.lastIndex = 0;
+    while ((m = GOTO_RE.exec(text)) !== null) {
+      gotosFound++;
+      const oldN = parseInt(m[1], 10);
+      if (map.has(oldN)) gotosResolvable++;
+      else gotosUnresolved++;
+    }
+  }
+  const lastNum = next - step;
+  const ok = confirm(
+    `Renumber ${renumbered} item${renumbered===1?'':'s'} ` +
+    `(${step}, ${step*2}, ${step*3}, … ${lastNum})?\n\n` +
+    `GOTO references found: ${gotosFound}\n` +
+    `  • will be rewritten: ${gotosResolvable}\n` +
+    `  • unresolvable (no matching item): ${gotosUnresolved}\n\n` +
+    `This cannot be undone. Save your file first if you want a backup.`
+  );
+  if (!ok) return;
+
+  // 4. Apply the renumbering. Walk again, assigning the new numbers.
+  let n = step;
+  for (const it of items) {
+    if (it.type !== CL_LINE_CHECKLISTITEM) continue;
+    it.itemNum = n;
+    n += step;
+  }
+
+  // 5. Rewrite GOTO references in item/comment text. Use the same regex
+  //    with a function-replacer so we can preserve the original casing
+  //    of the "goto" word and skip unresolved references.
+  let gotosRewritten = 0;
+  for (const it of items) {
+    if (typeof it.itemText !== 'string') continue;
+    it.itemText = it.itemText.replace(/\b(goto)(\s+)(\d+)\b/gi,
+      (whole, word, sep, num) => {
+        const oldN = parseInt(num, 10);
+        if (!map.has(oldN)) return whole;  // leave unresolved alone
+        gotosRewritten++;
+        return `${word}${sep}${map.get(oldN)}`;
+      });
+  }
+
+  // 6. Re-render + persist snapshot so the new numbering survives reload.
+  _renderTable();
+  if (typeof _clSaveSnapshot === 'function') _clSaveSnapshot();
+
+  // 7. Tell the user what happened.
+  alert(
+    `Renumber complete.\n\n` +
+    `${renumbered} items renumbered (${step}..${lastNum}, step ${step}).\n` +
+    `${gotosRewritten} GOTO reference${gotosRewritten===1?'':'s'} rewritten.` +
+    (gotosUnresolved > 0
+      ? `\n${gotosUnresolved} GOTO reference${gotosUnresolved===1?'':'s'} left untouched (no matching item).`
+      : '')
+  );
+}
+
 function clEditItemText(rowIdx) {
   const it = window.checklistItems[rowIdx]; if (!it) return;
   const t = prompt('Edit item text:', it.itemText);
@@ -946,8 +1083,13 @@ function _makeDraggable(dock, handle) {
 
   document.addEventListener('mousemove', (e) => {
     if (!dragging) return;
-    dock.style.left = (ox + e.clientX - sx) + 'px';
-    dock.style.top  = (oy + e.clientY - sy) + 'px';
+    // Honor the main UI's grid-snap setting when enabled. window.gridSnap
+    // is exposed by app.js and returns the input unchanged when grid is
+    // off, so this branch behaves identically to the original code when
+    // the user hasn't turned the grid on.
+    const snap = (typeof window.gridSnap === 'function') ? window.gridSnap : (px => px);
+    dock.style.left = snap(ox + e.clientX - sx) + 'px';
+    dock.style.top  = snap(oy + e.clientY - sy) + 'px';
   });
 
   document.addEventListener('mouseup', () => {
@@ -1029,8 +1171,20 @@ function _clSelfMount() {
         _clSaveLayout(dock);
         return;
       }
-      // User-driven resize: figure out which numRows this height implies
-      // and then refit cleanly to lock the visible rows exactly.
+      // User-driven resize. Snap width to the grid (height is taken care
+      // of separately by _clRefitWindow's numRows logic). gridSnap is a
+      // no-op when grid is off, so this is invisible until the user
+      // enables snap.
+      if (typeof window.gridSnap === 'function') {
+        const r = dock.getBoundingClientRect();
+        const snappedW = window.gridSnap(r.width);
+        if (snappedW !== Math.round(r.width)) {
+          window._clProgrammaticResize = true;
+          dock.style.width = snappedW + 'px';
+        }
+      }
+      // figure out which numRows this height implies and refit cleanly
+      // to lock the visible rows exactly.
       if (_clNumRowsFromDockHeight()) {
         _clRefitWindow();  // snaps the dock to a clean rows-aligned height
       }

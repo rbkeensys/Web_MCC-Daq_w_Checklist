@@ -31,9 +31,174 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.9"
-__updated__ = "2026-06-04"  # Serve popout.html for widget pop-out windows
+__version__ = "2.8.14"
+__updated__ = "2026-06-09"  # Console capture is now at the OS file-descriptor level instead of wrapping sys.stdout/sys.stderr in Python. This captures everything the previous tee captured PLUS output from C runtime printf() — most importantly the print() output from the compiled expression DLL, which writes directly via the C runtime and bypassed the Python wrapper.
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
+
+# ============================ console capture =============================
+# A bounded in-memory buffer of recent stdout/stderr lines, populated by a
+# pair of background reader threads that drain the OS file descriptors 1
+# and 2 (after we redirect them onto internal pipes — see
+# _install_console_fd_capture below). The browser's console widget reads
+# the buffer via /api/console/snapshot and the live WS stream.
+#
+# fd-level capture (vs a Python sys.stdout wrapper) is important because
+# it catches output from EVERYTHING that writes to those file descriptors:
+# Python print(), uvicorn logging, AND C-runtime printf() — the latter is
+# how the compiled expression DLL emits its print() output.
+#
+# Lines are stored as (seq, stream_label, text) tuples; `seq` is a
+# monotonic counter so clients can request "everything after sequence N"
+# on reconnect. The buffer is capped at CONSOLE_BUF_MAX entries; older
+# lines are evicted.
+import threading
+from collections import deque
+
+CONSOLE_BUF_MAX = 1000      # ~last 1000 lines retained — plenty for casual scrollback
+_console_buf: "deque[tuple]" = deque(maxlen=CONSOLE_BUF_MAX)
+_console_seq: int = 0
+_console_lock = threading.Lock()
+# Highest sequence already broadcast to clients. The acq loop only sends
+# lines with seq > this counter, so re-sending is avoided.
+_console_last_bcast_seq: int = 0
+
+def _console_append(label: str, line: str):
+    """Thread-safe push of a single line into the buffer. Used by the
+    background reader threads that drain the OS pipes."""
+    global _console_seq
+    with _console_lock:
+        _console_seq += 1
+        _console_buf.append((_console_seq, label, line))
+
+# ----- OS-fd-level capture ------------------------------------------------
+# A simple Python tee on sys.stdout/sys.stderr would miss anything that
+# writes directly to file descriptors 1 and 2 — most importantly, printf()
+# calls from the compiled C++ expression DLL. We capture at the fd level
+# instead by dup2-ing pipes onto fd 1 and 2, then running a background
+# reader thread that:
+#   1) appends each complete line to _console_buf, and
+#   2) writes everything back out to the ORIGINAL saved fds so the user's
+#      terminal/PyCharm output is unchanged.
+#
+# This catches: Python print(), uvicorn logging, C runtime printf() from
+# the DLL, any subprocess child output inherited on these fds, etc.
+#
+# Caveats:
+#   * Buffering: applications expect line buffering on a terminal but
+#     block buffering on a pipe. We force flushing on the Python side and
+#     accept that C runtime prints may pool until the C side flushes. The
+#     expr_print.cpp_printf_call() helper already appends fflush(stdout)
+#     to keep expression prints prompt.
+#   * Windows: os.pipe() and os.dup2() work for fds 1/2. The pipe ends
+#     are inheritable by default on POSIX but not on Windows; the
+#     duplicated fds 1/2 are visible to C extensions either way.
+
+def _install_console_fd_capture():
+    """Redirect OS fd 1 (stdout) and fd 2 (stderr) into background reader
+    threads, while preserving the original output so the terminal still
+    sees everything. Returns the (saved_stdout_fd, saved_stderr_fd) pair
+    for diagnostics; rarely needed once installed."""
+    # Save originals so we can still write to the actual terminal.
+    saved_out = os.dup(1)
+    saved_err = os.dup(2)
+
+    # One pipe per stream so we can label captured lines correctly.
+    r_out, w_out = os.pipe()
+    r_err, w_err = os.pipe()
+
+    # Replace fd 1 and 2 with the pipe write-ends. Everything written via
+    # the original fds — Python prints, C printfs, uvicorn logs — now
+    # ends up in our pipes.
+    os.dup2(w_out, 1)
+    os.dup2(w_err, 2)
+    # The original pipe-write ends are now duplicated as fd 1/2; close
+    # the originals to avoid extra references that would keep the pipe
+    # open after we replaced fds.
+    os.close(w_out)
+    os.close(w_err)
+
+    # Python's existing sys.stdout / sys.stderr TextIOWrappers already
+    # point at fd 1 and fd 2 — which are now the pipe-write ends. We
+    # deliberately do NOT replace these wrappers: doing so would trigger
+    # the OLD wrapper's finalizer, which on some Pythons calls close()
+    # on the fd it owns, closing the pipe-write end and breaking
+    # everything. Just flush them so their internal buffers don't hold
+    # back early output, and configure line-buffering for promptness.
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        # Best-effort: turn on line buffering via reconfigure() (Py3.7+).
+        # If reconfigure isn't available (or fails), we still capture —
+        # the C runtime may just batch a bit more before flushing.
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(line_buffering=True)
+        if hasattr(sys.stderr, 'reconfigure'):
+            sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
+    def _reader(read_fd, label, saved_fd):
+        """Background thread: read from the pipe, echo to the saved
+        terminal fd, append each line to the buffer."""
+        # Use os.fdopen so we get a proper Python file object that
+        # handles encoding and line splitting for us.
+        try:
+            f = os.fdopen(read_fd, 'r', buffering=1, encoding='utf-8', errors='replace')
+        except Exception:
+            return
+        partial = ''
+        while True:
+            try:
+                # readline() blocks until a newline or EOF. EOF (empty
+                # string) means the write end was closed (shutdown).
+                chunk = f.readline()
+                if not chunk:
+                    break
+                # Echo to the original terminal so the user's normal
+                # output stream is preserved.
+                try:
+                    os.write(saved_fd, chunk.encode('utf-8', errors='replace'))
+                except Exception:
+                    pass
+                # Split into complete lines. readline() returns one line
+                # at a time including the trailing \n, but we may also
+                # get a partial last line on EOF — handle that.
+                text = partial + chunk
+                if text.endswith('\n'):
+                    lines = text[:-1].split('\n')
+                    partial = ''
+                else:
+                    *lines, partial = text.split('\n')
+                for line in lines:
+                    _console_append(label, line)
+            except Exception:
+                # Never let a capture error kill the thread. If something
+                # really pathological happens, the loop continues; worst
+                # case we lose one line.
+                continue
+
+    threading.Thread(target=_reader, args=(r_out, 'stdout', saved_out),
+                     daemon=True, name='console-stdout-reader').start()
+    threading.Thread(target=_reader, args=(r_err, 'stderr', saved_err),
+                     daemon=True, name='console-stderr-reader').start()
+    return (saved_out, saved_err)
+
+# Install the capture immediately, before any other module imports — we
+# want every print and every printf, from startup onward, to be visible.
+_install_console_fd_capture()
+print(f"[MCC-Hub] Console fd-capture installed; buffer={CONSOLE_BUF_MAX} lines. (Includes DLL printf output.)")
+
+def _console_snapshot(since_seq: int = 0, limit: int = CONSOLE_BUF_MAX):
+    """Return up to `limit` console lines with sequence > since_seq.
+    Returns a list of (seq, stream_label, text) tuples in chronological
+    order. Thread-safe.
+    """
+    with _console_lock:
+        # The deque is in insertion order; just filter and copy.
+        out = [t for t in _console_buf if t[0] > since_seq]
+    return out[-limit:] if len(out) > limit else out
+
+# ============================ end console capture =========================
 
 # DLL versioning for hot-reload
 DLL_VERSION = 0
@@ -126,7 +291,10 @@ app = FastAPI()
 async def _no_cache(request, call_next):
     resp = await call_next(request)
     # disable caching for our UI assets and APIs
-    if request.url.path in ("/", "/index.html", "/app.js", "/styles.css", "/popout.html") or request.url.path.startswith("/api/"):
+    if request.url.path in (
+        "/", "/index.html", "/app.js", "/styles.css", "/popout.html",
+        "/checklist_widget.js", "/checklist_editor.js",
+    ) or request.url.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store, max-age=0"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
@@ -183,6 +351,33 @@ def get_version():
         "python": sys.version.split()[0],
         "platform": sys.platform
     }
+
+@app.get("/api/console/snapshot")
+def get_console_snapshot(since: int = 0, limit: int = CONSOLE_BUF_MAX):
+    """Return buffered stdout/stderr lines for the console widget.
+
+    Newly-mounted console widgets call this to populate themselves with
+    history; the WS push only delivers lines that arrive AFTER mount.
+    """
+    snap = _console_snapshot(since_seq=since, limit=limit)
+    return {
+        "lines": snap,                # [[seq, stream_label, text], ...]
+        "latest": _console_seq,       # so client knows where to resume
+    }
+
+@app.post("/api/console/test")
+def post_console_test():
+    """Force a few diagnostic prints so the console widget can verify the
+    live WS stream is delivering. Hit by the widget's "Test" button.
+
+    We print to BOTH stdout and stderr so the user can see the red stderr
+    styling at the same time as the regular stdout color.
+    """
+    import datetime as _dt
+    ts = _dt.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    print(f"[CONSOLE-TEST] stdout ping @ {ts}")
+    print(f"[CONSOLE-TEST] stderr ping @ {ts}", file=sys.stderr)
+    return {"ok": True, "ts": ts}
 
 @app.get("/api/layout")
 def get_layout():
@@ -1344,6 +1539,20 @@ async def acq_loop():
                 await broadcast(frame)
                 bcast_ctr = 0
 
+                # Console: piggyback any new stdout/stderr lines onto the
+                # broadcast tick. We track the last sequence we sent so
+                # this stays cheap (one int compare) when there's nothing
+                # new to ship.
+                global _console_last_bcast_seq
+                if _console_seq > _console_last_bcast_seq:
+                    new_lines = _console_snapshot(since_seq=_console_last_bcast_seq)
+                    if new_lines:
+                        _console_last_bcast_seq = new_lines[-1][0]
+                        await broadcast({
+                            "type": "console",
+                            "lines": new_lines,    # [[seq, label, text], ...]
+                        })
+
             # Debug for first few ticks
             if ticks <= MCC_DUMP_FIRST:
                 try:
@@ -2226,6 +2435,21 @@ async def ws(ws: WebSocket):
     await ws.accept()
     ws_clients.append(ws)
     print(f"[WS] client connected; total={len(ws_clients)}")
+
+    # Send a snapshot of recent console output to this client only, so
+    # the console widget has history right away. Subsequent lines arrive
+    # via the regular broadcast tick. `replace:true` tells the client to
+    # discard its current contents (this is a full re-sync, not an append).
+    try:
+        snapshot = _console_snapshot()
+        if snapshot:
+            await ws.send_text(json.dumps({
+                "type": "console",
+                "lines": snapshot,
+                "replace": True,
+            }, separators=(",", ":")))
+    except Exception as e:
+        print(f"[WS] failed sending console snapshot: {e}")
 
     # If this is the first client, start acquisition
     global run_task

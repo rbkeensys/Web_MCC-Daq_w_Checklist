@@ -27,9 +27,50 @@ body.fullscreen .topbar { display: none; }
 body.fullscreen #exitFullscreenBtn { display: block; }
 #exitFullscreenBtn:hover { background: #ff4d4d; color: white; }
 
-.workspace { display:flex; flex:1; min-height:0; }
-.palette { width:260px; padding:12px; border-right:1px solid #1f2330; background:#11131a; overflow:auto; }
+.workspace { display:flex; flex:1; min-height:0; position:relative; }
+.palette { width:260px; padding:12px; border-right:1px solid #1f2330; background:#11131a; overflow:auto;
+           transition: width 180ms ease, padding 180ms ease; }
 .palette .btn { width:100%; margin:6px 0; }
+/* Collapsed state: palette shrinks to zero width and its contents are
+   clipped. The transition gives a smooth slide-out. */
+.workspace.palette-collapsed .palette {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-right-width: 0;
+  overflow: hidden;
+}
+/* Toggle button — small tab attached to the right edge of the palette.
+   It uses position:absolute so it follows the palette as it collapses,
+   without needing a separate width measurement. */
+.palette-toggle {
+  position: absolute;
+  left: 260px;
+  top: 16px;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a1d2e;
+  color: #79c0ff;
+  border: 1px solid #2b2f45;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  z-index: 50;
+  user-select: none;
+  transition: left 180ms ease;
+}
+.palette-toggle:hover { background: #232842; }
+.workspace.palette-collapsed .palette-toggle {
+  left: 0;
+  transform: translateX(0);   /* keep flush against viewport edge */
+  border-left: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
 .page-controls { display:flex; gap:8px; margin-top:6px; }
 .canvas { flex:1; position:relative; overflow:auto; padding:0; }
 .widget { position:absolute; display:flex; flex-direction:column; background:var(--card); border:1px solid #262a3e; border-radius:12px; min-width:280px; }
@@ -61,6 +102,22 @@ body.fullscreen #exitFullscreenBtn { display: block; }
   box-shadow: none;
 }
 .widget.label-widget .body { padding: 4px; }
+/* Shape widget — just an SVG inside a transparent box. Like the label
+   widget, no chrome of its own; the drawing is the entire visual. The
+   small .shape-resize grabber in the bottom-right is added by mountShape
+   so the user can still drag-resize the bounding box. */
+.widget.shape-widget {
+  min-width: 16px;
+  min-height: 16px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  /* Shape backgrounds should never paint behind the widget — drag handle
+     in the body absorbs clicks naturally so we don't need pointer-events
+     tricks here. */
+}
+.widget.shape-widget .body { padding: 0; }
+.widget.shape-widget .shape-resize:hover { opacity: 1 !important; }
 .widget header { display:flex; align-items:flex-start; gap:8px; padding:8px; cursor:grab; }
 .widget.le-widget header, .widget.mathop-widget header { padding:2px 4px; min-height:14px; font-size:9px; }
 .widget header .title { font-weight:600; }
