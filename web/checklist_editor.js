@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_EDITOR_VERSION = '1.2.0';
+window.CHECKLIST_EDITOR_VERSION = '1.3.0';   // 2026-06-09: Renumber button — pops a quick dialog for step size (1-100) and renumbers all checklist items sequentially, skipping comments. Step is the increment between items, so step=1 gives 1,2,3,…; step=10 gives 10,20,30,….
 
 let _edItems       = [];
 let _edPath        = '';
@@ -46,6 +46,7 @@ function openChecklistEditor(itemsOverride) {
       <button class="btn danger" id="clEdDelRow">🗑 Delete</button>
       <button class="btn" id="clEdMoveUp">▲ Up</button>
       <button class="btn" id="clEdMoveDown">▼ Down</button>
+      <button class="btn" id="clEdRenum" title="Renumber all items (skips comments). Pops up to ask the step size.">🔢 Renumber…</button>
       <span id="clEdDirty" style="color:#f0caca;align-self:center;font-size:12px"></span>
     </div>
     <div class="cl-editor-table-wrap">
@@ -85,6 +86,7 @@ function openChecklistEditor(itemsOverride) {
   panel.querySelector('#clEdDelRow').onclick        = _edDeleteSelected;
   panel.querySelector('#clEdMoveUp').onclick        = () => _edMoveSelected(-1);
   panel.querySelector('#clEdMoveDown').onclick      = () => _edMoveSelected(+1);
+  panel.querySelector('#clEdRenum').onclick         = _edRenumber;
   panel.querySelector('#clEdClose').onclick         = () => _edClose(modal);
 
   _edRender();
@@ -251,6 +253,56 @@ function _edMoveSelected(dir) {
   _edRender();
   // Re-select the moved row
   setTimeout(() => _edSetSelected(j), 10);
+}
+
+/**
+ * Renumber all checklist items (type === 1) sequentially with a chosen
+ * step size. Comments (type !== 1) are skipped — their itemNum stays 0.
+ *
+ * Step is the *increment* between consecutive item numbers:
+ *   step = 1  →  1, 2, 3, 4, ...   (default, sequential)
+ *   step = 5  →  5, 10, 15, 20, ...
+ *   step = 10 →  10, 20, 30, 40, ...
+ *
+ * Starting at `step` rather than at 1 keeps the relationship "n-th item
+ * = step × n" which most users find more intuitive than "n-th item =
+ * 1 + (n-1)·step". Easy to change if you want a 'start at' input later.
+ */
+function _edRenumber() {
+  // How many real items are there? If none, nothing to do — warn and exit.
+  const itemCount = _edItems.filter(it => it.type === 1).length;
+  if (itemCount === 0) {
+    alert('No checklist items to renumber (only comments are present).');
+    return;
+  }
+
+  // Ask for the step. Default 1 = simple sequential. Validate 1..100.
+  const raw = prompt(
+    `Renumber ${itemCount} item${itemCount === 1 ? '' : 's'}.\n\n` +
+    `Step (increment between consecutive items, 1–100):\n` +
+    `  1 → 1, 2, 3, 4, …\n` +
+    `  5 → 5, 10, 15, 20, …\n` +
+    `  10 → 10, 20, 30, …`,
+    '1'
+  );
+  if (raw === null) return;                  // user cancelled
+  const step = parseInt(raw, 10);
+  if (!Number.isFinite(step) || step < 1 || step > 100) {
+    alert('Step must be a whole number between 1 and 100.');
+    return;
+  }
+
+  // Apply: walk items in order, assigning step, 2*step, 3*step, … to
+  // each item-row, leaving comments untouched.
+  let n = 1;
+  for (const it of _edItems) {
+    if (it.type === 1) {
+      it.itemNum = n * step;
+      n++;
+    }
+  }
+  _edMarkDirty(true);
+  _edRender();
 }
 
 /* ============================================================ load/save */

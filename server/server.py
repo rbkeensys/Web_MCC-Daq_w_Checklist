@@ -2,6 +2,55 @@
 # Python 3.10+
 
 import asyncio, json, math, time, os, sys
+
+# ----------------------------- crash dump hook ----------------------------
+# Installed as the very FIRST thing so module-import-time crashes don't
+# silently kill a frozen PyInstaller EXE. Without this, any exception that
+# escapes the main script (including one raised by an `import x` line near
+# the top of this file) causes the bootloader to close the console window
+# without giving the user a chance to read the error message.
+#
+# The hook does three things:
+#   1. Writes the traceback to mcc_startup.log next to the EXE.
+#   2. Writes the traceback to sys.__stderr__ (the original stderr).
+#   3. If running as a frozen EXE, calls input() so the console window
+#      stays open until the user reads the error.
+def _crash_excepthook(exc_type, exc_value, exc_tb):
+    import traceback as _tb
+    try:
+        # Use original stderr in case anything has been redirected.
+        target = sys.__stderr__ or sys.stderr
+        if target is not None:
+            target.write("\n========== MCC-Hub unhandled exception ==========\n")
+            _tb.print_exception(exc_type, exc_value, exc_tb, file=target)
+            target.write("=================================================\n")
+            try: target.flush()
+            except Exception: pass
+    except Exception:
+        pass
+    try:
+        with open("mcc_startup.log", "a", encoding="utf-8") as f:
+            f.write("\n========== MCC-Hub unhandled exception ==========\n")
+            _tb.print_exception(exc_type, exc_value, exc_tb, file=f)
+            f.write("=================================================\n")
+    except Exception:
+        pass
+    # Pause in frozen mode so the user can read the error.
+    if getattr(sys, 'frozen', False):
+        try:
+            tgt = sys.__stdout__ or sys.stdout
+            if tgt is not None:
+                tgt.write("\n[ Crash — Press Enter to close (see mcc_startup.log) ]\n")
+                tgt.flush()
+            try:
+                input()
+            except EOFError:
+                pass
+        except Exception:
+            pass
+
+sys.excepthook = _crash_excepthook
+
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -31,8 +80,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.14"
-__updated__ = "2026-06-09"  # Console capture is now at the OS file-descriptor level instead of wrapping sys.stdout/sys.stderr in Python. This captures everything the previous tee captured PLUS output from C runtime printf() — most importantly the print() output from the compiled expression DLL, which writes directly via the C runtime and bypassed the Python wrapper.
+__version__ = "2.8.17"
+__updated__ = "2026-06-09"  # Fixed 'OSError: [WinError 1] Incorrect function' crash on Windows that hit when the first print() ran after fd capture install. Root cause: on Windows the existing sys.stdout TextIOWrapper internally uses WriteConsoleW, which fails on a pipe fd. Fix is to close + recreate sys.stdout/sys.stderr around the new pipe fds (canonical natedileas pattern) instead of leaving the old console-aware wrappers in place.
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # ============================ console capture =============================
@@ -96,46 +145,87 @@ def _console_append(label: str, line: str):
 def _install_console_fd_capture():
     """Redirect OS fd 1 (stdout) and fd 2 (stderr) into background reader
     threads, while preserving the original output so the terminal still
-    sees everything. Returns the (saved_stdout_fd, saved_stderr_fd) pair
-    for diagnostics; rarely needed once installed."""
-    # Save originals so we can still write to the actual terminal.
-    saved_out = os.dup(1)
-    saved_err = os.dup(2)
+    sees everything.
 
-    # One pipe per stream so we can label captured lines correctly.
+    On Windows, the existing sys.stdout / sys.stderr are TextIOWrappers
+    that use WriteConsoleW on the underlying console handle. If we just
+    swap fd 1 to a pipe and leave the wrapper alone, the wrapper will
+    keep calling WriteConsoleW on what's now a pipe fd, raising
+    "OSError: [WinError 1] Incorrect function". So we must replace the
+    wrappers themselves with fresh ones built for a pipe.
+
+    The safe order to do this (cribbed from the well-known gist
+    https://gist.github.com/natedileas/8eb31dc03b76183c0211cdde57791005):
+      1. Duplicate fd 1 / fd 2 to save the originals (terminal handles).
+      2. Flush + close the current sys.stdout / sys.stderr — this closes
+         BOTH the wrapper and its underlying fd, freeing fd 1 / fd 2.
+      3. Create pipes; dup2 the pipe write-ends onto the freed fd 1/2.
+      4. Build fresh TextIOWrapper objects around the new fd 1/2 and
+         assign them to sys.stdout / sys.stderr.
+      5. Spawn reader threads on the pipe read-ends; they echo back to
+         the saved originals so the terminal display is unchanged.
+
+    On any failure the function raises and the caller treats capture as
+    optional — the server still runs without it.
+    """
+    import io
+
+    # ---- 1. Save originals so we can still write to the actual terminal.
+    saved_out = os.dup(1)
+    try:
+        saved_err = os.dup(2)
+    except OSError:
+        os.close(saved_out)
+        raise
+
+    # ---- 2. Flush + close current sys.stdout / sys.stderr.
+    # The .close() closes the underlying fd too (releasing fd 1 / 2 for
+    # reuse by step 3). This is the critical step — without it, the old
+    # wrapper keeps referencing a (now-pipe) fd and tries to use console
+    # APIs on it, raising "Incorrect function" on the next print.
+    for stream_name in ('stdout', 'stderr'):
+        s = getattr(sys, stream_name, None)
+        if s is None:
+            continue
+        try: s.flush()
+        except Exception: pass
+        try: s.close()
+        except Exception: pass
+
+    # ---- 3. Create pipes; redirect fd 1 / fd 2 to the pipe write-ends.
     r_out, w_out = os.pipe()
     r_err, w_err = os.pipe()
-
-    # Replace fd 1 and 2 with the pipe write-ends. Everything written via
-    # the original fds — Python prints, C printfs, uvicorn logs — now
-    # ends up in our pipes.
+    # After close() above, fd 1 / 2 are free. dup2 puts the pipe write-end
+    # there. (dup2 also closes the destination fd if it's still open, so
+    # this is robust even if some weird code path skipped the close.)
     os.dup2(w_out, 1)
     os.dup2(w_err, 2)
-    # The original pipe-write ends are now duplicated as fd 1/2; close
-    # the originals to avoid extra references that would keep the pipe
-    # open after we replaced fds.
     os.close(w_out)
     os.close(w_err)
 
-    # Python's existing sys.stdout / sys.stderr TextIOWrappers already
-    # point at fd 1 and fd 2 — which are now the pipe-write ends. We
-    # deliberately do NOT replace these wrappers: doing so would trigger
-    # the OLD wrapper's finalizer, which on some Pythons calls close()
-    # on the fd it owns, closing the pipe-write end and breaking
-    # everything. Just flush them so their internal buffers don't hold
-    # back early output, and configure line-buffering for promptness.
+    # ---- 4. Build fresh sys.stdout / sys.stderr around the new fds.
+    # closefd=False means the wrapper does NOT own fd 1 / fd 2; closing
+    # the wrapper won't close the pipe. We want the reader thread to
+    # control pipe lifetime, not the wrappers.
     try:
-        sys.stdout.flush()
-        sys.stderr.flush()
-        # Best-effort: turn on line buffering via reconfigure() (Py3.7+).
-        # If reconfigure isn't available (or fails), we still capture —
-        # the C runtime may just batch a bit more before flushing.
-        if hasattr(sys.stdout, 'reconfigure'):
-            sys.stdout.reconfigure(line_buffering=True)
-        if hasattr(sys.stderr, 'reconfigure'):
-            sys.stderr.reconfigure(line_buffering=True)
+        sys.stdout = io.TextIOWrapper(
+            io.BufferedWriter(io.FileIO(1, mode='w', closefd=False)),
+            encoding='utf-8', errors='replace',
+            line_buffering=True, write_through=True,
+        )
     except Exception:
-        pass
+        # If we can't build a new wrapper, leave sys.stdout as None and
+        # hope nothing tries to use it. Better than leaving the broken
+        # old wrapper in place.
+        sys.stdout = None
+    try:
+        sys.stderr = io.TextIOWrapper(
+            io.BufferedWriter(io.FileIO(2, mode='w', closefd=False)),
+            encoding='utf-8', errors='replace',
+            line_buffering=True, write_through=True,
+        )
+    except Exception:
+        sys.stderr = None
 
     def _reader(read_fd, label, saved_fd):
         """Background thread: read from the pipe, echo to the saved
@@ -185,8 +275,26 @@ def _install_console_fd_capture():
 
 # Install the capture immediately, before any other module imports — we
 # want every print and every printf, from startup onward, to be visible.
-_install_console_fd_capture()
-print(f"[MCC-Hub] Console fd-capture installed; buffer={CONSOLE_BUF_MAX} lines. (Includes DLL printf output.)")
+# Capture is a nice-to-have, not a requirement: if anything goes wrong
+# (PyInstaller frozen mode quirks, restricted fd environment, etc.) we
+# print the failure to whatever stderr we still have and continue without
+# capture. The server itself runs fine; the console widget just won't
+# show any output.
+_CONSOLE_CAPTURE_OK = False
+try:
+    _install_console_fd_capture()
+    _CONSOLE_CAPTURE_OK = True
+    print(f"[MCC-Hub] Console fd-capture installed; buffer={CONSOLE_BUF_MAX} lines. (Includes DLL printf output.)")
+except Exception as _cap_err:
+    # Use sys.__stderr__ which is the *original* stderr — survives even
+    # if sys.stderr has been mucked with above.
+    try:
+        (sys.__stderr__ or sys.stderr).write(
+            f"[MCC-Hub] WARNING: console fd-capture failed ({_cap_err!r}); "
+            f"server will run without console widget data.\n"
+        )
+    except Exception:
+        pass
 
 def _console_snapshot(since_seq: int = 0, limit: int = CONSOLE_BUF_MAX):
     """Return up to `limit` console lines with sequence > since_seq.
@@ -2479,11 +2587,78 @@ async def ws(ws: WebSocket):
 # app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="static")
 
 if __name__ == "__main__":
-    import uvicorn, os
-    port = int(os.environ.get("PORT", "8000"))
-    # Quieter defaults; allow overrides via env if needed
-    uv_level = os.environ.get("UVICORN_LEVEL", "warning").lower()  # "info" or "warning"
-    access = os.environ.get("UVICORN_ACCESS", "0") == "0"       # set to 1 to re-enable
+    # Frozen-EXE-friendly main: ALWAYS write a startup log file, ALWAYS
+    # pause before exit when running as a PyInstaller EXE. Without this,
+    # any failure (crash, clean exit, port already in use, …) closes the
+    # console window before the user can read what happened.
+    import traceback as _tb
+    _frozen = getattr(sys, 'frozen', False)
+    _log_path = "mcc_startup.log"        # next to the EXE; always created
+    _exit_code = 0
+    _crashed = False
+    try:
+        # Open the log immediately and tee a copy of stderr to it so we
+        # capture EVERY error message even if our fd-capture failed earlier.
+        _log_file = open(_log_path, "w", encoding="utf-8", buffering=1)
+        _log_file.write(f"[MCC-Hub] startup begin (frozen={_frozen})\n")
+        _log_file.flush()
+    except Exception:
+        _log_file = None
 
-    print(f"[MCC-Hub] Starting Uvicorn on http://127.0.0.1:{port}")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level=uv_level, access_log=access)
+    def _log_write(msg):
+        """Write a line to BOTH the original stderr and the startup log,
+        if either is available. Used by the crash handler so we have
+        independent records of what happened."""
+        for target in (sys.__stderr__, sys.stderr, _log_file):
+            if target is None: continue
+            try:
+                target.write(msg)
+                target.flush()
+            except Exception:
+                pass
+
+    try:
+        import uvicorn, os
+        port = int(os.environ.get("PORT", "8000"))
+        uv_level = os.environ.get("UVICORN_LEVEL", "warning").lower()
+        access = os.environ.get("UVICORN_ACCESS", "0") == "0"
+        _log_write(f"[MCC-Hub] Starting Uvicorn on http://127.0.0.1:{port}\n")
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level=uv_level, access_log=access)
+        _log_write("[MCC-Hub] Uvicorn exited normally.\n")
+    except SystemExit as e:
+        _log_write(f"[MCC-Hub] SystemExit with code={e.code}\n")
+        _exit_code = e.code if isinstance(e.code, int) else 1
+    except BaseException as _err:
+        _crashed = True
+        _exit_code = 1
+        _log_write("\n========== MCC-Hub crashed during startup ==========\n")
+        _log_write(_tb.format_exc())
+        _log_write("====================================================\n")
+    finally:
+        # Always pause when running as a frozen EXE — this is the whole
+        # point of the wrapper. If the user double-clicked the EXE, the
+        # console will close on exit and they'll never see what went
+        # wrong. The pause keeps the window open until they hit Enter.
+        if _frozen:
+            try:
+                # Tell them what happened so they know what to look at.
+                if _crashed:
+                    msg = "\n[ Press Enter to close — see error above or mcc_startup.log ]\n"
+                else:
+                    msg = "\n[ Server exited. Press Enter to close — see mcc_startup.log ]\n"
+                # Use the *original* stdout for the prompt so it's visible
+                # even if our wrappers got into a bad state.
+                tgt = sys.__stdout__ or sys.stdout
+                if tgt is not None:
+                    tgt.write(msg)
+                    tgt.flush()
+                try:
+                    input()
+                except EOFError:
+                    pass
+            except Exception:
+                pass
+        if _log_file is not None:
+            try: _log_file.close()
+            except Exception: pass
+        sys.exit(_exit_code)

@@ -43,7 +43,7 @@
           "name": "Ch P",
           "slope": 50.17183999499474,
           "offset": -27.436806323434716,
-          "cutoffHz": 0.2,
+          "cutoffHz": 0.0,
           "units": "psi",
           "include": true
         },
