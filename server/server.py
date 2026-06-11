@@ -80,8 +80,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.17"
-__updated__ = "2026-06-09"  # Fixed 'OSError: [WinError 1] Incorrect function' crash on Windows that hit when the first print() ran after fd capture install. Root cause: on Windows the existing sys.stdout TextIOWrapper internally uses WriteConsoleW, which fails on a pipe fd. Fix is to close + recreate sys.stdout/sys.stderr around the new pipe fds (canonical natedileas pattern) instead of leaving the old console-aware wrappers in place.
+__version__ = "2.8.18"
+__updated__ = "2026-06-10"  # CRITICAL fix: /api/check_events no longer blocks the asyncio event loop. Previously every X/Backspace press in the checklist widget caused write_check_events() to rewrite the ENTIRE session CSV synchronously inside the async handler, freezing the UI for 10-20 seconds in large sessions. The logger now accumulates events in memory and only embeds the chk_events column at session close (logger 2.1.4). Both /api/check_events and /api/check_events/save also now run their (now-trivial) I/O via asyncio.to_thread for safety.
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # ============================ console capture =============================
@@ -2327,7 +2327,13 @@ async def save_check_events(req: Request):
                 return {"ok": False, "error": "No session directory found"}
             chk_dir = dirs[-1]
         chk_path = chk_dir / "chk.json"
-        chk_path.write_text(json.dumps(data, indent=2))
+        # The disk write happens off the event loop so this handler can't
+        # stall WebSocket broadcasts and other API requests — even on a
+        # slow disk or under heavy IO load. The snapshot itself is small
+        # (current checklist state, not all events ever), so this is
+        # quick on a fast disk; the to_thread wrap is just insurance.
+        payload = json.dumps(data, indent=2)
+        await asyncio.to_thread(chk_path.write_text, payload)
         print(f"[MCC-Hub] Saved chk.json to {chk_path} ({len(data.get('checkEvents', []))} events)")
         return {"ok": True, "path": str(chk_path)}
     except Exception as e:
@@ -2492,13 +2498,23 @@ async def tare_scales(req: dict):
 
 @app.post("/api/check_events")
 async def post_check_events(req: Request):
-    """Receive checklist check events from frontend and write to current log."""
+    """Receive checklist check events from frontend and append to the
+    current session's in-memory accumulator. The actual CSV write happens
+    once at session close.
+
+    The call to write_check_events is wrapped in asyncio.to_thread to keep
+    even hypothetical future I/O off the event loop — historically this
+    handler was a major source of UI freezes (10-20 seconds per X/Backspace
+    keypress) because the underlying logger was rewriting the entire CSV
+    on every call. With the O(1) in-memory accumulator now in place the
+    to_thread wrap is overkill, but it's cheap and prevents regression.
+    """
     global session_logger
     try:
         data = await req.json()
         events = data.get("events", [])
         if session_logger and events:
-            session_logger.write_check_events(events)
+            await asyncio.to_thread(session_logger.write_check_events, events)
         return {"ok": True, "count": len(events)}
     except Exception as e:
         return {"ok": False, "error": str(e)}

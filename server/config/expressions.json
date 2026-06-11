@@ -105,19 +105,19 @@
     {
       "name": "S3_FillRunTank_Control",
       "enabled": true,
-      "expression": "// Controls the S3 Valve\n\nLOXCond   = static.LOXConditionState\nloadProp  = static.loadProp\nbackFlush = static.backFlush\n\nS3_Control = loadProp or LOXCond or backFlush\n\"DO:S3_PropMixLoad\" = S3_Control\n",
+      "expression": "// Controls the S3 Valve\n\nLOXCond   = static.LOXConditionState\nloadProp  = static.loadProp\nbackFlush = static.backFlush\nChillS7   = buttonVars.ChillS7\n\n\nS3_Control = loadProp or LOXCond or backFlush or ChillS7\n\"DO:S3_PropMixLoad\" = S3_Control\n",
       "execution_rate_hz": null
     },
     {
       "name": "S4_RunTankVent_Control",
       "enabled": true,
-      "expression": "// Controls the S4 Valve\n\ndepress      = buttonVars.depressRunTank\nautoDepress  = static.RunTankVent\nmanualVent   = depress\nventFromLoad = static.ventFromLoad\npurge        = static.Purge\ncondState    = static.LOXConditionState\nTankPress    = \"AI:Ch P\"\nRunTankMaxP  = static.RunTankMaxP\n\nTank_Vent_ON = 0\n\nif ( depress ) then\n    Tank_Vent_ON  = 1\nendif\n\nif ( (TankPress > RunTankMaxP) or condState ) then\n    Tank_Vent_ON = 1\nendif\n\nS4_Control = Tank_Vent_ON or autoDepress or ventFromLoad or purge\n\n\"DO:S4_RunTankVent\" = S4_Control",
+      "expression": "// Controls the S4 Valve\n\ndepress      = buttonVars.depressRunTank\nautoDepress  = static.RunTankVent\nmanualVent   = depress\nventFromLoad = static.ventFromLoad\npurge        = static.Purge\ncondState    = static.LOXConditionState\nTankPress    = \"AI:Ch P\"\nRunTankMaxP  = static.RunTankMaxP\nChillS7      = buttonVars.ChillS7\n\nTank_Vent_ON = 0\n\nif ( depress ) then\n    Tank_Vent_ON  = 1\nendif\n\nif ( (TankPress > RunTankMaxP) or condState ) then\n    Tank_Vent_ON = 1\nendif\n\nS4_Control = Tank_Vent_ON or autoDepress or ventFromLoad or purge or ChillS7\n\n\"DO:S4_RunTankVent\" = S4_Control",
       "execution_rate_hz": null
     },
     {
       "name": "S5_LineVent_Control",
       "enabled": true,
-      "expression": "// Controls the S5 Valve\nChillS7  = buttonVars.ChillS7\nbackFlush = static.backFlush\n\n\"DO:S5_MIXNearVent\" = backFlush or ChillS7\n    ",
+      "expression": "// Controls the S5 Valve\n\nbackFlush = static.backFlush\n\n\"DO:S5_MIXNearVent\" = backFlush\n    ",
       "execution_rate_hz": null
     },
     {

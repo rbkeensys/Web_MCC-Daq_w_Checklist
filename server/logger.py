@@ -1,31 +1,27 @@
 # server/logger.py
 """
 Buffered CSV logger for session data
-Version: 2.2.1 (2026-06-04)
+Version: 2.1.5 (2026-06-10)
 
-CHANGES from 2.2.0:
-- THREAD SAFETY: write(), add_columns(), write_check_events(), and close()
-  are now serialized with an internal RLock. Previously the acq-loop's
-  writerow could race the HTTP request thread's add_columns() — when
-  put_expressions triggered a CSV rewrite, the close()+reopen() of self.f
-  happened mid-write in the acq loop, crashing it with "I/O operation on
-  closed file." All file-handle mutations are now atomic w.r.t. write().
-
-Version: 2.2.0 (2026-06-03)
+CHANGES from 2.1.4:
+- BUGFIX (regression introduced in 2.1.4): __init__ now accepts an
+  optional known_columns parameter. server.py constructs SessionLogger
+  as SessionLogger(dir, known_columns=...) and 2.1.4 lost that
+  parameter, causing TypeError at acq-loop startup which killed
+  expressions and static vars (they're populated by the acq loop's
+  broadcast frame). 2.1.5 accepts known_columns and threads them
+  through to _finalise_header so the pre-declared gvar_/bvar_ columns
+  end up in the CSV header from the start without triggering the slow
+  per-column rewrite path.
 
 CHANGES from 2.1.3:
-- PERFORMANCE: missing columns discovered in write() are now batched into
-  a single CSV rewrite instead of one rewrite per column. Previously
-  saving an expression that added 6 globals triggered 6 full-CSV reads
-  + 6 full-CSV writes back-to-back; long sessions stalled the server
-  for seconds. One batched rewrite is O(rows), not O(N*rows).
-- NEW: __init__ accepts known_columns=[…] so callers can pre-declare
-  gvar_/bvar_ names harvested at startup. Those names are unioned into
-  the header at finalise time, so the slow rewrite path never fires
-  for them at all.
-- NEW: add_columns(names) public method. Call after a recompile/config
-  change to register newly-introduced variables. Triggers at most one
-  batched rewrite (or no rewrite if header hasn't settled yet).
+- BUGFIX (CRITICAL): write_check_events() no longer rewrites the entire
+  CSV file on every call. Previously, every X/Backspace press in the
+  checklist widget caused the server to read+rewrite the whole session
+  CSV (potentially hundreds of MB), blocking the asyncio event loop for
+  10-20 seconds and freezing the entire app. Now events are accumulated
+  in memory and embedded in the CSV's chk_events column exactly once,
+  at session close.
 
 CHANGES from 2.0.0:
 - BUGFIX: Header is now deferred for HEADER_SETTLE_FRAMES ticks so that
@@ -55,9 +51,8 @@ COLUMNS LOGGED:
 import csv
 import io
 import math
-import threading
 from pathlib import Path
-from typing import Optional, Iterable
+from typing import Optional
 
 # How many ticks to buffer before writing the header.
 # At 100 Hz this is 0.5 s - plenty of time for the frontend to POST its
@@ -160,24 +155,7 @@ def _row_from_frame(frame: dict, col_idx: dict) -> list:
 
 
 class SessionLogger:
-    def __init__(self, folder: Path, known_columns: Optional[Iterable[str]] = None):
-        """
-        folder: where to write session.csv
-        known_columns: optional iterable of column names that the caller
-            knows will appear in frames (e.g. "gvar_LN2maintainPeriod",
-            "bvar_run"). These get unioned into the header at finalise
-            time so the *normal-path* rewrite mechanism never has to fire
-            for any of them — eliminating the WARNING-storm + slow rewrite
-            you'd otherwise see when the first frame containing a new
-            global variable arrives after the header settled.
-
-            Pass everything you know up front: harvest static-var names
-            from the expression engine, button-var names from any UI
-            registration, anything else stable that contributes a
-            gvar_ / bvar_ column. The cost of including a column that's
-            never populated is one empty CSV cell per row, which is far
-            cheaper than even one mid-session rewrite.
-        """
+    def __init__(self, folder: Path, known_columns: Optional[list] = None):
         self.path = folder / "session.csv"
         # CRITICAL: 1 MB buffer prevents synchronous disk flushes (Windows 80 ms+ spikes)
         self.f = open(self.path, "w", newline="", buffering=1024 * 1024)
@@ -190,25 +168,27 @@ class SessionLogger:
         self._pending_frames: list = []      # raw frame dicts
         self._settled = False                # True once header has been written
 
-        # Pre-declared columns, unioned into the header at finalise time.
-        # Stored as a stable-ordered list (insertion order) so re-runs
-        # produce deterministic header layouts.
-        self._predeclared_cols: list = []
+        # Known gvar_/bvar_ columns supplied by server startup. These get
+        # folded into the header at finalisation time so the slow
+        # "_rewrite_with_new_col" path never fires for them when they
+        # first appear in a frame. Order is preserved (deduped). None or
+        # empty list means "no pre-declared columns" — behaves exactly
+        # like the older logger that didn't have this parameter.
+        self._known_columns: list = []
         if known_columns:
+            seen = set()
             for c in known_columns:
-                if isinstance(c, str) and c and c not in self._predeclared_cols:
-                    self._predeclared_cols.append(c)
+                if c and c not in seen:
+                    seen.add(c)
+                    self._known_columns.append(c)
 
-        # Serialize all mutations of self.f / self.w / self._cols / etc.
-        # The acquisition loop calls write() from the asyncio event loop
-        # thread; HTTP request handlers (put_expressions, put_pid, put_scales)
-        # call add_columns() from FastAPI's threadpool. Without this lock,
-        # the request thread can close+reopen self.f mid-write — surfacing
-        # as "I/O operation on closed file" in the acq loop. RLock because
-        # write() may itself trigger _rewrite_with_new_cols, and
-        # write_check_events() calls _finalise_header — both re-enter the
-        # lock from already-locked code paths.
-        self._lock = threading.RLock()
+        # Accumulator for checklist check events. write_check_events()
+        # appends here in O(1) instead of rewriting the entire CSV on
+        # every X/Backspace key press — which was causing 10-20 second
+        # blocking on the asyncio event loop when sessions got large.
+        # The events are embedded in the CSV's chk_events column exactly
+        # once, during close().
+        self._check_events_accum: list = []
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -216,9 +196,11 @@ class SessionLogger:
 
     def _finalise_header(self):
         """
-        Build the definitive column set from all buffered frames AND any
-        pre-declared columns the caller passed at construction time, write
+        Build the definitive column set from all buffered frames, write
         the header row, then flush every buffered frame as data rows.
+        Any pre-declared known_columns (gvar_/bvar_ names supplied at
+        construction time) are appended to the column list — these get
+        empty cells in any rows that don't carry a value for them.
         """
         # Union of all columns seen across all buffered frames, in stable order
         seen = {}
@@ -226,11 +208,11 @@ class SessionLogger:
             for col in _extract_cols(frame):
                 if col not in seen:
                     seen[col] = None
-        # Then add any pre-declared columns that haven't already appeared.
-        # These tend to be gvar_*/bvar_* names harvested from the expression
-        # engine at startup — including them here means the slow-path
-        # rewrite never has to fire for them later.
-        for col in self._predeclared_cols:
+        # Add the pre-declared columns at the end so they're in the header
+        # even if no buffered frame actually carried that variable yet.
+        # The "rewrite when new column appears" path in write() never
+        # fires for these because they're already in self._col_idx.
+        for col in self._known_columns:
             if col not in seen:
                 seen[col] = None
         self._cols = list(seen.keys())
@@ -244,26 +226,12 @@ class SessionLogger:
         self._pending_frames = []
         self._settled = True
 
-    def _rewrite_with_new_cols(self, new_cols):
+    def _rewrite_with_new_col(self, new_col: str):
         """
-        One or more bvar_ / gvar_ columns appeared after the header was
-        already written. Rewrite the entire CSV ONCE, appending all of
-        them at the same time.
-
-        This is the slow path. Adding N columns the old way would do N
-        full reads + N full rewrites — on a long session this is O(N*rows)
-        and stalls the server for seconds. Batching collapses that to
-        one read + one rewrite no matter how many columns appeared.
+        A bvar_ / gvar_ column appeared after the header was already written.
+        Rewrite the entire CSV to add the column (rare slow path).
         """
-        # Filter to genuinely new columns and preserve caller order
-        new_cols = [c for c in new_cols if c not in self._col_idx]
-        if not new_cols:
-            return
-
-        if len(new_cols) == 1:
-            print(f"[Logger] new column '{new_cols[0]}' appeared after header – rewriting CSV")
-        else:
-            print(f"[Logger] {len(new_cols)} new columns appeared after header – rewriting CSV once: {new_cols}")
+        print(f"[Logger] WARNING: new column '{new_col}' appeared after header – rewriting CSV")
 
         # Flush pending writes before reading back the file
         self.f.flush()
@@ -272,152 +240,134 @@ class SessionLogger:
         with open(self.path, newline="") as rf:
             existing_rows = list(csv.reader(rf))
 
-        # Extend schema with ALL new columns at once
-        start_idx = len(self._cols)
-        for c in new_cols:
-            self._cols.append(c)
-            self._col_idx[c] = len(self._cols) - 1
-        n_added = len(new_cols)
-        pad = [""] * n_added
+        # Extend schema
+        self._cols.append(new_col)
+        self._col_idx[new_col] = len(self._cols) - 1
 
         # Close current handle, reopen for full rewrite, restore 1 MB buffer
         self.f.close()
         self.f = open(self.path, "w", newline="", buffering=1024 * 1024)
         self.w = csv.writer(self.f)
 
-        # New header, then every data row padded with n_added empty cells.
         self.w.writerow(self._cols)
         if len(existing_rows) > 1:
             for row in existing_rows[1:]:
-                row.extend(pad)
+                row.append("")
                 self.w.writerow(row)
-
-    # Kept for backwards compatibility with any external caller.
-    def _rewrite_with_new_col(self, new_col: str):
-        self._rewrite_with_new_cols([new_col])
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def write(self, frame: dict):
-        with self._lock:
-            if not self._settled:
-                self._pending_frames.append(frame)
-                if len(self._pending_frames) >= HEADER_SETTLE_FRAMES:
-                    self._finalise_header()
-                return
-
-            # --- Normal path: header already written ---
-            # Collect ALL missing bvar_ / gvar_ columns from this frame first,
-            # then do a single batched rewrite if any are new. This avoids
-            # N back-to-back full-CSV rewrites when an expression save adds
-            # several variables at once.
-            missing = []
-            for name in frame.get("button_vars", {}).keys():
-                col = f"bvar_{name}"
-                if col not in self._col_idx and col not in missing:
-                    missing.append(col)
-            for name in frame.get("global_vars", {}).keys():
-                col = f"gvar_{name}"
-                if col not in self._col_idx and col not in missing:
-                    missing.append(col)
-            if missing:
-                self._rewrite_with_new_cols(missing)
-
-            self.w.writerow(_row_from_frame(frame, self._col_idx))
-
-    def add_columns(self, names):
-        """
-        Pre-register one or more column names (typically gvar_* or bvar_*).
-        Safe to call at any time:
-          * Before the header has settled, the names get folded into the
-            initial header at finalise time (no rewrite).
-          * After the header has settled, this triggers ONE batched rewrite
-            of the whole CSV with all the new names appended.
-
-        Use this when something the server knows about changes that
-        will contribute new columns — e.g. after an expression recompile,
-        when new static variables get introduced.
-
-        Thread-safe: serialized with write() / close() so the file handle
-        can't be swapped out from under an in-flight writerow.
-        """
-        if not names:
-            return
-        # Normalise to list, dedupe
-        names = [n for n in names if isinstance(n, str) and n]
-        if not names:
+        if not self._settled:
+            self._pending_frames.append(frame)
+            if len(self._pending_frames) >= HEADER_SETTLE_FRAMES:
+                self._finalise_header()
             return
 
-        with self._lock:
-            if not self._settled:
-                for n in names:
-                    if n not in self._predeclared_cols:
-                        self._predeclared_cols.append(n)
-                return
+        # --- Normal path: header already written ---
+        # Check for new bvar_ / gvar_ columns that appeared after settle time
+        for name in frame.get("button_vars", {}).keys():
+            col = f"bvar_{name}"
+            if col not in self._col_idx:
+                self._rewrite_with_new_col(col)
 
-            self._rewrite_with_new_cols(names)
+        for name in frame.get("global_vars", {}).keys():
+            col = f"gvar_{name}"
+            if col not in self._col_idx:
+                self._rewrite_with_new_col(col)
+
+        self.w.writerow(_row_from_frame(frame, self._col_idx))
 
     def write_check_events(self, events: list):
         """
-        Append (or rewrite) a chk_events column containing the JSON-serialised
-        list of checklist check events.  Called by server.py on session stop.
-        events = [{"t": float, "itemNum": int, "label": str}, ...]
+        Accumulate checklist check events for later embedding in the CSV.
+        Returns immediately — the actual file rewrite happens in close().
 
-        Thread-safe: serialized via the same lock as write() / add_columns()
-        so the file handle can't be closed under an in-flight writerow.
+        IMPORTANT: this was previously rewriting the entire CSV file on
+        every call. That blocked the asyncio event loop for 10-20 seconds
+        in large sessions, freezing the UI every time the user pressed X
+        or Backspace in the checklist widget. Now it's O(1).
+
+        events = [{"t": float, "itemNum": int, "label": str}, ...]
         """
-        import json
+        if not events:
+            return
+        # Append to the in-memory accumulator. Cheap, lock-free for our
+        # use case (single producer — the API handler — at a time).
+        self._check_events_accum.extend(events)
+
+    def _embed_check_events_in_csv(self):
+        """Rewrite the CSV file with a chk_events column on row 1 holding
+        the JSON-serialised list of all accumulated check events. Called
+        exactly once, from close(), so the 10-20s rewrite cost is paid
+        only at session end (when the user is already waiting for things
+        to finalise) instead of on every X/Backspace press.
+
+        If no events were ever recorded, this is a no-op.
+        """
+        events = self._check_events_accum
         if not events:
             return
 
+        import json
         col = "chk_events"
 
-        with self._lock:
-            # Make sure the file is settled first
-            if not self._settled and self._pending_frames:
-                self._finalise_header()
-
+        # Make sure the file is settled and any buffered data is flushed.
+        if not self._settled and self._pending_frames:
+            self._finalise_header()
+        try:
             self.f.flush()
+        except Exception:
+            pass
 
-            # Read back the file
-            with open(self.path, newline="") as rf:
-                existing_rows = list(__import__("csv").reader(rf))
+        # Read back the file
+        with open(self.path, newline="") as rf:
+            existing_rows = list(__import__("csv").reader(rf))
 
-            if not existing_rows:
-                return
+        if not existing_rows:
+            return
 
-            # We store the entire events JSON in row[1] of this column only;
-            # all other rows get an empty cell.  This keeps the CSV valid while
-            # making the payload easy to find on reload.
-            json_str = json.dumps(events)
+        # We store the entire events JSON in row[1] of this column only;
+        # all other rows get an empty cell. This keeps the CSV valid while
+        # making the payload easy to find on reload.
+        json_str = json.dumps(events)
 
-            if col in (existing_rows[0] if existing_rows else []):
-                # Column already exists — overwrite row 1 value
-                idx = existing_rows[0].index(col)
-                if len(existing_rows) > 1:
-                    while len(existing_rows[1]) <= idx:
-                        existing_rows[1].append("")
-                    existing_rows[1][idx] = json_str
-            else:
-                # Append new column
-                existing_rows[0].append(col)
-                if len(existing_rows) > 1:
-                    existing_rows[1].append(json_str)
-                for row in existing_rows[2:]:
-                    row.append("")
+        if col in (existing_rows[0] if existing_rows else []):
+            # Column already exists — overwrite row 1 value
+            idx = existing_rows[0].index(col)
+            if len(existing_rows) > 1:
+                while len(existing_rows[1]) <= idx:
+                    existing_rows[1].append("")
+                existing_rows[1][idx] = json_str
+        else:
+            # Append new column
+            existing_rows[0].append(col)
+            if len(existing_rows) > 1:
+                existing_rows[1].append(json_str)
+            for row in existing_rows[2:]:
+                row.append("")
 
-            self.f.close()
-            self.f = open(self.path, "w", newline="", buffering=1024 * 1024)
-            self.w = __import__("csv").writer(self.f)
-            for row in existing_rows:
-                self.w.writerow(row)
-            self.f.flush()
+        self.f.close()
+        self.f = open(self.path, "w", newline="", buffering=1024 * 1024)
+        self.w = __import__("csv").writer(self.f)
+        for row in existing_rows:
+            self.w.writerow(row)
+        self.f.flush()
 
     def close(self):
         # Short session that never hit HEADER_SETTLE_FRAMES - flush now
-        with self._lock:
-            if not self._settled and self._pending_frames:
-                self._finalise_header()
-            self.f.close()
+        if not self._settled and self._pending_frames:
+            self._finalise_header()
+        # Embed all accumulated checklist check events as the chk_events
+        # column. This is the slow file-rewrite operation that USED to
+        # run on every X/Backspace key press — moved here so it happens
+        # exactly once per session.
+        try:
+            self._embed_check_events_in_csv()
+        except Exception as e:
+            # Don't fail close() if the embed has trouble — the CSV data
+            # rows are still intact, just without the chk_events column.
+            print(f"[Logger] check-event embed on close failed: {e}")
+        self.f.close()

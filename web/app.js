@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.29";  // 2026-06-09: Console widget fixes — (1) fetches /api/console/snapshot on mount so the buffer history shows immediately (previously the widget was empty until new lines arrived). (2) Fixed MutationObserver race that would unregister the controller after renderPage rebuilds, orphaning the widget so subsequent broadcasts never appeared. Pair with server.py 2.8.12+ which adds the snapshot endpoint.
+const UI_VERSION = "2.1.31";  // 2026-06-10: New global "Locked / Editing" toggle in the top toolbar. When locked (the default), widgets can't be dragged or resized, clicking a widget doesn't bring it to front (so a filled shape sent-to-back stays back), and shape vertex-editing can't be entered. Inputs, buttons, sliders, charts, etc. all keep working in both modes — only LAYOUT operations are gated. State is saved per-browser in localStorage. The dashed outline around widgets while editing makes the mode obvious at a glance.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -1972,8 +1972,75 @@ const state = {
 let topZIndex = 100;
 function bringToFront(node) {
   if (!node) return;
+  // Locked UI: don't reorder z-stacking on click. Without this, clicking a
+  // shape that was sent-to-back would pop it forward and (if it had a fill
+  // color) hide the widgets behind it — the exact thing the lock is meant
+  // to prevent.
+  if (!isUiEditMode()) return;
   topZIndex++;
   node.style.zIndex = topZIndex;
+}
+
+/* --------------------------- UI edit mode -------------------------------
+ * Global lock/unlock for layout editing. When OFF (the default), widgets
+ * can't be dragged or resized, clicks don't reorder z-stacking, and
+ * shapes can't be selected for vertex/endpoint editing. Form inputs,
+ * buttons, sliders, and other "use the dashboard" interactions all keep
+ * working in both modes — only LAYOUT operations are gated.
+ *
+ * State is persisted in localStorage so a configured page opens locked
+ * (which is usually what you want for daily use); the user clicks the
+ * toolbar toggle to enter edit mode when they want to rearrange things.
+ *
+ * Note: this is intentionally per-browser (localStorage), not per-layout
+ * (layout file). The lock is a usage-time preference, not a property of
+ * the layout itself.                                                     */
+const UI_EDIT_MODE_KEY = 'mcc.uiEditMode';
+let _uiEditMode = false;
+function isUiEditMode() { return _uiEditMode; }
+function _loadUiEditMode() {
+  try {
+    _uiEditMode = (localStorage.getItem(UI_EDIT_MODE_KEY) === 'true');
+  } catch { _uiEditMode = false; }
+  _applyUiEditMode();
+}
+function _setUiEditMode(on) {
+  _uiEditMode = !!on;
+  try { localStorage.setItem(UI_EDIT_MODE_KEY, String(_uiEditMode)); } catch {}
+  _applyUiEditMode();
+}
+function _applyUiEditMode() {
+  document.body.classList.toggle('ui-locked', !_uiEditMode);
+  document.body.classList.toggle('ui-editing', _uiEditMode);
+  // Refresh the toolbar button label/style if it exists yet.
+  const btn = document.getElementById('uiEditToggle');
+  if (btn) {
+    btn.textContent = _uiEditMode ? '🔓 Editing' : '🔒 Locked';
+    btn.classList.toggle('ui-edit-toggle-on', _uiEditMode);
+    btn.title = _uiEditMode
+      ? 'Click to lock the layout (prevents accidental moves/resizes)'
+      : 'Click to unlock the layout for moving/resizing widgets';
+  }
+  // Leaving edit mode: any shape currently in per-shape edit mode should
+  // close — otherwise handles would linger when you can't actually use
+  // them. Iterate the active page's widgets and clear _editing for shapes.
+  if (!_uiEditMode && state && state.pages && Array.isArray(state.pages)) {
+    const page = state.pages[activePageIndex];
+    if (page && Array.isArray(page.widgets)) {
+      for (const w of page.widgets) {
+        if (w && w.type === 'shape' && w._editing) {
+          // _setShapeEditing applies the visuals (hides handles + outline).
+          // It's defined in the shape mount module; guard against early
+          // calls before it's reachable.
+          if (typeof _setShapeEditing === 'function') {
+            try { _setShapeEditing(w, false); } catch {}
+          } else {
+            w._editing = false;
+          }
+        }
+      }
+    }
+  }
 }
 
 function feedTick(msg){
@@ -2046,6 +2113,8 @@ document.addEventListener('DOMContentLoaded', () => {
   wireUI();
   _loadGridState();
   _wirePaletteToggle();
+  _wireUiEditToggle();
+  _loadUiEditMode();
   ensureStarterPage();
   // Apply grid visual after pages render so #canvas exists.
   _applyGridVisual();
@@ -2457,6 +2526,13 @@ function _wirePaletteToggle() {
     try { localStorage.setItem(PALETTE_KEY, String(collapsed)); } catch {}
     apply();
   });
+}
+
+/* Wire the global edit-mode toggle button in the top toolbar. */
+function _wireUiEditToggle() {
+  const btn = document.getElementById('uiEditToggle');
+  if (!btn) return;
+  btn.addEventListener('click', () => _setUiEditMode(!isUiEditMode()));
 }
 
 /**
@@ -7897,7 +7973,31 @@ function mountConsole(w, body) {
   const spacer = el('span', { style:'flex:1' });
   const seqLabel = el('span', { style:'font-family:monospace;color:#5a6075' }, '');
 
-  toolbar.append(pauseBtn, clearBtn, asLabel, streamSel, spacer, seqLabel);
+  // "Test" — hits /api/console/test which forces a stdout + stderr print
+  // on the server. If the live WS stream is healthy the user sees the
+  // two prints arrive within a fraction of a second. If they don't, the
+  // problem is the live broadcast path, not the widget.
+  const testBtn = el('button', {
+    className:'btn',
+    style:'padding:3px 7px;font-size:11px',
+    title:'Force a server-side stdout+stderr print to verify the live stream'
+  }, '🔧 Test');
+  testBtn.onclick = async () => {
+    try {
+      const r = await fetch('/api/console/test', { method: 'POST' });
+      if (!r.ok) {
+        // Show this directly in the widget so the user gets feedback even
+        // if the server is in a state where the print itself isn't reaching us.
+        controller.append([[Date.now(), 'stderr',
+          `[CONSOLE-TEST] /api/console/test returned HTTP ${r.status}`]]);
+      }
+    } catch (e) {
+      controller.append([[Date.now(), 'stderr',
+        `[CONSOLE-TEST] fetch failed: ${e.message || e}`]]);
+    }
+  };
+
+  toolbar.append(pauseBtn, clearBtn, asLabel, streamSel, testBtn, spacer, seqLabel);
 
   // The screen where lines render. White-space mode honors opts.wrap.
   const screen = el('div', {
@@ -9006,6 +9106,10 @@ function mountShape(w, body, box) {
   let _downX = null, _downY = null;
   body.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;            // left button only
+    // Global UI lock: per-shape editing is also gated. If the layout is
+    // locked, clicks on shapes do nothing — preventing accidental
+    // bring-to-front and accidental entering-edit-mode.
+    if (!isUiEditMode()) return;
     // If the click landed on a registered handle/grabber, that's a
     // drag-handle interaction — leave editing state alone. We check by
     // identity against w._editHandles and w._editGrabbers because the
@@ -9203,6 +9307,9 @@ function makeDragResize(node, w, header, handle){
   
   if (header) {
     header.addEventListener('mousedown', (e)=>{
+      // Layout drag is locked outside edit mode. Clicks on inputs /
+      // buttons / icons still work below.
+      if (!isUiEditMode()) return;
       const tag=(e.target.tagName||'').toUpperCase();
       // Allow clicking on icon spans (settings/close buttons)
       if (e.target.classList && e.target.classList.contains('icon')) return;
@@ -9211,7 +9318,11 @@ function makeDragResize(node, w, header, handle){
     });
   }
   if (handle) {
-    handle.addEventListener('mousedown', (e)=>{ resizing=true; ow=w.w; oh=w.h; sx=e.clientX; sy=e.clientY; e.preventDefault(); });
+    handle.addEventListener('mousedown', (e)=>{
+      // Resize is also a layout operation — locked outside edit mode.
+      if (!isUiEditMode()) return;
+      resizing=true; ow=w.w; oh=w.h; sx=e.clientX; sy=e.clientY; e.preventDefault();
+    });
   }
   window.addEventListener('mousemove',(e)=>{
     if(dragging){

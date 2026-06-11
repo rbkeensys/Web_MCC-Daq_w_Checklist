@@ -139,6 +139,29 @@ legend { color:#a8b3cf; padding:0 6px; }
 .icon:hover { background:#242a4a; }
 .resize { position:absolute; right:6px; bottom:6px; width:14px; height:14px; border-right:2px solid #3e4668; border-bottom:2px solid #3e4668; cursor:nwse-resize; opacity:0.7; }
 .widget.le-widget .resize, .widget.mathop-widget .resize { right:1px; }
+
+/* --------------------------- UI edit mode -------------------------------
+ * When the layout is locked (body.ui-locked), the affordances for moving
+ * and resizing widgets are visually hidden and pointer-events are turned
+ * off where appropriate. Inputs/buttons/sliders/etc. inside widgets are
+ * NOT affected — only the layout-editing grabbers and drag-cursors.       */
+body.ui-locked .widget header        { cursor: default; }
+body.ui-locked .widget .resize       { display: none; }
+body.ui-locked .widget .shape-resize { display: none; }
+/* Subtle visual cue that we're in edit mode: dashed outline on each
+   widget when unlocked. Helps the user remember they can move things. */
+body.ui-editing .widget {
+  outline: 1px dashed rgba(121, 192, 255, 0.25);
+  outline-offset: -1px;
+}
+/* The toolbar toggle button. Default = locked (muted look); when in
+   edit mode, light it up with the accent color so it's clearly active. */
+.ui-edit-toggle { min-width: 92px; }
+.ui-edit-toggle.ui-edit-toggle-on {
+  background: #1e3a5f;
+  border-color: #79c0ff;
+  color: #cfe5ff;
+}
 .row { display:flex; gap:8px; align-items:center; }
 .row>* { flex:1; }
 hr.soft { border:0; border-top:1px solid #1f2330; margin:6px 0; }
