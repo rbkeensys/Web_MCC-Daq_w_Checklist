@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.31";  // 2026-06-10: New global "Locked / Editing" toggle in the top toolbar. When locked (the default), widgets can't be dragged or resized, clicking a widget doesn't bring it to front (so a filled shape sent-to-back stays back), and shape vertex-editing can't be entered. Inputs, buttons, sliders, charts, etc. all keep working in both modes — only LAYOUT operations are gated. State is saved per-browser in localStorage. The dashed outline around widgets while editing makes the mode obvious at a glance.
+const UI_VERSION = "2.1.36";  // 2026-06-12: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -1371,6 +1371,42 @@ function hookLogButtons(){
       inp.onchange = ()=>{
         const f = inp.files?.[0];
         if (!f) return;
+
+        // Size check. CSVs above this threshold are likely to OOM the
+        // browser or freeze it for a long time during parse — the file's
+        // text content has to fit in a single JS string (V8 caps strings
+        // around ~512MB), then we materialise a row-of-numbers array
+        // that consumes several times the text size in RAM. So we warn
+        // (with an option to push through anyway) above the threshold.
+        //
+        // The threshold is in BYTES of the input file. Around 150 MB of
+        // CSV becomes ~500-800 MB of JS objects after parse, which is
+        // already a struggle on modest machines.
+        const WARN_BYTES  = 150 * 1024 * 1024;   // 150 MB
+        const BLOCK_BYTES = 1024 * 1024 * 1024;  //   1 GB hard ceiling
+        const sizeMB = (f.size / (1024*1024)).toFixed(1);
+
+        if (f.size > BLOCK_BYTES) {
+          alert(
+            `This log file is ${sizeMB} MB.\n\n` +
+            `The browser can't reliably load files this large — it would ` +
+            `run out of memory during parsing. Please use Excel or a ` +
+            `dedicated CSV viewer (e.g. EmEditor, Modern CSV) to inspect it ` +
+            `instead, or trim it down to a shorter time window first.`
+          );
+          return;
+        }
+        if (f.size > WARN_BYTES) {
+          const ok = confirm(
+            `This log file is ${sizeMB} MB — larger than the browser handles ` +
+            `gracefully (typical limit ~${(WARN_BYTES/1024/1024)|0} MB).\n\n` +
+            `Loading may freeze the page for tens of seconds or run out of ` +
+            `memory. Excel or another CSV tool will handle it better.\n\n` +
+            `Continue anyway?`
+          );
+          if (!ok) return;
+        }
+
         const rd = new FileReader();
         rd.onload = ()=>{
           (async ()=>{
@@ -1386,11 +1422,50 @@ function hookLogButtons(){
             }
           })();
         };
+        rd.onerror = () => {
+          alert('Failed to read the file. It may be too large for the ' +
+                'browser to load into memory.');
+        };
         rd.readAsText(f);
       };
       inp.click();
     });
     openBtn._wired = true;
+  }
+
+  // 🖥 Viewer — ask the server to spawn the standalone Python log viewer.
+  // The viewer opens on the server machine's display (same box as the
+  // browser in the normal setup) and streams huge CSVs the browser can't.
+  // We send along every chart series' displayScale/displayOffset keyed by
+  // CSV column name, so the viewer can optionally show data the way the
+  // in-app charts do (scaled) as well as raw.
+  const viewerBtn = document.getElementById('viewerBtn');
+  if (viewerBtn && !viewerBtn._wired){
+    viewerBtn.addEventListener('click', async ()=>{
+      try{
+        const names = await _collectSignalNames();      // friendly names for all signals
+        const charted = _collectChartedCols(names);     // cols on charts → default-visible
+        const r = await fetch('/api/log_viewer/launch', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ scales: _collectChartScales(), names, charted })
+        });
+        const j = await r.json();
+        if (!j.ok) alert('Viewer launch failed:\n' + (j.error || 'unknown error'));
+        // Success is silent — the viewer window appears on its own.
+      }catch(e){
+        alert('Viewer launch failed: ' + e.message);
+      }
+    });
+    viewerBtn._wired = true;
+  }
+
+  // 🔗 Merge chk — recovery tool for sessions where the server was
+  // terminated before close() embedded the check events into the CSV.
+  const mergeBtn = document.getElementById('mergeChkBtn');
+  if (mergeBtn && !mergeBtn._wired){
+    mergeBtn.addEventListener('click', openChkMergeDialog);
+    mergeBtn._wired = true;
   }
 
   const playBtn = document.getElementById('replayPlayBtn');
@@ -2100,6 +2175,81 @@ window.addEventListener('checklist-check', (ev) => {
   window._chartMarks.push({ t, label });
 });
 
+// Uncheck: remove the most recent live mark for that item. (This listener
+// was missing entirely before — unchecking left the mark on live charts.)
+window.addEventListener('checklist-uncheck', (ev) => {
+  const num = String(ev.detail?.itemNum ?? '');
+  if (!num || !window._chartMarks) return;
+  for (let i = window._chartMarks.length - 1; i >= 0; i--) {
+    if (window._chartMarks[i].label === num) {
+      window._chartMarks.splice(i, 1);
+      break;
+    }
+  }
+});
+
+/* ---------------- cross-window check-event sync (popouts) ----------------
+ * window.checkEvents and the 'checklist-check'/'checklist-uncheck' DOM
+ * events are per-window, so a chart popped out into its own window never
+ * heard about checks made in the main window (and vice versa when the
+ * checklist itself is popped out). A BroadcastChannel is shared by all
+ * same-origin windows — exactly the main page + its popouts — so we relay
+ * every mutation through it and apply it locally in each window.
+ *
+ * The receiving window re-dispatches the local DOM event, which lets the
+ * existing 'checklist-check' listener compute the mark time on the
+ * RECEIVING window's own performance.now() clock — correct, because each
+ * window's chart buffers run on their own clock and "now" is when the
+ * check happened (channel latency is sub-millisecond).
+ *
+ * Note: BroadcastChannel never delivers a message back to the window that
+ * posted it, so the originating window (which already applied the change
+ * locally) sees no echo and there's no double-apply. The idempotence
+ * checks below are belt-and-suspenders for multi-window race conditions. */
+(function () {
+  if (typeof BroadcastChannel === 'undefined') return;   // very old browser
+  let bc;
+  try { bc = new BroadcastChannel('mcc-check-events'); } catch { return; }
+
+  const sameEv = (a, b) => a && b && a.itemNum === b.itemNum &&
+    Math.abs((a.tServer ?? a.t ?? 0) - (b.tServer ?? b.t ?? 0)) < 1e-6;
+
+  window.broadcastCheckEvent = (op, payload) => {
+    try { bc.postMessage(Object.assign({ op }, payload || {})); } catch {}
+  };
+
+  bc.onmessage = (m) => {
+    const d = m.data || {};
+    window.checkEvents = window.checkEvents || [];
+    if (d.op === 'add' && d.ev) {
+      if (!window.checkEvents.some(e => sameEv(e, d.ev))) {
+        window.checkEvents.push(d.ev);
+        window.dispatchEvent(new CustomEvent('checklist-check', { detail: d.ev }));
+      }
+    } else if (d.op === 'remove' && d.itemNum !== undefined) {
+      const idx = window.checkEvents.map(e => e.itemNum).lastIndexOf(d.itemNum);
+      if (idx >= 0) window.checkEvents.splice(idx, 1);
+      window.dispatchEvent(new CustomEvent('checklist-uncheck',
+        { detail: { itemNum: d.itemNum } }));
+    } else if (d.op === 'replace' && Array.isArray(d.events)) {
+      window.checkEvents = d.events.slice();
+      if (!d.events.length) window._chartMarks = [];   // cleared/new checklist
+    } else if (d.op === 'sync_request') {
+      // A freshly-opened window wants current state. Any window that has
+      // events answers; identical answers from several windows are fine
+      // because 'replace' is idempotent.
+      if ((window.checkEvents || []).length) {
+        try { bc.postMessage({ op: 'replace', events: window.checkEvents }); } catch {}
+      }
+    }
+  };
+
+  // New windows — popouts especially — pull existing events from siblings
+  // shortly after boot, so a chart popped out mid-session knows about
+  // checks that happened before it opened.
+  setTimeout(() => { try { bc.postMessage({ op: 'sync_request' }); } catch {} }, 300);
+})();
+
 window.addEventListener('tick', (ev)=>{
   if (ev && ev.detail) feedTick(ev.detail);
 });
@@ -2533,6 +2683,222 @@ function _wireUiEditToggle() {
   const btn = document.getElementById('uiEditToggle');
   if (!btn) return;
   btn.addEventListener('click', () => _setUiEditMode(!isUiEditMode()));
+}
+
+/* ---------------------- chart scales → viewer export -------------------- */
+/* Friendly display names for every configured signal, keyed by CSV column
+   name — same sources friendlyColNames() uses for replay. The standalone
+   viewer shows these instead of raw ai0/tc2/expr5 keys.                    */
+async function _collectSignalNames() {
+  try { const r = await fetch('/api/config');        if (r.ok) configCache      = await r.json(); } catch {}
+  try { const r = await fetch('/api/pid');            if (r.ok) window.pidCache  = await r.json(); } catch {}
+  try { const r = await fetch('/api/math_operators'); if (r.ok) window.mathCache = await r.json(); } catch {}
+  try { const r = await fetch('/api/expressions');    if (r.ok) window.exprCache = await r.json(); } catch {}
+  const cfg = configCache || {};
+  const names = {};
+  const put = (col, n) => { if (n && typeof n === 'string') names[col] = n; };
+  getAllAnalogs(cfg).forEach((a, i)        => put('ai' + i, a && a.name));
+  getAllAnalogOutputs(cfg).forEach((a, i)  => put('ao' + i, a && a.name));
+  getAllDigitalOutputs(cfg).forEach((d, i) => put('do' + i, d && d.name));
+  getAllThermocouples(cfg).forEach((t, i)  => put('tc' + i, t && t.name));
+  (window.exprCache?.expressions || []).forEach((e, i) => put('expr' + i, e && e.name));
+  (window.mathCache?.operators   || []).forEach((m, i) => put('math' + i, m && m.name));
+  (window.pidCache?.loops        || []).forEach((p, i) => {
+    if (p && p.name) { put('pid' + i, p.name); put('pid' + i + '_out', p.name + '_out'); }
+  });
+  (window.scaleCache?.scales || []).forEach((s, i) => put('scale' + i, s && s.name));
+  return names;
+}
+
+/* CSV columns that appear as a series on ANY chart, in encounter order.
+   The viewer enables exactly these on open (instead of "first 6"). Chart
+   series names are folded into namesOut as a fallback for signals the
+   config doesn't name.                                                     */
+function _collectChartedCols(namesOut) {
+  const cols = [], seen = new Set();
+  const add = (c, nm) => {
+    if (!c || seen.has(c)) return;
+    seen.add(c); cols.push(c);
+    if (nm && namesOut && namesOut[c] === undefined) namesOut[c] = nm;
+  };
+  try {
+    for (const page of (state.pages || [])) {
+      for (const w of (page.widgets || [])) {
+        if (!w || w.type !== 'chart') continue;
+        for (const s of (w.opts?.series || [])) {
+          const nm = s.name;
+          switch (s.kind) {
+            case 'ai': case 'ao': case 'do': case 'tc':
+            case 'expr': case 'math': case 'scale':
+              add(`${s.kind}${s.index|0}`, nm); break;
+            case 'pid':
+              add(`pid${s.index|0}`, nm); add(`pid${s.index|0}_out`, nm); break;
+            case 'button':
+              add(`bvar_${s.index}`, nm); break;
+            case 'static': case 'global':
+              add(`gvar_${s.index}`, nm); add(`sv_${s.index}`, nm); break;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Viewer] charted-cols collection failed:', e);
+  }
+  return cols;
+}
+
+/* Walk every page's chart widgets and build a map of CSV column name →
+   {scale, offset, label} from each series' displayScale/displayOffset.
+   The standalone log viewer uses this to optionally render data the way
+   the in-app charts display it. Only series with a non-identity transform
+   (scale ≠ 1 or offset ≠ 0) are included. First occurrence wins when the
+   same signal appears in multiple charts with different settings.
+
+   Column-name mapping mirrors the logger/replay conventions:
+     ai/ao/do/tc/expr/math/scale + index  →  "ai0", "tc2", "expr5", …
+     pid + index   → "pid0" AND "pid0_out" (logger naming varies by version)
+     button + name → "bvar_<name>";  static + name → "gvar_<name>" + "sv_<name>"  */
+function _collectChartScales() {
+  const out = {};
+  const add = (col, s, label) => {
+    if (col && out[col] === undefined) {
+      out[col] = { scale: s.displayScale, offset: s.displayOffset, label: label || col };
+    }
+  };
+  try {
+    for (const page of (state.pages || [])) {
+      for (const w of (page.widgets || [])) {
+        if (!w || w.type !== 'chart') continue;
+        for (const s of (w.opts?.series || [])) {
+          const sc = (s.displayScale  === undefined) ? 1 : +s.displayScale;
+          const of = (s.displayOffset === undefined) ? 0 : +s.displayOffset;
+          if (sc === 1 && of === 0) continue;            // identity — skip
+          if (!isFinite(sc) || !isFinite(of)) continue;  // garbage — skip
+          const norm = { displayScale: sc, displayOffset: of };
+          const label = s.name || `${s.kind}${s.index}`;
+          switch (s.kind) {
+            case 'ai': case 'ao': case 'do': case 'tc':
+            case 'expr': case 'math': case 'scale':
+              add(`${s.kind}${s.index|0}`, norm, label); break;
+            case 'pid':
+              add(`pid${s.index|0}`,     norm, label);
+              add(`pid${s.index|0}_out`, norm, label); break;
+            case 'button':
+              add(`bvar_${s.index}`, norm, label); break;
+            case 'static': case 'global':
+              add(`gvar_${s.index}`, norm, label);
+              add(`sv_${s.index}`,   norm, label); break;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Viewer] scale collection failed:', e);
+  }
+  return out;
+}
+
+/* ------------------------- chk.json merge dialog ------------------------ */
+/* Recovery tool: when the server is terminated without a clean close(),
+   the session CSV never gets its chk_events column embedded — but chk.json
+   (saved on every keypress) still has everything. This dialog lists every
+   session that has both files, shows whether the CSV already contains the
+   events (none / identical / different), and merges on demand. Conflicts
+   and time-range mismatches come back from the server as needs_force and
+   are re-submitted only after an explicit confirm().                      */
+async function openChkMergeDialog() {
+  let data;
+  try {
+    const r = await fetch('/api/chk_merge/candidates');
+    data = await r.json();
+  } catch (e) {
+    alert('Could not fetch merge candidates: ' + e.message);
+    return;
+  }
+  if (!data.ok) { alert('Server error: ' + (data.error || 'unknown')); return; }
+  if (!data.sessions || !data.sessions.length) {
+    alert('No sessions found with both a chk.json and a session.csv.');
+    return;
+  }
+
+  const root = el('div', {style:'min-width:560px'});
+  root.append(el('h3', {}, 'Merge chk.json → session.csv'));
+  root.append(el('div', {style:'color:#9094a1;font-size:12px;margin-bottom:10px;line-height:1.5'},
+    'Embeds a session\'s checklist check events into its CSV. Use this when ' +
+    'the server was terminated before it could embed them at close. ' +
+    '"Identical" means the CSV already matches chk.json — nothing to do.'));
+
+  const tbl = el('table', {className:'form', style:'width:100%;border-collapse:collapse'});
+  const thead = el('tr', {});
+  ['Session','Events','CSV (MB)','Embedded','',''].forEach(h =>
+    thead.append(el('th', {style:'text-align:left;padding:4px 8px;color:#a8b3cf;font-size:12px'}, h)));
+  tbl.append(thead);
+
+  const statusColor = { none:'#f0caca', identical:'#9ad29a', different:'#ffd27f' };
+
+  for (const s of data.sessions) {
+    const tr = el('tr', {});
+    tr.append(el('td', {style:'padding:4px 8px;font-family:monospace;font-size:12px'}, s.session));
+    if (s.error) {
+      tr.append(el('td', {colSpan:'5', style:'padding:4px 8px;color:#f0caca;font-size:12px'}, s.error));
+      tbl.append(tr);
+      continue;
+    }
+    tr.append(el('td', {style:'padding:4px 8px'}, String(s.events)));
+    tr.append(el('td', {style:'padding:4px 8px'}, String(s.csv_mb)));
+    tr.append(el('td', {style:`padding:4px 8px;color:${statusColor[s.embedded]||'#e6e6e6'}`},
+      s.embedded + (s.is_active ? ' (ACTIVE)' : '')));
+
+    const mergeBtn = el('button', {className:'btn', style:'padding:2px 10px;font-size:12px'}, 'Merge');
+    // Identical = nothing to do; active = file is open for writing.
+    if (s.embedded === 'identical' || s.is_active) mergeBtn.disabled = true;
+    if (s.is_active) mergeBtn.title = 'Active session — use Start New Log instead';
+    if (s.embedded === 'identical') mergeBtn.title = 'CSV already contains these exact events';
+
+    const resultCell = el('td', {style:'padding:4px 8px;font-size:11px;color:#9094a1'}, '');
+
+    mergeBtn.onclick = async () => {
+      mergeBtn.disabled = true;
+      resultCell.textContent = 'Merging…';
+      const post = async (force) => {
+        const r = await fetch('/api/chk_merge/' + encodeURIComponent(s.session), {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({force})
+        });
+        return r.json();
+      };
+      try {
+        let j = await post(false);
+        if (j.needs_force) {
+          // Conflict or time mismatch — show the server's explanation and
+          // require an explicit yes before overwriting anything.
+          const go = confirm(j.message + '\n\nReally merge anyway?');
+          if (!go) { resultCell.textContent = 'Cancelled'; mergeBtn.disabled = false; return; }
+          j = await post(true);
+        }
+        if (j.ok) {
+          resultCell.textContent = j.message || j.status;
+          resultCell.style.color = j.merged ? '#9ad29a' : '#a8b3cf';
+        } else {
+          resultCell.textContent = j.error || j.message || 'Failed';
+          resultCell.style.color = '#f0caca';
+          mergeBtn.disabled = false;
+        }
+      } catch (e) {
+        resultCell.textContent = 'Error: ' + e.message;
+        resultCell.style.color = '#f0caca';
+        mergeBtn.disabled = false;
+      }
+    };
+
+    tr.append(el('td', {style:'padding:4px 8px'}, mergeBtn));
+    tr.append(resultCell);
+    tbl.append(tr);
+  }
+
+  root.append(tbl);
+  showModal(root, () => {});
 }
 
 /**
@@ -3522,6 +3888,7 @@ function loadLayoutFromFile() {
                       window.checklistItems[0].timeIn = new Date().toLocaleTimeString('en-US',{hour12:false});
                     }
                     window.checkEvents = [];
+                    window.broadcastCheckEvent?.('replace', { events: [] });
                     if (window._renderTable) window._renderTable();
                     console.log('[Layout] Loaded checklist content:', obj.checklist.fileName);
                   }
@@ -3544,6 +3911,7 @@ function loadLayoutFromFile() {
                 window.checklistItems[0].timeIn = new Date().toLocaleTimeString('en-US',{hour12:false});
               }
               window.checkEvents = [];
+              window.broadcastCheckEvent?.('replace', { events: [] });
               if (window._renderTable) window._renderTable();
               console.log('[Layout] Loaded checklist content:', obj.checklist.fileName);
             }

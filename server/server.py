@@ -80,8 +80,9 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.18"
-__updated__ = "2026-06-10"  # CRITICAL fix: /api/check_events no longer blocks the asyncio event loop. Previously every X/Backspace press in the checklist widget caused write_check_events() to rewrite the ENTIRE session CSV synchronously inside the async handler, freezing the UI for 10-20 seconds in large sessions. The logger now accumulates events in memory and only embeds the chk_events column at session close (logger 2.1.4). Both /api/check_events and /api/check_events/save also now run their (now-trivial) I/O via asyncio.to_thread for safety.
+__version__ = "2.8.21"
+__updated__ = "2026-06-11"  # 2.8.21: launch bundle now includes names + charted lists alongside scales (single _viewer_scales.json). 2.8.20: /api/log_viewer/launch now accepts a "scales" map from the browser ({csvCol:{scale,offset,label}}), writes it to LOGS_DIR/_viewer_scales.json, and passes --scales to the viewer so it can render data with the in-app charts' display scale/offset. 2.8.19: POST /api/log_viewer/launch spawns the standalone log_viewer.py app (huge-file chart viewer). New chk.json merge tool: GET /api/chk_merge/candidates lists sessions with chk.json + their embed status; POST /api/chk_merge/{session} streams the events into the CSV's chk_events column with sanity checks (identical = no-op, different = requires force, event times outside CSV range = requires force, active session = refused). Merge is a streaming copy + atomic os.replace, so memory stays flat on multi-GB files.
+import csv  # used by the chk-merge helpers below
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
 # ============================ console capture =============================
@@ -2542,6 +2543,300 @@ def close_log():
 def download_csv(session: str):
     path = LOGS_DIR/session/"session.csv"
     return FileResponse(str(path), filename=f"{session}.csv")
+
+# ============================ log viewer launch ============================
+@app.post("/api/log_viewer/launch")
+def launch_log_viewer(body: dict = None):
+    """Spawn the standalone log_viewer.py app on the server machine.
+
+    The browser can't launch local applications itself, so it asks us to.
+    This only makes sense when the browser and server run on the same
+    machine (the normal single-box setup) — the viewer window opens on
+    the SERVER's display.
+
+    Optional body: {"session": "<name>"} pre-opens that session's CSV.
+    """
+    import subprocess, shutil
+    body = body or {}
+
+    # Find the viewer script: next to server.py first, then CWD.
+    candidates = [
+        Path(__file__).parent / "log_viewer.py",
+        Path.cwd() / "log_viewer.py",
+    ]
+    script = next((p for p in candidates if p.exists()), None)
+    if script is None:
+        return {"ok": False, "error":
+                "log_viewer.py not found next to server.py. Copy it into "
+                "the server directory (or install dir for the frozen EXE)."}
+
+    # Pick a Python. In a frozen EXE, sys.executable is the EXE itself —
+    # useless for running a .py — so we hunt the PATH instead.
+    if getattr(sys, 'frozen', False):
+        py = shutil.which("python") or shutil.which("python3") or shutil.which("py")
+        if not py:
+            return {"ok": False, "error":
+                    "No Python interpreter found on PATH. Install Python "
+                    "(python.org) or run the viewer manually: "
+                    f"python {script}"}
+    else:
+        py = sys.executable
+
+    args = [py, str(script)]
+    sess = body.get("session")
+    if sess:
+        csv_path = LOGS_DIR / sess / "session.csv"
+        if csv_path.exists():
+            args.append(str(csv_path))
+
+    # Chart view bundle from the browser:
+    #   scales  — {csvCol: {scale, offset, label}} display transforms
+    #   names   — {csvCol: friendlyName} for every configured signal
+    #   charted — [csvCol, ...] columns shown on charts (viewer enables these)
+    # Written as one JSON file and handed to the viewer via --scales. The
+    # viewer also accepts the old flat scales-only format for back-compat.
+    scales  = body.get("scales")  if isinstance(body.get("scales"), dict)  else {}
+    names   = body.get("names")   if isinstance(body.get("names"), dict)   else {}
+    charted = body.get("charted") if isinstance(body.get("charted"), list) else []
+    if scales or names or charted:
+        try:
+            scales_path = LOGS_DIR / "_viewer_scales.json"
+            scales_path.write_text(json.dumps(
+                {"scales": scales, "names": names, "charted": charted},
+                indent=2), encoding="utf-8")
+            args += ["--scales", str(scales_path)]
+            print(f"[MCC-Hub] Viewer bundle: {len(scales)} scaled, "
+                  f"{len(names)} named, {len(charted)} charted -> {scales_path}")
+        except Exception as e:
+            # Non-fatal — the viewer just opens without the chart-view extras.
+            print(f"[MCC-Hub] Could not write viewer scales: {e}")
+
+    try:
+        kwargs = {"close_fds": True}
+        if sys.platform == "win32":
+            # Detach so the viewer survives a server restart and doesn't
+            # share our console.
+            kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED | NEW_PROCESS_GROUP
+        subprocess.Popen(args, **kwargs)
+        print(f"[MCC-Hub] Launched log viewer: {' '.join(args)}")
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": f"Launch failed: {e}"}
+
+# ============================ chk.json merge ===============================
+def _read_csv_head(csv_path):
+    """Return (header_fields, row1_fields_or_None, delim) reading only the
+    first two LINES of the file — never the whole thing. The chk_events
+    payload always lives in row 1, so this is all we need to know the
+    embed status of even a multi-GB CSV."""
+    with open(csv_path, "r", newline="", encoding="utf-8", errors="replace") as f:
+        h_line = f.readline()
+        r1_line = f.readline()
+    delim = "\t" if "\t" in h_line else ","
+    header = next(csv.reader([h_line], delimiter=delim)) if h_line else []
+    row1 = next(csv.reader([r1_line], delimiter=delim)) if r1_line.strip() else None
+    return [c.strip() for c in header], row1, delim
+
+def _read_csv_t_range(csv_path, header, row1, delim):
+    """Best-effort (t_first, t_last) from the first data row and the file
+    tail. Returns (None, None) if there's no 't' column or parsing fails."""
+    lower = [c.lower() for c in header]
+    t_idx = next((i for i, c in enumerate(lower)
+                  if c in ("t", "time", "timestamp")), None)
+    if t_idx is None or row1 is None:
+        return None, None
+    try:
+        t_first = float(row1[t_idx])
+    except (ValueError, IndexError):
+        return None, None
+    # Tail: read the last ~64 KB and take the final complete line.
+    t_last = t_first
+    try:
+        size = os.path.getsize(csv_path)
+        with open(csv_path, "rb") as f:
+            f.seek(max(0, size - 65536))
+            tail = f.read().decode("utf-8", errors="replace")
+        lines = [ln for ln in tail.split("\n") if ln.strip()]
+        if lines:
+            last = next(csv.reader([lines[-1]], delimiter=delim))
+            t_last = float(last[t_idx])
+    except Exception:
+        pass
+    return t_first, t_last
+
+def _chk_merge_status(session_dir):
+    """Compute merge status for one session dir. Returns a dict the
+    candidates endpoint serves to the browser, or None if the session
+    isn't a merge candidate (missing chk.json or session.csv)."""
+    chk_path = session_dir / "chk.json"
+    csv_path = session_dir / "session.csv"
+    if not chk_path.exists() or not csv_path.exists():
+        return None
+    try:
+        snap = json.loads(chk_path.read_text(encoding="utf-8"))
+        events = snap.get("checkEvents", [])
+    except Exception as e:
+        return {"session": session_dir.name, "error": f"chk.json unreadable: {e}"}
+
+    header, row1, delim = _read_csv_head(csv_path)
+    embedded = "none"
+    if "chk_events" in header and row1 is not None:
+        idx = header.index("chk_events")
+        cell = row1[idx] if idx < len(row1) else ""
+        if cell.strip():
+            try:
+                existing = json.loads(cell)
+                embedded = "identical" if existing == events else "different"
+            except Exception:
+                embedded = "different"   # unparseable cell ≠ our events
+
+    is_active = bool(session_logger and
+                     session_logger.path.parent.name == session_dir.name)
+    return {
+        "session":  session_dir.name,
+        "events":   len(events),
+        "embedded": embedded,
+        "is_active": is_active,
+        "csv_mb":   round(csv_path.stat().st_size / (1024 * 1024), 1),
+    }
+
+@app.get("/api/chk_merge/candidates")
+def chk_merge_candidates():
+    """Sessions that have BOTH a chk.json and a session.csv, with their
+    embed status. The browser's merge dialog lists these."""
+    out = []
+    try:
+        for p in sorted(LOGS_DIR.iterdir(), key=lambda p: p.name, reverse=True):
+            if not p.is_dir():
+                continue
+            st = _chk_merge_status(p)
+            if st:
+                out.append(st)
+    except Exception as e:
+        return {"ok": False, "error": str(e), "sessions": []}
+    return {"ok": True, "sessions": out}
+
+@app.post("/api/chk_merge/{session}")
+def chk_merge(session: str, body: dict = None):
+    """Merge a session's chk.json checkEvents into its session.csv as the
+    chk_events column — the manual recovery path for sessions where the
+    server was terminated before close() could embed them.
+
+    Sanity checks (each requires force=true to override):
+      * The CSV already has DIFFERENT chk_events embedded  -> 'conflict'
+      * Event timestamps fall outside the CSV's time range -> 'time_mismatch'
+    If the embedded events are IDENTICAL to chk.json, nothing is written
+    and we report that — re-merging the same data is a no-op by design.
+
+    The merge itself STREAMS the CSV row-by-row to a temp file and then
+    atomically replaces the original (os.replace), so memory stays flat
+    even for multi-GB files and a crash mid-merge can't corrupt the CSV.
+
+    This is a sync (def) endpoint, so FastAPI runs it on a threadpool
+    worker — a long merge does not block the asyncio event loop.
+    """
+    body = body or {}
+    force = bool(body.get("force"))
+    session_dir = LOGS_DIR / session
+    chk_path = session_dir / "chk.json"
+    csv_path = session_dir / "session.csv"
+
+    if not chk_path.exists():
+        return {"ok": False, "error": "No chk.json in this session"}
+    if not csv_path.exists():
+        return {"ok": False, "error": "No session.csv in this session"}
+    if session_logger and session_logger.path.parent.name == session:
+        return {"ok": False, "error":
+                "This is the ACTIVE session — its CSV is open for writing. "
+                "Stop the log (Start New Log) first, which embeds the "
+                "events automatically anyway."}
+
+    try:
+        snap = json.loads(chk_path.read_text(encoding="utf-8"))
+        events = snap.get("checkEvents", [])
+    except Exception as e:
+        return {"ok": False, "error": f"chk.json unreadable: {e}"}
+    if not events:
+        return {"ok": False, "error": "chk.json has no check events to merge"}
+
+    header, row1, delim = _read_csv_head(csv_path)
+    if not header or row1 is None:
+        return {"ok": False, "error": "CSV has no data rows"}
+
+    # --- sanity 1: existing embed -----------------------------------------
+    if "chk_events" in header:
+        idx = header.index("chk_events")
+        cell = row1[idx] if idx < len(row1) else ""
+        if cell.strip():
+            try:
+                existing = json.loads(cell)
+            except Exception:
+                existing = None
+            if existing == events:
+                return {"ok": True, "merged": False, "status": "identical",
+                        "message": "CSV already contains these exact events "
+                                   "— nothing to merge."}
+            if not force:
+                return {"ok": False, "needs_force": True, "status": "conflict",
+                        "message": f"CSV already has {len(existing) if isinstance(existing, list) else '?'} "
+                                   f"embedded events that DIFFER from chk.json's "
+                                   f"{len(events)}. Merging will OVERWRITE the "
+                                   f"embedded set with chk.json's."}
+
+    # --- sanity 2: time range ----------------------------------------------
+    t_first, t_last = _read_csv_t_range(csv_path, header, row1, delim)
+    ev_ts = [ev.get("tServer", ev.get("t")) for ev in events]
+    ev_ts = [float(t) for t in ev_ts if t is not None]
+    if t_first is not None and ev_ts:
+        # Only comparable when both look like the same time base (Unix
+        # epoch ≈ 1e9+). A session-relative t column can't be checked.
+        if t_first > 1e9 and min(ev_ts) > 1e9:
+            TOL = 300.0   # 5-minute slack on each end
+            if (min(ev_ts) < t_first - TOL) or (max(ev_ts) > t_last + TOL):
+                if not force:
+                    return {"ok": False, "needs_force": True,
+                            "status": "time_mismatch",
+                            "message": "Event timestamps fall OUTSIDE this "
+                                       "CSV's time range — this chk.json may "
+                                       "belong to a different session. "
+                                       f"CSV: {t_first:.0f}…{t_last:.0f}, "
+                                       f"events: {min(ev_ts):.0f}…{max(ev_ts):.0f}."}
+
+    # --- the merge: stream copy with the column injected --------------------
+    json_str = json.dumps(events)
+    tmp_path = csv_path.with_suffix(".csv.tmp")
+    try:
+        with open(csv_path, "r", newline="", encoding="utf-8", errors="replace") as rf, \
+             open(tmp_path, "w", newline="", encoding="utf-8") as wf:
+            rd = csv.reader(rf, delimiter=delim)
+            wr = csv.writer(wf, delimiter=delim)
+            hdr = next(rd)
+            if "chk_events" in hdr:
+                col_idx = hdr.index("chk_events")
+                append_col = False
+            else:
+                hdr.append("chk_events")
+                col_idx = len(hdr) - 1
+                append_col = True
+            wr.writerow(hdr)
+            for i, row in enumerate(rd):
+                if append_col:
+                    row.append(json_str if i == 0 else "")
+                else:
+                    while len(row) <= col_idx:
+                        row.append("")
+                    if i == 0:
+                        row[col_idx] = json_str
+                wr.writerow(row)
+        os.replace(tmp_path, csv_path)   # atomic on same filesystem
+    except Exception as e:
+        try: tmp_path.unlink(missing_ok=True)
+        except Exception: pass
+        return {"ok": False, "error": f"Merge write failed: {e}"}
+
+    print(f"[MCC-Hub] Merged {len(events)} check events from chk.json into {csv_path}")
+    return {"ok": True, "merged": True, "status": "merged",
+            "message": f"Embedded {len(events)} events into {session}/session.csv."}
 
 # @app.get("/api/diag")
 # def diag():

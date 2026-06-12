@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.16.2';  // 2026-06-09: Checklist dock now honors the main UI's grid-snap setting. Drag and corner-drag (width) snap via window.gridSnap; height already snapped through the numRows logic. window.gridSnap is exposed by app.js and is a no-op when grid is off, so this only kicks in when the user has the grid enabled.
+window.CHECKLIST_VERSION = '1.17.0';  // 2026-06-12: Check/uncheck/restore/clear now relay through window.broadcastCheckEvent (BroadcastChannel in app.js) so popped-out charts get checkmarks from the main-page checklist and a popped-out checklist reaches main-page charts.
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -95,6 +95,7 @@ function _clApplySnapshot(snap) {
   window.checklistReturnRow = snap.checklistReturnRow ?? 0;
   window.checklistShowRow   = snap.checklistShowRow   ?? 0;
   window.checkEvents        = snap.checkEvents || [];
+  window.broadcastCheckEvent?.('replace', { events: window.checkEvents });
   window.checklistLoaded    = true;
   if (snap.checklistPath) window.checklistPath = snap.checklistPath;
   _renderTable();
@@ -391,6 +392,9 @@ function clCheck() {
   const ev = { t: ts.tServer, tServer: ts.tServer, itemNum: items[active].itemNum, label: String(items[active].itemNum) };
   window.checkEvents.push(ev);
   window.dispatchEvent(new CustomEvent('checklist-check', { detail: ev }));
+  // Relay to other windows (popped-out charts / main page when WE are the
+  // popped-out checklist). No-op when the sync layer isn't loaded.
+  window.broadcastCheckEvent?.('add', { ev });
 
   fetch('/api/check_events', {
     method: 'POST',
@@ -467,6 +471,7 @@ function clUncheck() {
 
   // Dispatch event so app.js removes the chart mark
   window.dispatchEvent(new CustomEvent('checklist-uncheck', { detail: { itemNum: removedNum } }));
+  window.broadcastCheckEvent?.('remove', { itemNum: removedNum });
 
   // Move active row FIRST so _clTickDuration immediately stops on old active row
   window.checklistActiveRow = target;
@@ -548,6 +553,7 @@ function clOpenFile() {
       window.checklistLoaded    = true;
       if (window.checklistItems.length > 0) window.checklistItems[0].timeIn = _nowStr();
       window.checkEvents = [];
+      window.broadcastCheckEvent?.('replace', { events: [] });
       _renderTable();
       if (_clPanel) _clPanel.focus();
 
