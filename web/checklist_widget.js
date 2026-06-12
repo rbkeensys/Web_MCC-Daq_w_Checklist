@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.17.1';  // 2026-06-12: Unchecks now also POST /api/check_events/uncheck so the server relays them to other computers and trims the log accumulator. Prev: Check/uncheck/restore/clear relay through window.broadcastCheckEvent (BroadcastChannel in app.js) so popped-out charts get checkmarks from the main-page checklist and a popped-out checklist reaches main-page charts.
+window.CHECKLIST_VERSION = '1.19.0';  // 2026-06-12: Host checkbox -- share this checklist with every connected computer (server-arbitrated claim/relinquish with popups on both sides, timeout denies, disconnect auto-releases; late joiners adopt on dock open; host re-pushes on file load/snapshot restore). Prev: Multi-computer checklist mirroring -- clApplyRemoteCheck/clApplyRemoteUncheck let relayed events from other machines check/uncheck items and move the cursor here, idempotently and without re-emitting. Prev: Unchecks now also POST /api/check_events/uncheck so the server relays them to other computers and trims the log accumulator. Prev: Check/uncheck/restore/clear relay through window.broadcastCheckEvent (BroadcastChannel in app.js) so popped-out charts get checkmarks from the main-page checklist and a popped-out checklist reaches main-page charts.
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -99,6 +99,7 @@ function _clApplySnapshot(snap) {
   window.checklistLoaded    = true;
   if (snap.checklistPath) window.checklistPath = snap.checklistPath;
   _renderTable();
+  if (_clAmHost) setTimeout(_clHostPush, 50);   // hosting? share restored state
   return true;
 }
 
@@ -125,6 +126,7 @@ function buildChecklistPanel() {
       <button class="btn cl-btn" id="clPopBtn"      title="Pop out checklist to a separate window">📤 Pop</button>
       <button class="btn cl-btn" id="clInsBtn"   title="Insert item below active (Ins)">⤵ Insert</button>
       <button class="btn cl-btn" id="clRenumBtn" title="Renumber items in order and rewrite GOTO references">🔢 Renum</button>
+      <label class="cl-host-lbl" title="Host this checklist: every connected computer follows this copy" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#a8b3cf;cursor:pointer;margin-left:4px"><input type="checkbox" id="clHostChk"> Host</label>
       <span class="cl-status" id="clStatus">No checklist loaded</span>
     </div>
     <div class="cl-table-wrap" id="clTableWrap">
@@ -149,6 +151,9 @@ function buildChecklistPanel() {
 
   // Toolbar wiring
   panel.querySelector('#clLoadBtn').onclick   = clOpenFile;
+  panel.querySelector('#clHostChk').onchange  = _clHostToggle;
+  // Late joiner: if a host is already active, offer/adopt its checklist.
+  setTimeout(_clHostSyncOnMount, 400);
   panel.querySelector('#clSaveBtn').onclick   = () => clSaveFile(true);
   panel.querySelector('#clGotoBtn').onclick   = clGoto;
   panel.querySelector('#clReturnBtn').onclick = clReturn;
@@ -375,6 +380,185 @@ function _esc(s) {
 }
 
 /* ================================================================ check / uncheck */
+/* ------------------------- checklist hosting -----------------------------
+ * The Host checkbox shares THIS checklist with every connected computer.
+ * Server-arbitrated: claiming while another live host exists asks them to
+ * relinquish (their popup); the requester waits (our popup) until granted,
+ * denied, or timeout. The hosted payload is a snapshot object, so adoption
+ * is just _clApplySnapshot(); afterwards the normal check/uncheck relay
+ * keeps everyone in step. */
+let _clAmHost = false;
+let _clHostWaitDiv = null;
+let _clHostWaitTimer = null;
+
+function _clBuildHostPayload() {
+  return {
+    checklistItems:     window.checklistItems,
+    checklistActiveRow: window.checklistActiveRow,
+    checklistReturnRow: window.checklistReturnRow,
+    checklistShowRow:   window.checklistShowRow,
+    checkEvents:        window.checkEvents || [],
+    checklistPath:      window.checklistPath || 'checklist.txt',
+  };
+}
+
+function _clSetHostChk(on) {
+  const chk = _clPanel?.querySelector('#clHostChk');
+  if (chk) chk.checked = !!on;
+}
+
+function _clCloseHostWait() {
+  if (_clHostWaitTimer) { clearTimeout(_clHostWaitTimer); _clHostWaitTimer = null; }
+  if (_clHostWaitDiv)   { _clHostWaitDiv.remove(); _clHostWaitDiv = null; }
+}
+
+function _clShowHostWait(ttl) {
+  _clCloseHostWait();
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);' +
+    'display:flex;align-items:center;justify-content:center;z-index:99999';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#1d2233;border:1px solid #3e4668;border-radius:8px;' +
+    'padding:18px 22px;color:#e6e6e6;font-size:14px;max-width:380px;text-align:center';
+  box.innerHTML = '<div style="margin-bottom:12px">Requesting to host checklist from other computers\u2026</div>';
+  const cancel = document.createElement('button');
+  cancel.className = 'btn'; cancel.textContent = 'Cancel';
+  cancel.onclick = () => {
+    _clCloseHostWait();
+    _clSetHostChk(false);
+    fetch('/api/checklist_host/cancel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: window.MCC_CLIENT_ID })
+    }).catch(() => {});
+  };
+  box.append(cancel);
+  d.append(box);
+  document.body.append(d);
+  _clHostWaitDiv = d;
+  // Local timeout slightly under the server TTL so OUR dialog resolves
+  // first; the server denies the stale claim on its own clock anyway.
+  _clHostWaitTimer = setTimeout(() => {
+    _clCloseHostWait();
+    _clSetHostChk(false);
+    fetch('/api/checklist_host/cancel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: window.MCC_CLIENT_ID })
+    }).catch(() => {});
+    alert('No response from the current host \u2014 request expired.');
+  }, Math.max(5, (ttl || 30) - 3) * 1000);
+}
+
+async function _clHostToggle(e) {
+  const want = e.target.checked;
+  if (want) {
+    if (!window.checklistLoaded) {
+      alert('Load a checklist first \u2014 hosting shares YOUR copy with the other computers.');
+      e.target.checked = false;
+      return;
+    }
+    if (!window.MCC_CLIENT_ID) {
+      alert('Not connected to the server yet \u2014 try again in a moment.');
+      e.target.checked = false;
+      return;
+    }
+    try {
+      const r = await fetch('/api/checklist_host/claim', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: window.MCC_CLIENT_ID,
+                               checklist: _clBuildHostPayload() })
+      });
+      const j = await r.json();
+      if (j.ok && j.granted) {
+        // The broadcast 'set' confirms and flips _clAmHost.
+      } else if (j.ok && j.pending) {
+        _clShowHostWait(j.ttl);
+      } else {
+        alert(j.error || 'Hosting request failed.');
+        e.target.checked = false;
+      }
+    } catch (err) {
+      alert('Hosting request failed: ' + err.message);
+      e.target.checked = false;
+    }
+  } else if (_clAmHost) {
+    fetch('/api/checklist_host/release', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: window.MCC_CLIENT_ID })
+    }).catch(() => {});
+  }
+}
+
+/* Push a refreshed copy to the server while hosting (host loaded a new
+ * file or restored a snapshot). The claim endpoint treats a claim from
+ * the current host as a data refresh + rebroadcast. */
+function _clHostPush() {
+  if (!_clAmHost || !window.checklistLoaded) return;
+  fetch('/api/checklist_host/claim', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: window.MCC_CLIENT_ID,
+                           checklist: _clBuildHostPayload() })
+  }).catch(() => {});
+}
+
+/* Server messages routed here by app.js (type === 'cl_host'). */
+window.clHostMessage = function (msg) {
+  switch (msg.op) {
+    case 'request': {
+      // We are the current host; someone wants it.
+      const ok = confirm('Another computer is requesting to host the checklist.\n' +
+                         'Do you want to relinquish hosting to them?');
+      fetch('/api/checklist_host/respond', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: window.MCC_CLIENT_ID, allow: ok })
+      }).then(r => r.json()).then(j => {
+        if (!j.ok) alert(j.error || 'The request had already expired.');
+      }).catch(() => {});
+      break;
+    }
+    case 'set': {
+      const mine = !!(msg.host_id && msg.host_id === window.MCC_CLIENT_ID);
+      const wasHost = _clAmHost;
+      _clAmHost = mine;
+      _clSetHostChk(mine);
+      if (mine) {
+        _clCloseHostWait();
+      } else if (msg.host_id && msg.checklist) {
+        _clCloseHostWait();           // covers losing a pending race
+        if (wasHost) alert('Hosting was transferred to another computer; this checklist now follows theirs.');
+        _clApplySnapshot(msg.checklist);
+      }
+      // host_id === null: hosting ended; keep current local state as-is.
+      break;
+    }
+    case 'granted':  _clCloseHostWait(); break;   // 'set' carries the rest
+    case 'denied':
+      _clCloseHostWait();
+      _clSetHostChk(false);
+      alert('The current host declined to relinquish hosting.');
+      break;
+    case 'timeout':
+      _clCloseHostWait();
+      _clSetHostChk(false);
+      alert('Hosting request expired \u2014 no response from the current host.');
+      break;
+  }
+};
+
+/* Dock just opened: if a host is already active elsewhere, adopt (with a
+ * confirm when it would replace a locally loaded checklist). */
+async function _clHostSyncOnMount() {
+  try {
+    const r = await fetch('/api/checklist_host');
+    const j = await r.json();
+    if (!j.host_id || !j.checklist) return;
+    if (j.host_id === window.MCC_CLIENT_ID) { _clAmHost = true; _clSetHostChk(true); return; }
+    if (window.checklistLoaded &&
+        !confirm('A hosted checklist is active (' + (j.checklist.checklistPath || '?') +
+                 ').\nFollow it? This replaces your current checklist.')) return;
+    _clApplySnapshot(j.checklist);
+  } catch {}
+}
+
 function clCheck() {
   const items  = window.checklistItems;
   let   active = window.checklistActiveRow;
@@ -420,6 +604,76 @@ function clCheck() {
   _renderTable();
   _clSaveSnapshot();
 }
+
+/* ---------------- remote checklist mirroring (multi-computer) -----------
+ * Applied when ANOTHER computer (or another window) checks/unchecks an
+ * item; events arrive via the server WS relay -> app.js
+ * applyRemoteCheckEvent -> these hooks. They mutate the local checklist
+ * state the same way clCheck/clUncheck do, but emit NOTHING (no POST, no
+ * broadcast, no snapshot save -- the originator did all that), so there
+ * are no echo loops. Both are idempotent by matching on itemNum AND the
+ * current checked state: an echo of our own action, or a duplicate
+ * delivery, finds nothing left to change and no-ops.                     */
+window.clApplyRemoteCheck = function (ev) {
+  const items = window.checklistItems;
+  if (!window.checklistLoaded || !items || !ev) return;
+  // First UNCHECKED item with this number. Already-checked => echo/dup => no-op.
+  let idx = -1;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type === CL_LINE_CHECKLISTITEM &&
+        items[i].itemNum === ev.itemNum && !items[i].checked) { idx = i; break; }
+  }
+  if (idx < 0) return;
+  items[idx].checked = true;
+  items[idx].timeOut = _nowStr();
+  // Mirror clCheck's cursor advance when the checked row IS our active
+  // row (the normal both-screens-in-step case). If our cursor is
+  // elsewhere (operator browsing), just mark the box and leave it be.
+  if (idx === window.checklistActiveRow) {
+    let next = idx;
+    for (let i = idx + 1; i < items.length; i++) {
+      if (items[i].type === CL_LINE_CHECKLISTITEM && !items[i].checked) { next = i; break; }
+    }
+    if (next !== idx) {
+      window.checklistActiveRow = next;
+      items[next].timeIn   = _nowStr();
+      items[next].duration = 0;
+    }
+    window.checklistShowRow = window.checklistActiveRow;
+  }
+  _renderTable();
+};
+
+window.clApplyRemoteUncheck = function (itemNum) {
+  const items = window.checklistItems;
+  if (!window.checklistLoaded || !items) return;
+  // Last CHECKED item with this number. Already-unchecked => echo => no-op.
+  let idx = -1;
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].type === CL_LINE_CHECKLISTITEM &&
+        items[i].itemNum === itemNum && items[i].checked) { idx = i; break; }
+  }
+  if (idx < 0) return;
+  const active = window.checklistActiveRow;
+  items[idx].checked  = false;
+  items[idx].timeIn   = '';
+  items[idx].timeOut  = '';
+  items[idx].duration = 0;
+  // Mirror clUncheck's cursor retreat when the unchecked row is at or
+  // before our active row; zero the abandoned active row's times like
+  // the local path does.
+  if (idx <= active) {
+    window.checklistActiveRow = idx;
+    window.checklistShowRow   = idx;
+    if (active !== idx && items[active]) {
+      items[active].timeIn   = '';
+      items[active].timeOut  = '';
+      items[active].duration = 0;
+    }
+    items[idx].timeIn = _nowStr();   // it is the active row again; resume timing
+  }
+  _renderTable();
+};
 
 function clUncheck() {
   const items  = window.checklistItems;
@@ -563,6 +817,7 @@ function clOpenFile() {
       window.broadcastCheckEvent?.('replace', { events: [] });
       _renderTable();
       if (_clPanel) _clPanel.focus();
+      _clHostPush();   // hosting? share the freshly loaded file
 
       // Offer to restore a saved snapshot (chk.json) for this checklist
       if (confirm('Load a saved checkpoint (.chk.json) to restore where you left off?\n(Cancel to start fresh)')) {

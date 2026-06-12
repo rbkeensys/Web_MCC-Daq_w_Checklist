@@ -107,8 +107,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.26"
-__updated__ = "2026-06-12"  # 2.8.26: silenced the benign Windows-only ConnectionResetError [WinError 10054] tracebacks that the asyncio Proactor transport prints whenever a browser drops its connection (refresh/close/sleep). Only that specific error in that one cleanup callback is swallowed; all other exceptions surface as before. 2.8.25: optional HTTPS — if CFG_DIR/ssl/cert.pem + key.pem exist (e.g. generated with mkcert), uvicorn serves TLS automatically; removes the browser "Not secure" warning and makes remote origins proper secure contexts. 2.8.24: layout endpoints hardened + instrumented — PUT mkdirs the config dir, writes atomically, and returns {ok:false,error} instead of a bare 500; both GET and PUT print one console line per request so a broken remote layout-sync is diagnosable from the server window. 2.8.23: WS clients now receive a {type:hello} message with hardware status on every (re)connect, so button colorization no longer depends on a single boot-time /api/diag fetch that could fail transiently and stick a client in the un-connected look forever. 2.8.22: check events now relay over the WebSocket to ALL clients (type=check_event) -- checklist on one computer marks charts on every computer. New /api/check_events/uncheck removes the event from the logger accumulator and relays the removal. 2.8.21: launch bundle now includes names + charted lists alongside scales (single _viewer_scales.json). 2.8.20: /api/log_viewer/launch now accepts a "scales" map from the browser ({csvCol:{scale,offset,label}}), writes it to LOGS_DIR/_viewer_scales.json, and passes --scales to the viewer so it can render data with the in-app charts' display scale/offset. 2.8.19: POST /api/log_viewer/launch spawns the standalone log_viewer.py app (huge-file chart viewer). New chk.json merge tool: GET /api/chk_merge/candidates lists sessions with chk.json + their embed status; POST /api/chk_merge/{session} streams the events into the CSV's chk_events column with sanity checks (identical = no-op, different = requires force, event times outside CSV range = requires force, active session = refused). Merge is a streaming copy + atomic os.replace, so memory stays flat on multi-GB files.
+__version__ = "2.8.27"
+__updated__ = "2026-06-12"  # 2.8.27: checklist host arbitration -- one browser can host its checklist for all others (claim/respond/cancel/release endpoints + WS cl_host messages). Live hosts are asked to relinquish (30s expiry denies); disconnected hosts are replaced instantly and hosting auto-releases when the host browser drops. WS hello now carries a per-connection client_id. 2.8.26: silenced the benign Windows-only ConnectionResetError [WinError 10054] tracebacks that the asyncio Proactor transport prints whenever a browser drops its connection (refresh/close/sleep). Only that specific error in that one cleanup callback is swallowed; all other exceptions surface as before. 2.8.25: optional HTTPS — if CFG_DIR/ssl/cert.pem + key.pem exist (e.g. generated with mkcert), uvicorn serves TLS automatically; removes the browser "Not secure" warning and makes remote origins proper secure contexts. 2.8.24: layout endpoints hardened + instrumented — PUT mkdirs the config dir, writes atomically, and returns {ok:false,error} instead of a bare 500; both GET and PUT print one console line per request so a broken remote layout-sync is diagnosable from the server window. 2.8.23: WS clients now receive a {type:hello} message with hardware status on every (re)connect, so button colorization no longer depends on a single boot-time /api/diag fetch that could fail transiently and stick a client in the un-connected look forever. 2.8.22: check events now relay over the WebSocket to ALL clients (type=check_event) -- checklist on one computer marks charts on every computer. New /api/check_events/uncheck removes the event from the logger accumulator and relays the removal. 2.8.21: launch bundle now includes names + charted lists alongside scales (single _viewer_scales.json). 2.8.20: /api/log_viewer/launch now accepts a "scales" map from the browser ({csvCol:{scale,offset,label}}), writes it to LOGS_DIR/_viewer_scales.json, and passes --scales to the viewer so it can render data with the in-app charts' display scale/offset. 2.8.19: POST /api/log_viewer/launch spawns the standalone log_viewer.py app (huge-file chart viewer). New chk.json merge tool: GET /api/chk_merge/candidates lists sessions with chk.json + their embed status; POST /api/chk_merge/{session} streams the events into the CSV's chk_events column with sanity checks (identical = no-op, different = requires force, event times outside CSV range = requires force, active session = refused). Merge is a streaming copy + atomic os.replace, so memory stays flat on multi-GB files.
 import csv  # used by the chk-merge helpers below
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
@@ -2578,6 +2578,154 @@ async def post_check_events(req: Request):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+# ====================== checklist host arbitration ========================
+# One browser can volunteer to HOST the checklist: its copy (items, cursor,
+# check events) is pushed to the server and broadcast to every connected
+# browser, whose checklist widgets adopt it. After adoption the existing
+# check/uncheck relay keeps all copies in step; hosting only distributes
+# the FILE and decides who is authoritative.
+#
+# Arbitration: claiming while another live host exists puts the claim in a
+# pending slot and asks the current host (via its WebSocket) to relinquish.
+# The host answers through /respond; silence expires after PENDING_TTL so
+# an unattended host cannot wedge the system -- but it also is not stolen
+# from: expiry DENIES the request. A DISCONNECTED host is replaced
+# immediately (its WS is gone, nothing to ask).
+ws_client_ids: dict = {}                     # client_id -> WebSocket
+_cl_host = {"id": None, "data": None}        # current host + its checklist
+_cl_pending = {"id": None, "data": None, "ts": 0.0}
+_CL_PENDING_TTL = 30.0                       # seconds before a claim expires
+
+async def _ws_send_to(cid, msg):
+    """Best-effort targeted send to one client by id."""
+    w = ws_client_ids.get(cid)
+    if w is None:
+        return False
+    try:
+        await w.send_text(json.dumps(msg, separators=(",", ":")))
+        return True
+    except Exception:
+        return False
+
+async def _cl_expire_pending():
+    """Drop a stale pending claim, notifying the requester."""
+    if _cl_pending["id"] and (time.time() - _cl_pending["ts"]) > _CL_PENDING_TTL:
+        stale = _cl_pending["id"]
+        _cl_pending.update({"id": None, "data": None, "ts": 0.0})
+        await _ws_send_to(stale, {"type": "cl_host", "op": "timeout"})
+
+async def _cl_install_host(cid, data):
+    """Make cid the host with the given checklist and tell everyone."""
+    _cl_host["id"] = cid
+    _cl_host["data"] = data
+    fname = (data or {}).get("checklistPath", "?")
+    print(f"[MCC-Hub] checklist host = {cid} ({fname})")
+    await broadcast({"type": "cl_host", "op": "set",
+                     "host_id": cid, "checklist": data})
+
+@app.get("/api/checklist_host")
+async def get_checklist_host():
+    """Current hosting state + the hosted checklist itself, so a browser
+    that opens its checklist dock late can adopt immediately."""
+    return {"host_id": _cl_host["id"],
+            "has_data": _cl_host["data"] is not None,
+            "checklist": _cl_host["data"]}
+
+@app.post("/api/checklist_host/claim")
+async def checklist_host_claim(req: Request):
+    """A browser wants to host. Granted instantly when there is no live
+    host (or the claimer already hosts -- that refreshes the data, used
+    when the host loads a different checklist file). Otherwise the claim
+    goes pending and the current host is asked to relinquish."""
+    try:
+        body = await req.json()
+        cid = body.get("client_id")
+        data = body.get("checklist")
+        if not cid or not isinstance(data, dict):
+            return {"ok": False, "error": "client_id and checklist required"}
+        await _cl_expire_pending()
+
+        # Already the host: refresh the shared copy and rebroadcast.
+        if _cl_host["id"] == cid:
+            await _cl_install_host(cid, data)
+            return {"ok": True, "granted": True}
+
+        # No host, or the recorded host has no live connection: take over.
+        if _cl_host["id"] is None or _cl_host["id"] not in ws_client_ids:
+            await _cl_install_host(cid, data)
+            return {"ok": True, "granted": True}
+
+        # A different request is already waiting its turn.
+        if _cl_pending["id"] and _cl_pending["id"] != cid:
+            return {"ok": False,
+                    "error": "Another computer is already requesting to host. Try again shortly."}
+
+        # Park the claim and ask the current host to relinquish.
+        _cl_pending.update({"id": cid, "data": data, "ts": time.time()})
+        sent = await _ws_send_to(_cl_host["id"],
+                                 {"type": "cl_host", "op": "request"})
+        if not sent:
+            # Host vanished between the liveness check and the send.
+            _cl_pending.update({"id": None, "data": None, "ts": 0.0})
+            await _cl_install_host(cid, data)
+            return {"ok": True, "granted": True}
+        return {"ok": True, "granted": False, "pending": True,
+                "ttl": _CL_PENDING_TTL}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/api/checklist_host/respond")
+async def checklist_host_respond(req: Request):
+    """The current host answers a relinquish request (allow true/false)."""
+    try:
+        body = await req.json()
+        cid = body.get("client_id")
+        allow = bool(body.get("allow"))
+        if _cl_host["id"] != cid:
+            return {"ok": False, "error": "You are not the current host."}
+        await _cl_expire_pending()
+        if not _cl_pending["id"]:
+            return {"ok": False, "error": "The request already expired or was cancelled."}
+        requester, data = _cl_pending["id"], _cl_pending["data"]
+        _cl_pending.update({"id": None, "data": None, "ts": 0.0})
+        if not allow:
+            await _ws_send_to(requester, {"type": "cl_host", "op": "denied"})
+            return {"ok": True, "relinquished": False}
+        if requester not in ws_client_ids:
+            return {"ok": True, "relinquished": False,
+                    "note": "Requester disconnected; you remain host."}
+        await _ws_send_to(requester, {"type": "cl_host", "op": "granted"})
+        await _cl_install_host(requester, data)
+        return {"ok": True, "relinquished": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/api/checklist_host/cancel")
+async def checklist_host_cancel(req: Request):
+    """The requester gave up waiting (timeout or Cancel button)."""
+    try:
+        body = await req.json()
+        if _cl_pending["id"] == body.get("client_id"):
+            _cl_pending.update({"id": None, "data": None, "ts": 0.0})
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/api/checklist_host/release")
+async def checklist_host_release(req: Request):
+    """The host unchecked its Host box: hosting ends for everyone."""
+    try:
+        body = await req.json()
+        if _cl_host["id"] != body.get("client_id"):
+            return {"ok": False, "error": "You are not the current host."}
+        _cl_host["id"] = None
+        _cl_host["data"] = None
+        print("[MCC-Hub] checklist hosting released")
+        await broadcast({"type": "cl_host", "op": "set", "host_id": None})
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @app.post("/api/check_events/uncheck")
 async def post_check_events_uncheck(req: Request):
     """Relay a checklist UNcheck to every connected browser and drop the
@@ -2939,7 +3087,13 @@ def chk_merge(session: str, body: dict = None):
 async def ws(ws: WebSocket):
     await ws.accept()
     ws_clients.append(ws)
-    print(f"[WS] client connected; total={len(ws_clients)}")
+    # Per-connection identity: used by the checklist-host arbitration so
+    # the server can address ONE browser (the current host) and recognise
+    # claims/releases coming back over HTTP from the same client.
+    import uuid as _uuid
+    client_id = _uuid.uuid4().hex[:12]
+    ws_client_ids[client_id] = ws
+    print(f"[WS] client connected; total={len(ws_clients)} id={client_id}")
 
     # Hello: hardware/runtime status for THIS client. Button colorization
     # (hwReady in app.js) used to rely on a single boot-time /api/diag
@@ -2953,6 +3107,7 @@ async def ws(ws: WebSocket):
             "have_mcculw": bool(HAVE_MCCULW),
             "have_uldaq": bool(HAVE_ULDAQ),
             "server": SERVER_VERSION,
+            "client_id": client_id,
         }, separators=(",", ":")))
     except Exception as e:
         print(f"[WS] failed sending hello: {e}")
@@ -2986,6 +3141,18 @@ async def ws(ws: WebSocket):
     finally:
         if ws in ws_clients:
             ws_clients.remove(ws)
+        ws_client_ids.pop(client_id, None)
+        # If the departing browser was hosting the checklist, hosting ends
+        # with it -- everyone's Host checkbox clears and machines go back
+        # to independent checklists until someone claims again.
+        if _cl_host["id"] == client_id:
+            _cl_host["id"] = None
+            _cl_host["data"] = None
+            print(f"[WS] checklist host {client_id} disconnected; hosting released")
+            try:
+                await broadcast({"type": "cl_host", "op": "set", "host_id": None})
+            except Exception:
+                pass
         if not ws_clients and run_task:
             print("[WS] no clients; stopping acquisition task")
             run_task.cancel()
