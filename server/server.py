@@ -80,8 +80,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.21"
-__updated__ = "2026-06-11"  # 2.8.21: launch bundle now includes names + charted lists alongside scales (single _viewer_scales.json). 2.8.20: /api/log_viewer/launch now accepts a "scales" map from the browser ({csvCol:{scale,offset,label}}), writes it to LOGS_DIR/_viewer_scales.json, and passes --scales to the viewer so it can render data with the in-app charts' display scale/offset. 2.8.19: POST /api/log_viewer/launch spawns the standalone log_viewer.py app (huge-file chart viewer). New chk.json merge tool: GET /api/chk_merge/candidates lists sessions with chk.json + their embed status; POST /api/chk_merge/{session} streams the events into the CSV's chk_events column with sanity checks (identical = no-op, different = requires force, event times outside CSV range = requires force, active session = refused). Merge is a streaming copy + atomic os.replace, so memory stays flat on multi-GB files.
+__version__ = "2.8.23"
+__updated__ = "2026-06-12"  # 2.8.23: WS clients now receive a {type:hello} message with hardware status on every (re)connect, so button colorization no longer depends on a single boot-time /api/diag fetch that could fail transiently and stick a client in the un-connected look forever. 2.8.22: check events now relay over the WebSocket to ALL clients (type=check_event) -- checklist on one computer marks charts on every computer. New /api/check_events/uncheck removes the event from the logger accumulator and relays the removal. 2.8.21: launch bundle now includes names + charted lists alongside scales (single _viewer_scales.json). 2.8.20: /api/log_viewer/launch now accepts a "scales" map from the browser ({csvCol:{scale,offset,label}}), writes it to LOGS_DIR/_viewer_scales.json, and passes --scales to the viewer so it can render data with the in-app charts' display scale/offset. 2.8.19: POST /api/log_viewer/launch spawns the standalone log_viewer.py app (huge-file chart viewer). New chk.json merge tool: GET /api/chk_merge/candidates lists sessions with chk.json + their embed status; POST /api/chk_merge/{session} streams the events into the CSV's chk_events column with sanity checks (identical = no-op, different = requires force, event times outside CSV range = requires force, active session = refused). Merge is a streaming copy + atomic os.replace, so memory stays flat on multi-GB files.
 import csv  # used by the chk-merge helpers below
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
@@ -2516,7 +2516,44 @@ async def post_check_events(req: Request):
         events = data.get("events", [])
         if session_logger and events:
             await asyncio.to_thread(session_logger.write_check_events, events)
+        # Relay to every connected browser. Same-machine windows already
+        # synced via BroadcastChannel; this is what carries checks to OTHER
+        # computers watching the same server. The originating window sees
+        # the echo too and skips it (idempotent apply, see app.js).
+        for ev in events:
+            try:
+                await broadcast({"type": "check_event", "op": "add", "ev": ev})
+            except Exception:
+                pass
         return {"ok": True, "count": len(events)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/api/check_events/uncheck")
+async def post_check_events_uncheck(req: Request):
+    """Relay a checklist UNcheck to every connected browser and drop the
+    matching event from the active session's in-memory accumulator so the
+    chk_events column embedded at close reflects the final checked state.
+    This is the cross-computer counterpart of the same-machine
+    BroadcastChannel relay — a second computer only hears about checks and
+    unchecks through the server."""
+    global session_logger
+    try:
+        data = await req.json()
+        item_num = data.get("itemNum")
+        if item_num is None:
+            return {"ok": False, "error": "itemNum required"}
+        if session_logger:
+            try:
+                await asyncio.to_thread(session_logger.remove_check_event, item_num)
+            except AttributeError:
+                pass  # older logger without remove support; chk.json still rules
+        try:
+            await broadcast({"type": "check_event", "op": "remove",
+                             "itemNum": item_num})
+        except Exception:
+            pass
+        return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -2854,6 +2891,22 @@ async def ws(ws: WebSocket):
     await ws.accept()
     ws_clients.append(ws)
     print(f"[WS] client connected; total={len(ws_clients)}")
+
+    # Hello: hardware/runtime status for THIS client. Button colorization
+    # (hwReady in app.js) used to rely on a single boot-time /api/diag
+    # fetch — if that one fetch failed (server restarting, transient
+    # network), the client's buttons stayed in the un-connected color
+    # forever. Sending the status on every (re)connect makes it
+    # self-healing.
+    try:
+        await ws.send_text(json.dumps({
+            "type": "hello",
+            "have_mcculw": bool(HAVE_MCCULW),
+            "have_uldaq": bool(HAVE_ULDAQ),
+            "server": SERVER_VERSION,
+        }, separators=(",", ":")))
+    except Exception as e:
+        print(f"[WS] failed sending hello: {e}")
 
     # Send a snapshot of recent console output to this client only, so
     # the console widget has history right away. Subsequent lines arrive

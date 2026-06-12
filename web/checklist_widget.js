@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.17.0';  // 2026-06-12: Check/uncheck/restore/clear now relay through window.broadcastCheckEvent (BroadcastChannel in app.js) so popped-out charts get checkmarks from the main-page checklist and a popped-out checklist reaches main-page charts.
+window.CHECKLIST_VERSION = '1.17.1';  // 2026-06-12: Unchecks now also POST /api/check_events/uncheck so the server relays them to other computers and trims the log accumulator. Prev: Check/uncheck/restore/clear relay through window.broadcastCheckEvent (BroadcastChannel in app.js) so popped-out charts get checkmarks from the main-page checklist and a popped-out checklist reaches main-page charts.
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -472,6 +472,13 @@ function clUncheck() {
   // Dispatch event so app.js removes the chart mark
   window.dispatchEvent(new CustomEvent('checklist-uncheck', { detail: { itemNum: removedNum } }));
   window.broadcastCheckEvent?.('remove', { itemNum: removedNum });
+  // Tell the server too: it relays the removal to OTHER computers and
+  // drops the event from the session log accumulator.
+  fetch('/api/check_events/uncheck', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemNum: removedNum })
+  }).catch(() => {});
 
   // Move active row FIRST so _clTickDuration immediately stops on old active row
   window.checklistActiveRow = target;

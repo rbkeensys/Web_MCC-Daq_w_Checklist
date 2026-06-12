@@ -1,7 +1,14 @@
 # server/logger.py
 """
 Buffered CSV logger for session data
-Version: 2.1.5 (2026-06-10)
+Version: 2.1.6 (2026-06-12)
+
+CHANGES from 2.1.5:
+- remove_check_event(item_num): unchecking in the UI now removes the
+  matching event from the in-memory accumulator, so the chk_events
+  column embedded at session close matches the final checked state.
+
+CHANGES from 2.1.4 (was 2.1.5):
 
 CHANGES from 2.1.4:
 - BUGFIX (regression introduced in 2.1.4): __init__ now accepts an
@@ -297,6 +304,17 @@ class SessionLogger:
         # Append to the in-memory accumulator. Cheap, lock-free for our
         # use case (single producer — the API handler — at a time).
         self._check_events_accum.extend(events)
+
+    def remove_check_event(self, item_num):
+        """Drop the most recent accumulated event for item_num (the user
+        unchecked it). Keeps the chk_events column embedded at close in
+        agreement with the final checklist state. O(n) on a small
+        in-memory list — n is the number of checks this session."""
+        for i in range(len(self._check_events_accum) - 1, -1, -1):
+            if self._check_events_accum[i].get("itemNum") == item_num:
+                del self._check_events_accum[i]
+                return True
+        return False
 
     def _embed_check_events_in_csv(self):
         """Rewrite the CSV file with a chk_events column on row 1 holding

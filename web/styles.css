@@ -154,6 +154,20 @@ body.ui-editing .widget {
   outline: 1px dashed rgba(121, 192, 255, 0.25);
   outline-offset: -1px;
 }
+/* Multi-select: outline on every selected widget, and the rubber-band
+   box drawn while drag-selecting on empty canvas. */
+.widget.multi-selected {
+  outline: 2px solid #79c0ff !important;
+  outline-offset: 1px;
+}
+#msRubber {
+  position: absolute;
+  border: 1px dashed #79c0ff;
+  background: rgba(121, 192, 255, 0.08);
+  z-index: 9999;
+  pointer-events: none;
+}
+
 /* The toolbar toggle button. Default = locked (muted look); when in
    edit mode, light it up with the accent color so it's clearly active. */
 .ui-edit-toggle { min-width: 92px; }

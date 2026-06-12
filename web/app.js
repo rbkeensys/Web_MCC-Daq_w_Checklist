@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.36";  // 2026-06-12: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
+const UI_VERSION = "2.1.39";  // 2026-06-12: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -2096,7 +2096,10 @@ function _applyUiEditMode() {
       ? 'Click to lock the layout (prevents accidental moves/resizes)'
       : 'Click to unlock the layout for moving/resizing widgets';
   }
-  // Leaving edit mode: any shape currently in per-shape edit mode should
+  // Leaving edit mode: drop any multi-selection (its affordances only
+  // exist while editing) ...
+  if (!_uiEditMode && typeof msClear === 'function') { try { msClear(); } catch {} }
+  // ... and any shape currently in per-shape edit mode should
   // close — otherwise handles would linger when you can't actually use
   // them. Iterate the active page's widgets and clear _editing for shapes.
   if (!_uiEditMode && state && state.pages && Array.isArray(state.pages)) {
@@ -2206,6 +2209,38 @@ window.addEventListener('checklist-uncheck', (ev) => {
  * posted it, so the originating window (which already applied the change
  * locally) sees no echo and there's no double-apply. The idempotence
  * checks below are belt-and-suspenders for multi-window race conditions. */
+/* Shared applier for check-event mutations arriving from ANOTHER context —
+ * a sibling window via BroadcastChannel, or another COMPUTER via the
+ * server's WebSocket relay ({type:'check_event'} messages). Both deliver
+ * the same {op, ...} shape. Idempotence rules make echo storms harmless:
+ *  - 'add' is skipped when the same event (itemNum + timestamp) is present,
+ *    which also swallows the server echo in the originating window.
+ *  - 'remove' only dispatches the mark-removal DOM event when an event was
+ *    actually spliced, so the originator (which already removed its copy)
+ *    doesn't pull a second mark off its charts. */
+function applyRemoteCheckEvent(d) {
+  if (!d) return;
+  const sameEv = (a, b) => a && b && a.itemNum === b.itemNum &&
+    Math.abs((a.tServer ?? a.t ?? 0) - (b.tServer ?? b.t ?? 0)) < 1e-6;
+  window.checkEvents = window.checkEvents || [];
+  if (d.op === 'add' && d.ev) {
+    if (!window.checkEvents.some(e => sameEv(e, d.ev))) {
+      window.checkEvents.push(d.ev);
+      window.dispatchEvent(new CustomEvent('checklist-check', { detail: d.ev }));
+    }
+  } else if (d.op === 'remove' && d.itemNum !== undefined) {
+    const idx = window.checkEvents.map(e => e.itemNum).lastIndexOf(d.itemNum);
+    if (idx >= 0) {
+      window.checkEvents.splice(idx, 1);
+      window.dispatchEvent(new CustomEvent('checklist-uncheck',
+        { detail: { itemNum: d.itemNum } }));
+    }
+  } else if (d.op === 'replace' && Array.isArray(d.events)) {
+    window.checkEvents = d.events.slice();
+    if (!d.events.length) window._chartMarks = [];   // cleared/new checklist
+  }
+}
+
 (function () {
   if (typeof BroadcastChannel === 'undefined') return;   // very old browser
   let bc;
@@ -2220,27 +2255,15 @@ window.addEventListener('checklist-uncheck', (ev) => {
 
   bc.onmessage = (m) => {
     const d = m.data || {};
-    window.checkEvents = window.checkEvents || [];
-    if (d.op === 'add' && d.ev) {
-      if (!window.checkEvents.some(e => sameEv(e, d.ev))) {
-        window.checkEvents.push(d.ev);
-        window.dispatchEvent(new CustomEvent('checklist-check', { detail: d.ev }));
-      }
-    } else if (d.op === 'remove' && d.itemNum !== undefined) {
-      const idx = window.checkEvents.map(e => e.itemNum).lastIndexOf(d.itemNum);
-      if (idx >= 0) window.checkEvents.splice(idx, 1);
-      window.dispatchEvent(new CustomEvent('checklist-uncheck',
-        { detail: { itemNum: d.itemNum } }));
-    } else if (d.op === 'replace' && Array.isArray(d.events)) {
-      window.checkEvents = d.events.slice();
-      if (!d.events.length) window._chartMarks = [];   // cleared/new checklist
-    } else if (d.op === 'sync_request') {
+    if (d.op === 'sync_request') {
       // A freshly-opened window wants current state. Any window that has
       // events answers; identical answers from several windows are fine
       // because 'replace' is idempotent.
       if ((window.checkEvents || []).length) {
         try { bc.postMessage({ op: 'replace', events: window.checkEvents }); } catch {}
       }
+    } else {
+      applyRemoteCheckEvent(d);
     }
   };
 
@@ -2266,6 +2289,8 @@ document.addEventListener('DOMContentLoaded', () => {
   _wireUiEditToggle();
   _loadUiEditMode();
   ensureStarterPage();
+  loadLayoutFromServer();   // async; applies only when this browser is empty
+  _wireMultiSelect();
   // Apply grid visual after pages render so #canvas exists.
   _applyGridVisual();
   showVersions();
@@ -2523,6 +2548,15 @@ function connect(){
     if(msg.type==='session'){ sessionDir=msg.dir; $('#session').textContent=sessionDir; }
     if (msg.type === 'tick') feedTick(msg);
     if (msg.type === 'console') _onConsoleMessage(msg);
+    if (msg.type === 'check_event') applyRemoteCheckEvent(msg);   // other computers
+    if (msg.type === 'hello') {
+      // Server tells us hardware status on every (re)connect — this is
+      // what flips DO buttons from the grey un-connected look to live
+      // red/green. Replaces sole reliance on the boot-time /api/diag
+      // fetch, which could fail once and leave hwReady stuck false.
+      if (typeof msg.have_mcculw !== 'undefined') hwReady = !!msg.have_mcculw;
+      updateDOButtons();
+    }
   };
   updateConnectBtn();
 }
@@ -2675,6 +2709,133 @@ function _wirePaletteToggle() {
     collapsed = !collapsed;
     try { localStorage.setItem(PALETTE_KEY, String(collapsed)); } catch {}
     apply();
+  });
+}
+
+/* ----------------------- multi-select & grouping ------------------------
+ * Editing aid: Ctrl+click widgets to build a selection, or drag a rubber-
+ * band box on empty canvas. Dragging any selected widget moves the whole
+ * selection together (relative offsets preserved exactly — only the
+ * grabbed widget grid-snaps, the rest follow its delta). Ctrl+G stamps
+ * the selection with a persistent groupId (saved in the layout); a
+ * grouped widget always drags its whole group, so a background rectangle
+ * grouped with its buttons moves as one — without popping to the front,
+ * since group/multi drags deliberately skip bringToFront.
+ * Selection itself is transient; only groupId persists.                  */
+const _msSel = new Set();          // selected widget ids (active page)
+
+function msApplyVisual() {
+  document.querySelectorAll('.widget').forEach(n => {
+    n.classList.toggle('multi-selected', _msSel.has((n.id || '').slice(2)));
+  });
+}
+function msClear() { _msSel.clear(); msApplyVisual(); }
+function msToggle(id) {
+  if (_msSel.has(id)) _msSel.delete(id); else _msSel.add(id);
+  msApplyVisual();
+}
+function msSelectGroup(groupId) {
+  _msSel.clear();
+  const page = state.pages[activePageIndex];
+  for (const w of (page?.widgets || []))
+    if (w.groupId === groupId) _msSel.add(w.id);
+  msApplyVisual();
+}
+function groupSelected() {
+  if (_msSel.size < 2) return;
+  const gid = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const page = state.pages[activePageIndex];
+  let n = 0;
+  for (const w of (page?.widgets || []))
+    if (_msSel.has(w.id)) { w.groupId = gid; n++; }
+  console.log(`[Group] grouped ${n} widgets as ${gid}`);
+  msApplyVisual();
+}
+function ungroupSelected(seedW) {
+  // Ungroup everything selected; with a seed widget (context menu), also
+  // dissolve that widget's whole group even if only one member is selected.
+  const gids = new Set();
+  const page = state.pages[activePageIndex];
+  for (const w of (page?.widgets || []))
+    if (_msSel.has(w.id) && w.groupId) gids.add(w.groupId);
+  if (seedW?.groupId) gids.add(seedW.groupId);
+  let n = 0;
+  for (const w of (page?.widgets || []))
+    if (w.groupId && gids.has(w.groupId)) { delete w.groupId; n++; }
+  if (n) console.log(`[Group] ungrouped ${n} widgets`);
+}
+/* Pure helper (also unit-tested): do two rects {x,y,w,h} intersect? */
+function _rectsIntersect(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x &&
+         a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+/* Rubber-band select on empty canvas + keyboard shortcuts. Wired once at
+ * boot via document-level delegation so canvas rebuilds can't orphan it. */
+function _wireMultiSelect() {
+  let band = null, bx = 0, by = 0, additive = false;
+
+  const canvasPoint = (e) => {
+    const cv = document.getElementById('canvas');
+    if (!cv) return null;
+    const r = cv.getBoundingClientRect();
+    return { cv, x: e.clientX - r.left + cv.scrollLeft,
+                 y: e.clientY - r.top  + cv.scrollTop };
+  };
+
+  document.addEventListener('mousedown', (e) => {
+    if (!isUiEditMode() || e.button !== 0) return;
+    if (!e.target || e.target.id !== 'canvas') return;   // empty canvas only
+    const p = canvasPoint(e);
+    if (!p) return;
+    bx = p.x; by = p.y; additive = e.ctrlKey || e.metaKey;
+    band = el('div', { id: 'msRubber' });
+    band.style.left = bx + 'px'; band.style.top = by + 'px';
+    band.style.width = '0px';    band.style.height = '0px';
+    p.cv.append(band);
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!band) return;
+    const p = canvasPoint(e); if (!p) return;
+    const x = Math.min(bx, p.x), y = Math.min(by, p.y);
+    band.style.left = x + 'px';               band.style.top = y + 'px';
+    band.style.width  = Math.abs(p.x - bx) + 'px';
+    band.style.height = Math.abs(p.y - by) + 'px';
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (!band) return;
+    const p = canvasPoint(e);
+    const rect = p ? { x: Math.min(bx, p.x), y: Math.min(by, p.y),
+                       w: Math.abs(p.x - bx), h: Math.abs(p.y - by) } : null;
+    band.remove(); band = null;
+    if (!rect) return;
+    if (rect.w < 4 && rect.h < 4) {           // a plain click, not a drag
+      if (!additive) msClear();
+      return;
+    }
+    if (!additive) _msSel.clear();
+    const page = state.pages[activePageIndex];
+    for (const w of (page?.widgets || [])) {
+      if (w.popoutId) continue;               // popped-out: not on canvas
+      if (_rectsIntersect(rect, { x: w.x, y: w.y, w: w.w, h: w.h }))
+        _msSel.add(w.id);
+    }
+    msApplyVisual();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (!isUiEditMode()) return;
+    const tag = (e.target?.tagName || '').toUpperCase();
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || e.target?.isContentEditable) return;
+    if (e.key === 'Escape') { msClear(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) {
+      e.preventDefault();                     // hijack browser find-next
+      if (e.shiftKey) { ungroupSelected(); msApplyVisual(); }
+      else groupSelected();
+    }
   });
 }
 
@@ -3826,6 +3987,16 @@ function saveLayoutToFile() {
     console.log('[Layout] Saved checklist:', layout.checklist.fileName, 'with', window.checklistItems.length, 'items (annotated)');
   }
   
+  // Mirror the layout to the server (best-effort) so OTHER computers
+  // opening this page get the same widgets automatically — see
+  // loadLayoutFromServer(). The file download below is unchanged.
+  fetch('/api/layout', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(layout)
+  }).then(() => console.log('[Layout] Mirrored to server'))
+    .catch(e => console.warn('[Layout] server mirror failed:', e));
+
   const blob = new Blob([JSON.stringify(layout, null, 2)], {type: 'application/json'});
   const a = el('a', {href: URL.createObjectURL(blob), download: 'layout.json'});
   a.click();
@@ -3841,6 +4012,21 @@ function loadLayoutFromFile() {
     rd.onload = () => {
       try {
         const obj = JSON.parse(rd.result);
+        applyLayoutObject(obj);
+      } catch (e) {
+        alert('Load failed: ' + e.message);
+      }
+    };
+    rd.readAsText(f);
+  };
+  inp.click();
+}
+
+/** Apply a parsed layout object (pages, grid prefs, docked checklist incl.
+ *  content). Shared by the file-load path and the server-layout path so a
+ *  layout behaves identically no matter where it came from. Throws on an
+ *  invalid object — callers handle the error. */
+function applyLayoutObject(obj) {
         if (!obj.pages || !Array.isArray(obj.pages)) throw new Error('Invalid layout file');
         state.pages = normalizeLayoutPages(obj.pages);
 
@@ -3917,13 +4103,29 @@ function loadLayoutFromFile() {
             }
           }
         }
-      } catch (e) {
-        alert('Load failed: ' + e.message);
-      }
-    };
-    rd.readAsText(f);
-  };
-  inp.click();
+}
+
+/** Fetch the server-stored layout (PUT by Save Layout on any machine) and
+ *  apply it — but ONLY when this browser has no layout of its own. This is
+ *  what makes a second computer work out of the box: open the page, get
+ *  the same widgets. A locally loaded layout always wins over the server
+ *  copy. Returns true if a server layout was applied. */
+async function loadLayoutFromServer() {
+  const empty = state.pages.length <= 1 &&
+                ((state.pages[0]?.widgets || []).length === 0);
+  if (!empty) return false;
+  try {
+    const r = await fetch('/api/layout');
+    if (!r.ok) return false;
+    const obj = await r.json();
+    if (!obj || !Array.isArray(obj.pages) || !obj.pages.length) return false;
+    applyLayoutObject(obj);
+    console.log('[Layout] Applied server layout');
+    return true;
+  } catch (e) {
+    console.warn('[Layout] server layout fetch failed:', e);
+    return false;
+  }
 }
 
 function applyChecklistLayout(dock, layout) {
@@ -5247,6 +5449,7 @@ function renderPage(){
     }
   }
   updateDOButtons();
+  msApplyVisual();   // re-render rebuilt the nodes; restore selection outlines
 }
 
 function renderWidget(w){
@@ -8754,6 +8957,14 @@ function _showChromelessContextMenu(w, x, y) {
   // Pop out / Move forward / Move backward / Delete only apply in the
   // main window — inside a popout the widget IS the window, so reordering
   // and deletion only affect a temporary minimal state-copy.
+  if (!IS_POPOUT && isUiEditMode()) {
+    if (_msSel.size > 1) {
+      items.push(mkItem('⛓ Group selected (Ctrl+G)', () => groupSelected()));
+    }
+    if (w.groupId) {
+      items.push(mkItem('⛓ Ungroup (Ctrl+Shift+G)', () => { ungroupSelected(w); msApplyVisual(); }));
+    }
+  }
   if (!IS_POPOUT) {
     if (w.type !== 'shape') {
       // Static shapes don't need their own window. Indicators and labels
@@ -9478,6 +9689,8 @@ function mountShape(w, body, box) {
     // locked, clicks on shapes do nothing — preventing accidental
     // bring-to-front and accidental entering-edit-mode.
     if (!isUiEditMode()) return;
+    // Ctrl+click is a multi-select toggle, never a shape-edit toggle.
+    if (e.ctrlKey || e.metaKey) { _downX = null; return; }
     // If the click landed on a registered handle/grabber, that's a
     // drag-handle interaction — leave editing state alone. We check by
     // identity against w._editHandles and w._editGrabbers because the
@@ -9646,6 +9859,7 @@ function resolveTargetValue(s) {
 // drag/resize — block drag when interacting with inputs
 function makeDragResize(node, w, header, handle){
   let dragging=false,resizing=false,sx=0,sy=0,ox=0,oy=0,ow=0,oh=0;
+  let groupTargets=null;   // other members moving with this drag
   
   // Set minimum sizes based on widget type
   let minW = 280;
@@ -9668,8 +9882,13 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'shape') minH = 16;
   else if (w.type === 'console') minH = 80;
   
-  // Bring to front when clicking anywhere on widget
+  // Bring to front when clicking anywhere on widget — EXCEPT during
+  // multi-select/group interactions: a grouped background shape must keep
+  // its sent-to-back position while being moved (the whole reason groups
+  // exist), and ctrl-clicks are selection edits, not focus changes.
   node.addEventListener('mousedown', (e)=>{
+    if (isUiEditMode() && (e.ctrlKey || e.metaKey ||
+        w.groupId || (_msSel.size > 1 && _msSel.has(w.id)))) return;
     bringToFront(node);
   });
   
@@ -9682,6 +9901,25 @@ function makeDragResize(node, w, header, handle){
       // Allow clicking on icon spans (settings/close buttons)
       if (e.target.classList && e.target.classList.contains('icon')) return;
       if (['INPUT','SELECT','BUTTON','TEXTAREA','LABEL','OPTION'].includes(tag)) return;
+      // Ctrl+click = selection toggle, never a drag.
+      if (e.ctrlKey || e.metaKey) { msToggle(w.id); e.preventDefault(); return; }
+      // Establish the move-set BEFORE dragging: an explicit selection that
+      // includes this widget wins; otherwise a persistent group implies
+      // its members; otherwise this drag is solo (and clears selection).
+      if (!_msSel.has(w.id)) {
+        if (w.groupId) msSelectGroup(w.groupId); else msClear();
+      }
+      groupTargets = null;
+      if (_msSel.has(w.id) && _msSel.size > 1) {
+        const page = state.pages[activePageIndex];
+        groupTargets = [];
+        for (const other of (page?.widgets || [])) {
+          if (other.id !== w.id && _msSel.has(other.id) && !other.popoutId) {
+            groupTargets.push({ w: other,
+                                node: document.getElementById('w_' + other.id) });
+          }
+        }
+      }
       dragging=true; ox=w.x; oy=w.y; sx=e.clientX; sy=e.clientY; e.preventDefault();
     });
   }
@@ -9709,6 +9947,23 @@ function makeDragResize(node, w, header, handle){
       if (typeof w._onDrag === 'function') {
         try { w._onDrag(dx, dy); } catch (e2) { console.warn(e2); }
       }
+      // Group move: every other member follows the grabbed widget's
+      // INCREMENTAL delta. Only the grabbed widget grid-snaps; followers
+      // inherit its snapped motion, so relative offsets are preserved
+      // bit-exactly (no per-member re-snapping drift). Shapes' absolute
+      // endpoint/vertex coords ride along via their own _onDrag hooks.
+      if (groupTargets) {
+        for (const gt of groupTargets) {
+          gt.w.x += dx; gt.w.y += dy;
+          if (gt.node) {
+            gt.node.style.left = gt.w.x + 'px';
+            gt.node.style.top  = gt.w.y + 'px';
+          }
+          if (typeof gt.w._onDrag === 'function') {
+            try { gt.w._onDrag(dx, dy); } catch (e3) { console.warn(e3); }
+          }
+        }
+      }
     }
     if(resizing){
       // Snap the new width/height so the lower-right resize handle lands
@@ -9723,7 +9978,7 @@ function makeDragResize(node, w, header, handle){
       node.style.height = w.h + 'px';
     }
   });
-  window.addEventListener('mouseup',()=>{ dragging=false; resizing=false; });
+  window.addEventListener('mouseup',()=>{ dragging=false; resizing=false; groupTargets=null; });
 }
 
 function normalizeLayoutPages(pages){
