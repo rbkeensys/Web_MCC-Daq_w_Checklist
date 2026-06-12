@@ -51,6 +51,33 @@ def _crash_excepthook(exc_type, exc_value, exc_tb):
 
 sys.excepthook = _crash_excepthook
 
+# ------------------- Windows proactor noise suppression -------------------
+# On Windows, asyncio Proactor transports raise
+#     ConnectionResetError: [WinError 10054]
+# inside _call_connection_lost whenever a peer (a browser tab) drops its
+# TCP connection abruptly: page refresh, tab close, machine sleep. The
+# connection is already dead and fully cleaned up; the exception fires in
+# a loop callback where no application code can catch it, so asyncio
+# prints a traceback to stderr. One per refresh, pure noise -- and since
+# the console fd-capture mirrors stderr into the browser console widget,
+# it pollutes that too. We wrap that ONE callback and swallow ONLY
+# ConnectionResetError; every other exception still surfaces normally.
+if sys.platform == "win32":
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+        _orig_call_connection_lost = _ProactorBasePipeTransport._call_connection_lost
+
+        def _quiet_call_connection_lost(self, exc):
+            try:
+                _orig_call_connection_lost(self, exc)
+            except ConnectionResetError:
+                pass   # peer already gone -- nothing to do, nothing to report
+
+        _ProactorBasePipeTransport._call_connection_lost = _quiet_call_connection_lost
+    except Exception:
+        pass   # internals moved in some future Python -- noise returns, harmless
+
+
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -80,8 +107,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.23"
-__updated__ = "2026-06-12"  # 2.8.23: WS clients now receive a {type:hello} message with hardware status on every (re)connect, so button colorization no longer depends on a single boot-time /api/diag fetch that could fail transiently and stick a client in the un-connected look forever. 2.8.22: check events now relay over the WebSocket to ALL clients (type=check_event) -- checklist on one computer marks charts on every computer. New /api/check_events/uncheck removes the event from the logger accumulator and relays the removal. 2.8.21: launch bundle now includes names + charted lists alongside scales (single _viewer_scales.json). 2.8.20: /api/log_viewer/launch now accepts a "scales" map from the browser ({csvCol:{scale,offset,label}}), writes it to LOGS_DIR/_viewer_scales.json, and passes --scales to the viewer so it can render data with the in-app charts' display scale/offset. 2.8.19: POST /api/log_viewer/launch spawns the standalone log_viewer.py app (huge-file chart viewer). New chk.json merge tool: GET /api/chk_merge/candidates lists sessions with chk.json + their embed status; POST /api/chk_merge/{session} streams the events into the CSV's chk_events column with sanity checks (identical = no-op, different = requires force, event times outside CSV range = requires force, active session = refused). Merge is a streaming copy + atomic os.replace, so memory stays flat on multi-GB files.
+__version__ = "2.8.26"
+__updated__ = "2026-06-12"  # 2.8.26: silenced the benign Windows-only ConnectionResetError [WinError 10054] tracebacks that the asyncio Proactor transport prints whenever a browser drops its connection (refresh/close/sleep). Only that specific error in that one cleanup callback is swallowed; all other exceptions surface as before. 2.8.25: optional HTTPS — if CFG_DIR/ssl/cert.pem + key.pem exist (e.g. generated with mkcert), uvicorn serves TLS automatically; removes the browser "Not secure" warning and makes remote origins proper secure contexts. 2.8.24: layout endpoints hardened + instrumented — PUT mkdirs the config dir, writes atomically, and returns {ok:false,error} instead of a bare 500; both GET and PUT print one console line per request so a broken remote layout-sync is diagnosable from the server window. 2.8.23: WS clients now receive a {type:hello} message with hardware status on every (re)connect, so button colorization no longer depends on a single boot-time /api/diag fetch that could fail transiently and stick a client in the un-connected look forever. 2.8.22: check events now relay over the WebSocket to ALL clients (type=check_event) -- checklist on one computer marks charts on every computer. New /api/check_events/uncheck removes the event from the logger accumulator and relays the removal. 2.8.21: launch bundle now includes names + charted lists alongside scales (single _viewer_scales.json). 2.8.20: /api/log_viewer/launch now accepts a "scales" map from the browser ({csvCol:{scale,offset,label}}), writes it to LOGS_DIR/_viewer_scales.json, and passes --scales to the viewer so it can render data with the in-app charts' display scale/offset. 2.8.19: POST /api/log_viewer/launch spawns the standalone log_viewer.py app (huge-file chart viewer). New chk.json merge tool: GET /api/chk_merge/candidates lists sessions with chk.json + their embed status; POST /api/chk_merge/{session} streams the events into the CSV's chk_events column with sanity checks (identical = no-op, different = requires force, event times outside CSV range = requires force, active session = refused). Merge is a streaming copy + atomic os.replace, so memory stays flat on multi-GB files.
 import csv  # used by the chk-merge helpers below
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
@@ -490,16 +517,38 @@ def post_console_test():
 
 @app.get("/api/layout")
 def get_layout():
-    if LAYOUT_PATH.exists():
-        import json
-        return json.loads(LAYOUT_PATH.read_text(encoding="utf-8"))
+    """Serve the shared layout. Prints a console line per request so the
+    layout-sync chain is diagnosable from the server window: if a remote
+    machine's auto-load isn't working, this line tells you whether the
+    request arrived and what was served."""
+    try:
+        if LAYOUT_PATH.exists():
+            obj = json.loads(LAYOUT_PATH.read_text(encoding="utf-8"))
+            n = len(obj.get("pages", []) or [])
+            print(f"[MCC-Hub] GET /api/layout -> {n} page(s) from {LAYOUT_PATH}")
+            return obj
+        print(f"[MCC-Hub] GET /api/layout -> NO FILE at {LAYOUT_PATH}")
+    except Exception as e:
+        print(f"[MCC-Hub] GET /api/layout FAILED: {e}")
     return {"version": "v1", "pages": []}
 
 @app.put("/api/layout")
 def put_layout(body: dict):
-    import json
-    LAYOUT_PATH.write_text(json.dumps(body, indent=2), encoding="utf-8")
-    return {"ok": True}
+    """Store the shared layout. Hardened: ensures the config directory
+    exists (a frozen-EXE install can be missing it), writes atomically
+    (temp file + os.replace, so a crash mid-write can't truncate the
+    layout), and reports failure as JSON instead of an opaque 500."""
+    try:
+        LAYOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = LAYOUT_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(body, indent=2), encoding="utf-8")
+        os.replace(tmp, LAYOUT_PATH)
+        n = len(body.get("pages", []) or [])
+        print(f"[MCC-Hub] PUT /api/layout -> wrote {n} page(s) to {LAYOUT_PATH}")
+        return {"ok": True, "pages": n, "path": str(LAYOUT_PATH)}
+    except Exception as e:
+        print(f"[MCC-Hub] PUT /api/layout FAILED: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 # ---- Serve index and assets explicitly so /ws is not intercepted ----
@@ -2986,8 +3035,28 @@ if __name__ == "__main__":
         port = int(os.environ.get("PORT", "8000"))
         uv_level = os.environ.get("UVICORN_LEVEL", "warning").lower()
         access = os.environ.get("UVICORN_ACCESS", "0") == "0"
-        _log_write(f"[MCC-Hub] Starting Uvicorn on http://127.0.0.1:{port}\n")
-        uvicorn.run(app, host="0.0.0.0", port=port, log_level=uv_level, access_log=access)
+        # Optional HTTPS: drop a cert.pem + key.pem into CFG_DIR/ssl (the
+        # mkcert tool makes locally-trusted ones in two commands) and the
+        # server switches to TLS automatically. Browsers then treat the
+        # origin as secure — no "Not secure" chip in installed app
+        # windows, and secure-context APIs (clipboard, native
+        # crypto.randomUUID, ...) work on remote machines. Note: with TLS
+        # on, plain http:// no longer answers on this port — use https://
+        # on every machine. app.js already upgrades its WebSocket to wss
+        # automatically based on the page protocol.
+        ssl_kwargs = {}
+        proto = "http"
+        try:
+            _cert = CFG_DIR / "ssl" / "cert.pem"
+            _key  = CFG_DIR / "ssl" / "key.pem"
+            if _cert.exists() and _key.exists():
+                ssl_kwargs = {"ssl_certfile": str(_cert), "ssl_keyfile": str(_key)}
+                proto = "https"
+                _log_write(f"[MCC-Hub] HTTPS enabled (certs in {_cert.parent})\n")
+        except Exception as _ssl_err:
+            _log_write(f"[MCC-Hub] HTTPS cert check failed ({_ssl_err}); serving plain HTTP\n")
+        _log_write(f"[MCC-Hub] Starting Uvicorn on {proto}://127.0.0.1:{port}\n")
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level=uv_level, access_log=access, **ssl_kwargs)
         _log_write("[MCC-Hub] Uvicorn exited normally.\n")
     except SystemExit as e:
         _log_write(f"[MCC-Hub] SystemExit with code={e.code}\n")

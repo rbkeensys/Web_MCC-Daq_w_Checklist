@@ -10,7 +10,7 @@
         {
           "name": "AI0",
           "slope": 25.0,
-          "offset": -12.486343383789062,
+          "offset": -0.683135986328125,
           "cutoffHz": 0.2,
           "units": "psi",
           "include": true
@@ -18,7 +18,7 @@
         {
           "name": "AI1",
           "slope": 37.5,
-          "offset": -18.777809143066406,
+          "offset": 17.055130004882812,
           "cutoffHz": 0.2,
           "units": "psi",
           "include": true

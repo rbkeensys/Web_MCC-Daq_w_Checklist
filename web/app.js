@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.39";  // 2026-06-12: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
+const UI_VERSION = "2.1.42";  // 2026-06-12: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -2289,7 +2289,7 @@ document.addEventListener('DOMContentLoaded', () => {
   _wireUiEditToggle();
   _loadUiEditMode();
   ensureStarterPage();
-  loadLayoutFromServer();   // async; applies only when this browser is empty
+  loadLayoutFromLocal();    // THIS browser's last-saved layout, or starter page
   _wireMultiSelect();
   // Apply grid visual after pages render so #canvas exists.
   _applyGridVisual();
@@ -2710,6 +2710,31 @@ function _wirePaletteToggle() {
     try { localStorage.setItem(PALETTE_KEY, String(collapsed)); } catch {}
     apply();
   });
+}
+
+/* ------------------------------ id generation ---------------------------
+ * crypto.randomUUID() exists ONLY in secure contexts (https or localhost).
+ * A second computer reaching the server over plain http://192.168.x.x has
+ * no such API — so every call threw, which killed the boot sequence
+ * (ensureStarterPage crashed before connect()/loadLayoutFromServer ran)
+ * and broke all the add-widget palette buttons on remote machines. This
+ * helper uses randomUUID when present and otherwise builds an RFC-4122 v4
+ * UUID from crypto.getRandomValues, which works on insecure origins too. */
+function genId() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  } catch {}
+  const b = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(b);
+  } else {
+    for (let i = 0; i < 16; i++) b[i] = (Math.random() * 256) | 0;  // last resort
+  }
+  b[6] = (b[6] & 0x0f) | 0x40;   // version 4
+  b[8] = (b[8] & 0x3f) | 0x80;   // variant 10xx
+  const h = Array.from(b, x => x.toString(16).padStart(2, '0'));
+  return `${h.slice(0,4).join('')}-${h.slice(4,6).join('')}-${h.slice(6,8).join('')}-` +
+         `${h.slice(8,10).join('')}-${h.slice(10).join('')}`;
 }
 
 /* ----------------------- multi-select & grouping ------------------------
@@ -3182,7 +3207,7 @@ let activePageIndex = 0;
 
 function ensureStarterPage(){
   if(!state.pages.length){
-    state.pages=[{id:crypto.randomUUID(), name:'Page 1', widgets:[]}];
+    state.pages=[{id:genId(), name:'Page 1', widgets:[]}];
   }
   refreshPages();
   setActivePage(0);
@@ -3202,7 +3227,7 @@ function setActivePage(idx){
   renderPage();
 }
 function addPage(){
-  state.pages.push({id:crypto.randomUUID(), name:`Page ${state.pages.length+1}`, widgets:[]});
+  state.pages.push({id:genId(), name:`Page ${state.pages.length+1}`, widgets:[]});
   setActivePage(state.pages.length-1);
 }
 function removeActivePage(){
@@ -3286,7 +3311,7 @@ function addWidget(type){
           const chosen = varInput.tagName === 'SELECT' ? varInput.value : varInput.value.trim();
           if (!chosen) { alert('Enter a variable name.'); return; }
           const w = {
-            id: crypto.randomUUID(), type:'staticvar',
+            id: genId(), type:'staticvar',
             x:40, y:40, w:220, h:90,
             opts: { title: chosen, varName: chosen,
                     decimalPlaces: parseInt(decInput.value) || 3 }
@@ -3339,7 +3364,7 @@ function addWidget(type){
     defaultH = 280;
   }
   
-  const w={ id:crypto.randomUUID(), type, x:40, y:40, w:defaultW, h:defaultH, opts:defaultsFor(type) };
+  const w={ id:genId(), type, x:40, y:40, w:defaultW, h:defaultH, opts:defaultsFor(type) };
   // For a fresh line shape, anchor its endpoints to the actual placement
   // position so the line spans the visible area instead of relying on
   // stale x1/y1/x2/y2 defaults.
@@ -3396,7 +3421,7 @@ async function addPIDPanel() {
         const loopName = loops[loopIndex].name || `Loop ${loopIndex}`;
         
         const w = {
-          id: crypto.randomUUID(),
+          id: genId(),
           type: 'pidpanel',
           x: 40,
           y: 40,
@@ -3459,7 +3484,7 @@ async function addMotorWidget() {
         const motorName = motors[motorIndex].name || `Motor ${motorIndex}`;
         
         const w = {
-          id: crypto.randomUUID(),
+          id: genId(),
           type: 'motor',
           x: 40,
           y: 40,
@@ -3523,7 +3548,7 @@ async function addLEWidget() {
         const leName = elements[leIndex].name || `LE${leIndex}`;
         
         const w = {
-          id: crypto.randomUUID(),
+          id: genId(),
           type: 'le',
           x: 40,
           y: 40,
@@ -3587,7 +3612,7 @@ async function addMathOpWidget() {
         const mathName = operators[mathIndex].name || `Math${mathIndex}`;
         
         const w = {
-          id: crypto.randomUUID(),
+          id: genId(),
           type: 'mathop',
           x: 40,
           y: 40,
@@ -3651,7 +3676,7 @@ async function addExprWidget() {
         const exprName = expressions[exprIndex].name || `Expr${exprIndex}`;
         
         const w = {
-          id: crypto.randomUUID(),
+          id: genId(),
           type: 'expr',
           x: 40,
           y: 40,
@@ -3987,15 +4012,13 @@ function saveLayoutToFile() {
     console.log('[Layout] Saved checklist:', layout.checklist.fileName, 'with', window.checklistItems.length, 'items (annotated)');
   }
   
-  // Mirror the layout to the server (best-effort) so OTHER computers
-  // opening this page get the same widgets automatically — see
-  // loadLayoutFromServer(). The file download below is unchanged.
-  fetch('/api/layout', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(layout)
-  }).then(() => console.log('[Layout] Mirrored to server'))
-    .catch(e => console.warn('[Layout] server mirror failed:', e));
+  // Remember this layout in THIS browser so it auto-restores on refresh.
+  // (Deliberately NOT mirrored to the server — each machine owns its own
+  // layout; see _persistLayoutLocal/loadLayoutFromLocal.)
+  // Persist to THIS browser only, so the layout comes back on refresh.
+  // No server mirroring — each machine owns its own layout; sharing
+  // happens deliberately via the downloaded file + Load Layout.
+  _persistLayoutLocal(layout);
 
   const blob = new Blob([JSON.stringify(layout, null, 2)], {type: 'application/json'});
   const a = el('a', {href: URL.createObjectURL(blob), download: 'layout.json'});
@@ -4013,6 +4036,7 @@ function loadLayoutFromFile() {
       try {
         const obj = JSON.parse(rd.result);
         applyLayoutObject(obj);
+        _persistLayoutLocal(obj);   // a loaded file becomes this browser's layout
       } catch (e) {
         alert('Load failed: ' + e.message);
       }
@@ -4105,27 +4129,61 @@ function applyLayoutObject(obj) {
         }
 }
 
-/** Fetch the server-stored layout (PUT by Save Layout on any machine) and
- *  apply it — but ONLY when this browser has no layout of its own. This is
- *  what makes a second computer work out of the box: open the page, get
- *  the same widgets. A locally loaded layout always wins over the server
- *  copy. Returns true if a server layout was applied. */
-async function loadLayoutFromServer() {
-  const empty = state.pages.length <= 1 &&
-                ((state.pages[0]?.widgets || []).length === 0);
-  if (!empty) return false;
+/* Per-browser layout persistence. Each machine keeps ITS OWN last-saved
+ * layout in localStorage and restores it at boot — the earlier design
+ * auto-loaded a server-shared copy, which meant a save on the remote
+ * machine showed up on the host. Layouts now travel between machines
+ * only when YOU move them (Save Layout file -> Load Layout), exactly the
+ * workflow that existed before, just with "my last layout comes back on
+ * refresh" added. */
+const LAYOUT_LS_KEY = 'mcc.layout';
+
+function _persistLayoutLocal(layoutObj) {
   try {
-    const r = await fetch('/api/layout');
-    if (!r.ok) return false;
-    const obj = await r.json();
+    localStorage.setItem(LAYOUT_LS_KEY, JSON.stringify(layoutObj));
+  } catch (e) {
+    // Quota or privacy mode — non-fatal, the layout just won't survive
+    // a refresh on this browser.
+    console.warn('[Layout] local persist failed:', e);
+  }
+}
+
+function loadLayoutFromLocal() {
+  try {
+    const raw = localStorage.getItem(LAYOUT_LS_KEY);
+    if (!raw) {
+      console.log('[Layout] no saved layout in this browser — starter page');
+      return false;
+    }
+    const obj = JSON.parse(raw);
     if (!obj || !Array.isArray(obj.pages) || !obj.pages.length) return false;
     applyLayoutObject(obj);
-    console.log('[Layout] Applied server layout');
+    console.log(`[Layout] restored this browser's last layout (${obj.pages.length} pages)`);
     return true;
   } catch (e) {
-    console.warn('[Layout] server layout fetch failed:', e);
+    console.warn('[Layout] local restore failed:', e);
     return false;
   }
+}
+
+/** Silent, debounced auto-save of the current layout to THIS browser's
+ *  localStorage — called by a few settings callbacks (series color
+ *  changes) so tweaks survive a refresh without clicking Save Layout. */
+let _saveLayoutTimer = null;
+function saveLayout() {
+  if (_saveLayoutTimer) clearTimeout(_saveLayoutTimer);
+  _saveLayoutTimer = setTimeout(() => {
+    _saveLayoutTimer = null;
+    try {
+      const pagesClone = JSON.parse(JSON.stringify(state.pages));
+      for (const p of pagesClone)
+        for (const w of (p.widgets || []))
+          if (w && w.popoutId) delete w.popoutId;
+      _persistLayoutLocal({ pages: pagesClone, grid: { ...state.grid } });
+    } catch (e) {
+      console.warn('[Layout] auto-save failed:', e);
+    }
+  }, 800);
 }
 
 function applyChecklistLayout(dock, layout) {
@@ -5646,7 +5704,7 @@ function popOutWidget(w){
     delete w.popoutId;
   }
 
-  const id = crypto.randomUUID();
+  const id = genId();
   w.popoutId = id;
 
   // Size the window to match the widget's current size, so it pops out
