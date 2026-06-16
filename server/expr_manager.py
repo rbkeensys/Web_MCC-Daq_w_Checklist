@@ -103,6 +103,7 @@ class ExpressionManager:
     def evaluate_all(self, signal_state: Dict[str, Any], bridge=None, sample_rate_hz: float = 100.0) -> List[Dict]:
         """Evaluate all enabled expressions and return telemetry"""
         telemetry = []
+        self.last_vfd_writes = []   # VFD param/register writes collected this tick
         
         # Add expression list to state so expressions can reference each other
         signal_state['expr_list'] = [{'name': expr.name} for expr in self.expressions]
@@ -152,6 +153,7 @@ class ExpressionManager:
                     result = evaluator.evaluate(ast)
                     local_vars = dict(evaluator.local_vars)
                     hw_writes = evaluator.hardware_writes
+                    self.last_vfd_writes.extend(getattr(evaluator, "vfd_writes", []))
                     branch_paths = evaluator.branch_paths  # Direct attribute!
                     executed_lines = evaluator.executed_lines  # Direct attribute!
                 

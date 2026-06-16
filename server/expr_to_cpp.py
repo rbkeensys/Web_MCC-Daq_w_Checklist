@@ -14,8 +14,8 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 - NUMBER, PLUS, MINUS, MULT, DIV, MOD, POWER
 """
 
-__version__ = "3.6.0"
-__updated__ = "2026-05-28"  # Generated C functions now named expr_N_<SanitizedUIName> instead of bare expr_N
+__version__ = "3.3.0"
+__updated__ = "2026-06-15"  # 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
 
 import json
 import os
@@ -28,42 +28,8 @@ from typing import Dict, List, Tuple, Optional, Set
 sys.path.insert(0, str(Path(__file__).parent / "server"))
 from expr_engine import Lexer, Parser
 
-# Shared print() formatting support (C printf statement generation).
-try:
-    import expr_print
-except ImportError:
-    expr_print = None
 
-
-import re as _re_sym
-
-
-def make_expr_symbol(index: int, name: str) -> str:
-    """
-    Build a valid, unique C identifier for an expression's generated function.
-
-    C function names can only contain [A-Za-z0-9_] and can't start with a
-    digit, so a UI name like "LOX Fill Controller" or "Fuel->LOX MR" can't be
-    used verbatim. We sanitize the name and prefix it with the index:
-
-        index=1,  name="LOX Fill Controller"  -> "expr_1_LOX_Fill_Controller"
-        index=14, name="Fuel->LOX MR"         -> "expr_14_Fuel_LOX_MR"
-        index=5,  name=""                      -> "expr_5"
-
-    The "expr_{index}_" prefix guarantees uniqueness (even for blank or
-    duplicate names) and keeps the functions sorted/greppable, while the
-    suffix makes expressions.cpp readable at a glance.
-    """
-    base = f"expr_{index}"
-    if not name:
-        return base
-    # Replace any run of non-identifier chars with a single underscore
-    cleaned = _re_sym.sub(r'[^A-Za-z0-9_]+', '_', str(name))
-    cleaned = cleaned.strip('_')
-    if not cleaned:
-        return base
-    return f"{base}_{cleaned}"
-
+_VFD_CMD_TOKENS = {"ENABLE","DISABLE","RUN","STOP","RPM","HZ","FREQ","DIR","DIRECTION","REVERSE","REV","FORWARD","FWD","FAULT_RESET","RESET"}  # semantic VFD write targets (routed to controller methods)
 
 class SignalMap:
     """Maps signal names to array indices"""
@@ -111,9 +77,8 @@ class SignalMap:
                     self.tc_map[ch['name']] = tc_index
                     tc_index += 1
 
-        # Serial scales — read from scales.json (separate file from config.json).
-        # Index matches the order in scales.json so it stays in sync with the
-        # values the SerialScaleManager places at scale_mgr.get_values()[i].
+        # Serial scales come from scales.json (separate from board config).
+        # Index i corresponds to the value SerialScaleManager.get_values()[i].
         if scales_cfg:
             for i, sc in enumerate(scales_cfg):
                 name = sc.get('name', f'Scale{i}')
@@ -182,19 +147,89 @@ class CPPCodeGenerator:
         self.staticvar_map: Dict[str, int] = {}  # name -> index
         self.buttonvar_counter = 0
         self.staticvar_counter = 0
+        # VFD register/param reads (vfd_in[]) and writes (vfd_out[]) -- approach B
+        self.vfd_reads = []        # ordered [{drive,token,kind}]; index = position
+        self.vfd_read_index = {}   # canonical key -> index
+        self.vfd_writes = []       # ordered [{drive,token,kind}]
+        self.vfd_write_index = {}
     
+    import re as _re
+    _VFD_RE = _re.compile(r'^(?:VFD:)?([A-Za-z0-9_\- ]+?)(\.[A-Za-z0-9_.]+|#0[xX][0-9A-Fa-f]+|#[0-9]+)$')
+    def _parse_vfd_inquote(self, value):
+        m = self._VFD_RE.match(str(value).strip())
+        if not m: return (None, None, None)
+        name = m.group(1).strip(); ref = m.group(2)
+        if ref.startswith('#'): return (name, ref, 'raw')
+        return (name, ref[1:], 'param')
+    def _vfd_read_idx(self, drive, token, kind):
+        key = kind + ':' + drive + '.' + token
+        if key not in self.vfd_read_index:
+            self.vfd_read_index[key] = len(self.vfd_reads)
+            self.vfd_reads.append({'drive': drive, 'token': token, 'kind': kind})
+        return self.vfd_read_index[key]
+    def _vfd_write_idx(self, drive, token, kind, cmd=None):
+        key = (cmd or kind) + ':' + drive + '.' + token
+        if key not in self.vfd_write_index:
+            self.vfd_write_index[key] = len(self.vfd_writes)
+            self.vfd_writes.append({'drive': drive, 'token': token, 'kind': kind, 'cmd': cmd})
+        return self.vfd_write_index[key]
+
     def indent(self) -> str:
         return "    " * self.indent_level
-    
-    def compile_expression(self, expr_text: str, expr_index: int,
-                           func_name: Optional[str] = None) -> Tuple[str, List[str], List[str]]:
-        """Compile one expression to C++ function.
 
-        func_name: the C symbol for the generated function. Defaults to
-        ``expr_{expr_index}`` when not supplied. Callers pass a name-embedding
-        symbol (e.g. ``expr_1_LOX_Fill_Controller``) for readability; it must
-        already be a valid C identifier (see make_expr_symbol()).
-        """
+    _KNOWN_SIG_TYPES = ('AI', 'AO', 'DO', 'TC', 'PID', 'MATH', 'LE', 'EXPR', 'SCALE')
+
+    def _is_real_signal(self, sigval: str) -> bool:
+        """True if a SIGNAL string is a real 'TYPE:name' reference (known type),
+        False if it is free text (a print message that merely happens to be
+        quoted, possibly containing a ':')."""
+        if ':' not in sigval:
+            return False
+        head = sigval.split(':', 1)[0].strip().upper()
+        return head in self._KNOWN_SIG_TYPES
+
+    @staticmethod
+    def _coerce_printf_format(fmt: str) -> str:
+        """All expression values are C doubles. Rewrite integer/char format
+        specifiers (%d %i %u %x %X %o %c) to %g so doubles print correctly and
+        MSVC does not error on type mismatch. Leaves %f/%g/%e and width/precision
+        forms like %3.1f intact. %% is preserved."""
+        import re as _re
+        def repl(m):
+            spec = m.group(0)
+            if spec == '%%':
+                return spec
+            conv = spec[-1]
+            if conv in 'diouxXc':
+                # keep any flags/width but drop precision that is invalid for %g?
+                # Simplest robust choice: replace the whole specifier with %g,
+                # preserving leading flags/width (not precision) is overkill;
+                # %g is fine for logging.
+                return '%g'
+            return spec
+        return _re.sub(r'%[-+ 0-9.#]*[diouxXeEfFgGcs%]', repl, fmt)
+
+    @staticmethod
+    def _c_string_escape(text: str) -> str:
+        """Escape a Python string for embedding as a C string literal."""
+        out = []
+        for ch in text:
+            if ch == '\\':
+                out.append('\\\\')
+            elif ch == '"':
+                out.append('\\"')
+            elif ch == '\n':
+                out.append('\\n')
+            elif ch == '\r':
+                out.append('\\r')
+            elif ch == '\t':
+                out.append('\\t')
+            else:
+                out.append(ch)
+        return ''.join(out)
+    
+    def compile_expression(self, expr_text: str, expr_index: int) -> Tuple[str, List[str], List[str]]:
+        """Compile one expression to C++ function"""
         self.local_vars = set()
         self.static_vars = set()
         self._static_assigns = set()  # Track which static vars are ASSIGNED in this expression
@@ -210,13 +245,13 @@ class CPPCodeGenerator:
         self._collect_variables(ast)
         
         # Generate function
-        if func_name is None:
-            func_name = f"expr_{expr_index}"
+        func_name = f"expr_{expr_index}"
         code = []
         code.append(f"double {func_name}(")
         code.append("    double* ai, double* ao, double* tc, double* do_state, double* pid,")
         code.append("    double* do_out, double* ao_out,")
         code.append("    double* scale,")
+        code.append("    double* vfd_in, double* vfd_out,")
         code.append("    double* static_vars, double* buttonVars,")
         code.append(f"    double* local_out_{expr_index}")
         code.append(") {")
@@ -388,16 +423,23 @@ class CPPCodeGenerator:
             return f"buttonVars[{index}]"
         
         elif node_type == 'SIGNAL':
-            # AI:name or DO:name etc
-            parts = node.value.split(':', 1)
-            if len(parts) == 2:
-                sig_type, sig_name = parts
-                idx = self.signal_map.get_signal_index(sig_type, sig_name)
-                array_name = sig_type.lower()
-                if sig_type == 'DO':
-                    array_name = 'do_state'
-                return f"{array_name}[{idx}]"
-            return "0.0"
+            if isinstance(node.value, str) and node.value[:4].upper() == 'VFD:':
+                drive, token, kind = self._parse_vfd_inquote(node.value)
+                if drive is not None:
+                    return f"vfd_in[{self._vfd_read_idx(drive, token, kind)}]"
+                return "0.0"
+            # AI:name / DO:name / Scale:name etc. A quoted string that is NOT a
+            # real "TYPE:name" reference (e.g. a print message) resolves to 0.0
+            # rather than being mis-parsed as a signal.
+            if not self._is_real_signal(node.value):
+                return "0.0"
+            sig_type, sig_name = node.value.split(':', 1)
+            sig_type_u = sig_type.strip().upper()
+            idx = self.signal_map.get_signal_index(sig_type_u, sig_name)
+            array_name = sig_type_u.lower()
+            if sig_type_u == 'DO':
+                array_name = 'do_state'
+            return f"{array_name}[{idx}]"
         
         # Assignments
         elif node_type == 'ASSIGN':
@@ -445,6 +487,25 @@ class CPPCodeGenerator:
             idx = self.signal_map.get_signal_index('AO', sig_name)
             expr = self.generate_node(node.children[0]) if node.children else "0.0"
             return f"result = ao_out[{idx}] = {expr};"
+
+        elif node_type == 'SIGNAL_PROP':
+            # "VFD:Name".RPM etc. -> live status read via vfd_in[]; others -> 0.0
+            ref, prop = node.value if isinstance(node.value, (tuple, list)) else (node.value, '')
+            if isinstance(ref, str) and ref[:4].upper() == 'VFD:':
+                drive = ref.split(':', 1)[1].strip()
+                return f"vfd_in[{self._vfd_read_idx(drive, str(prop).upper(), 'status')}]"
+            return "0.0"
+
+        elif node_type == 'VFD_ASSIGN':
+            # "VFD:Name.token" = expr -> queue via vfd_out[] (NaN sentinel = unwritten)
+            drive, token, kind = self._parse_vfd_inquote(node.value)
+            expr = self.generate_node(node.children[0]) if node.children else "0.0"
+            if drive is None:
+                return f"result = ({expr});"
+            cmd = token.upper() if (token and token.upper() in _VFD_CMD_TOKENS) else None
+            if cmd: kind = 'cmd'
+            idx = self._vfd_write_idx(drive, token, kind, cmd)
+            return f"result = vfd_out[{idx}] = {expr};"
         
         # Operators
         elif node_type == 'PLUS':
@@ -540,69 +601,96 @@ class CPPCodeGenerator:
         
         # Function calls
         elif node_type == 'CALL':
-            func_name = node.value
+            func_name = (node.value or "").lower()
             args = [self.generate_node(arg) for arg in node.children]
             args_str = ", ".join(args)
+
+            # min/max must be std:: and operate on doubles (bare min/max are
+            # undeclared in C++ here; passing ints/doubles also needs care).
+            if func_name == 'min':
+                if len(args) >= 2:
+                    expr = args[0]
+                    for a in args[1:]:
+                        expr = f"std::min((double)({expr}), (double)({a}))"
+                    return expr
+                return args[0] if args else "0.0"
+            if func_name == 'max':
+                if len(args) >= 2:
+                    expr = args[0]
+                    for a in args[1:]:
+                        expr = f"std::max((double)({expr}), (double)({a}))"
+                    return expr
+                return args[0] if args else "0.0"
+
+            # print(...) -> printf to the C runtime stdout (captured by the
+            # console fd-capture and forwarded to the browser console widget).
+            #
+            # Your expressions use printf-style logging:
+            #   print("Starting TEST")
+            #   print("Min LOX not reached: %f", L0)
+            #   print("Fuel(%d) -> %d", fuelOut, state)
+            # The FIRST argument is a message/format string (a string-literal
+            # SIGNAL node). If present, we emit a real printf with that format
+            # and the remaining numeric args. If there is no leading string, we
+            # fall back to the numeric expr_print helpers.
+            if func_name in ('print', 'printf'):
+                children = node.children
+                if children and children[0].type == 'SIGNAL' \
+                        and not self._is_real_signal(children[0].value):
+                    fmt = self._c_string_escape(self._coerce_printf_format(children[0].value))
+                    rest = [self.generate_node(c) for c in children[1:]]
+                    # printf returns an int; cast to double so print() is usable
+                    # inline and matches the expression engine's double type.
+                    if rest:
+                        joined = ", ".join(rest)
+                        return f'(double)printf("[EXPR] {fmt}\\n", {joined})'
+                    return f'(double)printf("[EXPR] {fmt}\\n")'
+                # No leading message string: numeric print.
+                if len(args) == 0:
+                    return "expr_print(0.0)"
+                if len(args) == 1:
+                    return f"expr_print({args[0]})"
+                inner = ", ".join(args)
+                return f"expr_print_multi({len(args)}, {inner})"
+
+            # Direct <cmath> functions pass through unchanged.
             return f"{func_name}({args_str})"
-
-        elif node_type == 'PRINT':
-            # print("fmt", arg1, ...) -> a C printf statement to stdout.
-            # node.value is the literal format string; node.children are the
-            # argument expressions. This returns a complete statement ending
-            # in ';' so generate_statements() leaves it alone (it won't try to
-            # wrap it as `result = ...`).
-            fmt = node.value
-            arg_exprs = [self.generate_node(arg) for arg in node.children]
-            if expr_print is None:
-                return "/* print() unavailable: expr_print not importable */"
-            if fmt is None:
-                # No format string — print args space-separated as %g.
-                fmt = ' '.join(['%g'] * len(arg_exprs))
-            try:
-                return expr_print.cpp_printf_call(fmt, arg_exprs)
-            except Exception as e:
-                # Bad format string — emit a comment instead of breaking the build
-                safe = str(e).replace('*/', '* /')
-                return f"/* print() format error: {safe} */"
-
+        
         else:
             return f"/* Unhandled: {node_type} */"
 
 
 def compile_all_expressions(expressions_file: str, config_file: str, output_dir: str = "compiled",
-                            scales_file: Optional[str] = None):
+                            scales_file: str = None, **_kwargs):
     """Compile all expressions to C++ DLL.
 
-    scales_file: optional path to scales.json (separate from config.json).
-    If None, the function looks for scales.json next to config_file. Missing
-    scales.json is fine — scale_map will simply be empty and Scale: refs
-    will warn about unknown signals.
+    scales_file: optional path to scales.json (separate from config.json). If
+    None, the function looks for scales.json next to config_file. Missing
+    scales.json is fine -- scale_map is empty and Scale: refs warn. Serial scale
+    values are read in compiled expressions via "Scale:Name" -> scale[index],
+    where index matches the order in scales.json (== SerialScaleManager order).
     """
+    import os as _os
     print("[CPP] ========== COMPILING EXPRESSIONS ==========")
     print(f"[CPP] expr_to_cpp.py VERSION: {__version__} (updated {__updated__})")
-    print(f"[CPP] DLL Signature: 16 parameters (NEW — adds scale[])")
+    print(f"[CPP] DLL Signature: 18 parameters (adds vfd_in[]/vfd_out[])")
     print("[CPP] ===============================================")
     
     # Load config
     with open(config_file) as f:
         config = json.load(f)
 
-    # Load scales config (separate file). If not provided, look for scales.json
-    # next to config.json — that's where server.py keeps it.
-    scales_cfg: List[Dict] = []
+    # Load scales config (separate file). If not provided, look next to config.
+    scales_cfg = []
     if scales_file is None:
-        candidate = Path(config_file).parent / "scales.json"
-        scales_file = str(candidate) if candidate.exists() else None
-    if scales_file:
-        try:
-            with open(scales_file) as f:
-                scales_data = json.load(f)
-            scales_cfg = scales_data.get('scales', []) or []
-        except Exception as e:
-            print(f"[CPP-WARN] Could not load scales from {scales_file}: {e}")
-            scales_cfg = []
-    
-    signal_map = SignalMap(config, scales_cfg=scales_cfg)
+        scales_file = _os.path.join(_os.path.dirname(config_file), "scales.json")
+    try:
+        with open(scales_file) as f:
+            scales_cfg = json.load(f).get("scales", [])
+    except (FileNotFoundError, ValueError):
+        scales_cfg = []
+
+    signal_map = SignalMap(config, scales_cfg)
     print(f"[CPP] Signal map: {len(signal_map.ai_map)} AI, {len(signal_map.do_map)} DO, "
           f"{len(signal_map.ao_map)} AO, {len(signal_map.tc_map)} TC, "
           f"{len(signal_map.scale_map)} Scale")
@@ -613,35 +701,23 @@ def compile_all_expressions(expressions_file: str, config_file: str, output_dir:
     
     expressions = expr_data.get('expressions', [])
     print(f"[CPP] Found {len(expressions)} expressions")
-    
+
+
     # Compile each
     generator = CPPCodeGenerator(signal_map)
     functions = []
     all_local_vars = {}
     all_static_vars = set()
-    expr_names = {}    # index -> UI name (for headers/metadata)
-    expr_symbols = {}  # index -> C function symbol (e.g. expr_1_LOX_Fill_Controller)
-
+    
     for i, expr in enumerate(expressions):
         expr_text = expr.get('expression', '')
         expr_name = expr.get('name', f'Expr{i}')
-        expr_names[i] = expr_name
-        symbol = make_expr_symbol(i, expr_name)
-        expr_symbols[i] = symbol
-
-        print(f"[CPP] Compiling #{i}: {expr_name}  ->  {symbol}()")
+        
+        print(f"[CPP] Compiling #{i}: {expr_name}")
         
         try:
-            func_code, local_vars, static_vars = generator.compile_expression(expr_text, i, func_name=symbol)
-            # Prepend a readable header naming the expression, so anyone reading
-            # the generated expressions.cpp can match a function to its UI name
-            # without counting entries in expressions.json.
-            header = (
-                f"// ============================================================\n"
-                f"// Expr #{i}: \"{expr_name}\"\n"
-                f"// ============================================================\n"
-            )
-            functions.append(header + func_code)
+            func_code, local_vars, static_vars = generator.compile_expression(expr_text, i)
+            functions.append(func_code)
             all_local_vars[i] = local_vars
             all_static_vars.update(static_vars)
             
@@ -657,7 +733,7 @@ def compile_all_expressions(expressions_file: str, config_file: str, output_dir:
             return False
     
     # Generate batch function
-    batch_func = generate_batch_function(len(expressions), all_local_vars, expr_names, expr_symbols)
+    batch_func = generate_batch_function(len(expressions), all_local_vars)
     
     # Write C++ file
     output_path = Path(output_dir)
@@ -672,6 +748,7 @@ def compile_all_expressions(expressions_file: str, config_file: str, output_dir:
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
+#include <cstdarg>
 
 #define EXPORT extern "C" __declspec(dllexport)
 
@@ -679,13 +756,34 @@ inline double clamp(double x, double lo, double hi) {
     return std::max(lo, std::min(hi, x));
 }
 
+// print(x) from expressions: write to the C runtime stdout (the server's
+// console fd-capture forwards this to the browser console widget) and return
+// the value so print() can be used inline in an expression.
+inline double expr_print(double x) {
+    printf("[EXPR] %g\\n", x);
+    fflush(stdout);
+    return x;
+}
+
+// print(a, b, ...): print each value, return the last.
+inline double expr_print_multi(int n, ...) {
+    va_list ap;
+    va_start(ap, n);
+    double last = 0.0;
+    for (int i = 0; i < n; ++i) {
+        last = va_arg(ap, double);
+        printf("[EXPR] %g%s", last, (i + 1 < n) ? " " : "\\n");
+    }
+    va_end(ap);
+    fflush(stdout);
+    return last;
+}
+
 """)
         
-        # Function prototypes (symbol embeds the UI name; comment shows raw name)
+        # Function prototypes
         for i in range(len(expressions)):
-            sym = expr_symbols.get(i, f"expr_{i}")
-            f.write(f"double {sym}(double*, double*, double*, double*, double*, double*, double*, double*, double*, double*);"
-                    f"  // {expr_names.get(i, f'Expr{i}')}\n")
+            f.write(f"double expr_{i}(double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*);\n")
         
         f.write("\n// Expression functions\n\n")
         
@@ -702,13 +800,13 @@ inline double clamp(double x, double lo, double hi) {
     # Write metadata with variable mappings
     metadata = {
         'num_expressions': len(expressions),
-        'expr_names': {str(k): v for k, v in expr_names.items()},      # index -> UI name
-        'expr_symbols': {str(k): v for k, v in expr_symbols.items()},  # index -> C function symbol
         'local_var_names': {str(k): v for k, v in all_local_vars.items()},  # FIXED: was 'local_vars'
         'static_vars': list(sorted(all_static_vars)),
         'buttonvar_map': generator.buttonvar_map,  # name -> index
         'staticvar_map': generator.staticvar_map,  # name -> index
-        'scale_map': signal_map.scale_map          # Scale name -> index (matches scales.json order)
+        'scale_map': signal_map.scale_map,         # Scale name -> index (scales.json order)
+        'vfd_read_refs': generator.vfd_reads,      # ordered [{drive,token,kind}] -> vfd_in[] index
+        'vfd_write_refs': generator.vfd_writes     # ordered [{drive,token,kind}] -> vfd_out[] index
     }
     
     with open(output_path / "expr_metadata.json", 'w') as f:
@@ -718,20 +816,15 @@ inline double clamp(double x, double lo, double hi) {
     return True
 
 
-def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]],
-                            expr_names: Optional[Dict[int, str]] = None,
-                            expr_symbols: Optional[Dict[int, str]] = None) -> str:
+def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]]) -> str:
     """Generate batch evaluation function with per-expression write tracking"""
-    if expr_names is None:
-        expr_names = {}
-    if expr_symbols is None:
-        expr_symbols = {}
     code = []
     code.append("// Batch evaluation with per-expression write tracking")
     code.append("EXPORT void evaluate_all_expressions(")
     code.append("    double* ai, double* ao, double* tc, double* do_state, double* pid,")
     code.append("    double* do_out, double* ao_out,")
     code.append("    double* scale,")
+    code.append("    double* vfd_in, double* vfd_out,")
     code.append("    double* static_vars, double* buttonVars,")
     code.append("    double* expr_results,")
     code.append("    double* local_vars_out,")
@@ -775,10 +868,10 @@ def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]],
     
     local_offset = 0
     for i in range(num_exprs):
-        code.append(f"    // Expression {i}: {expr_names.get(i, f'Expr{i}')}")
+        code.append(f"    // Expression {i}")
         code.append(f"    for (int j = 0; j < 64; j++) {{ temp_do[j] = -1.0; }}")  # -1 = not written yet
         code.append(f"    for (int j = 0; j < 16; j++) {{ temp_ao[j] = -999999.0; }}")  # Sentinel for not written
-        code.append(f"    expr_results[{i}] = {expr_symbols.get(i, f'expr_{i}')}(ai, ao, tc, do_state, pid, temp_do, temp_ao, scale, static_vars, buttonVars, local_vars_out + {local_offset});")
+        code.append(f"    expr_results[{i}] = expr_{i}(ai, ao, tc, do_state, pid, temp_do, temp_ao, scale, vfd_in, vfd_out, static_vars, buttonVars, local_vars_out + {local_offset});")
         
         # Track offset for next expression
         if local_vars.get(i):

@@ -20,8 +20,8 @@ CHANGELOG:
   • Hardware write support (DO, AO)
   • Static and global variable support
 """
-__version__ = "3.4.0"
-__updated__ = "2026-05-28"  # Removed verbose per-eval CPP-DEBUG locals dump and per-expr metadata listing; trimmed to summaries; fixed stale 15-param banner
+__version__ = "3.3.0"
+__updated__ = "2026-06-15"  # 3.3.0: added scale[] (16-arg DLL) -- self.scale buffer, scale in argtypes + call, scale_vals on evaluate()
 
 import ctypes
 import json
@@ -49,7 +49,11 @@ class CPPExpressionBackend:
         self.pid = np.zeros(50, dtype=np.float64)
         self.do_out = np.zeros(64, dtype=np.float64)
         self.ao_out = np.zeros(16, dtype=np.float64)
-        self.scale = np.zeros(16, dtype=np.float64)  # Serial scales (read-only inputs from SerialScaleManager)
+        self.scale = np.zeros(16, dtype=np.float64)  # Serial scales (read-only inputs)
+        self.vfd_in = np.zeros(64, dtype=np.float64)             # VFD reads (server-filled)
+        self.vfd_out = np.full(64, np.nan, dtype=np.float64)     # VFD writes (NaN = not written)
+        self.vfd_read_refs = []
+        self.vfd_write_refs = []
         self.static_vars = np.zeros(100, dtype=np.float64)
         self.button_vars = np.zeros(100, dtype=np.float64)
         self.expr_results = np.zeros(50, dtype=np.float64)
@@ -79,6 +83,8 @@ class CPPExpressionBackend:
             self.local_var_names = metadata.get('local_var_names', {})
             self.staticvar_map = metadata.get('staticvar_map', {})
             self.buttonvar_map = metadata.get('buttonvar_map', {})
+            self.vfd_read_refs = metadata.get('vfd_read_refs', [])    # -> vfd_in[] order
+            self.vfd_write_refs = metadata.get('vfd_write_refs', [])  # -> vfd_out[] order
             
             # Initialize static_vars from metadata (default values)
             if 'static_var_defaults' in metadata:
@@ -93,10 +99,11 @@ class CPPExpressionBackend:
             
             print(f"[CPP-EXPR] Loaded metadata: {self.num_expressions} expressions")
             if self.local_var_names:
-                _exprs_with_locals = sum(1 for v in self.local_var_names.values() if v)
-                print(f"[CPP-EXPR] LocalVars: {_exprs_with_locals} expressions with locals")
-            print(f"[CPP-EXPR] StaticVars: {len(self.staticvar_map)} variables")
-            print(f"[CPP-EXPR] ButtonVars: {len(self.buttonvar_map)} variables")
+                print(f"[CPP-EXPR] LocalVars: {len(self.local_var_names)} expressions with locals")
+                for expr_idx, var_names in self.local_var_names.items():
+                    print(f"[CPP-EXPR]   Expr {expr_idx}: {var_names}")
+            print(f"[CPP-EXPR] StaticVars: {len(self.staticvar_map)} variables: {list(self.staticvar_map.keys())}")
+            print(f"[CPP-EXPR] ButtonVars: {len(self.buttonvar_map)} variables: {list(self.buttonvar_map.keys())}")
             
         except Exception as e:
             print(f"[CPP-EXPR] Error loading metadata: {e}")
@@ -107,7 +114,7 @@ class CPPExpressionBackend:
             raise FileNotFoundError(f"DLL not found: {self.dll_path}")
         
         print(f"[CPP-EXPR] cpp_expr_backend.py VERSION: {__version__} (updated {__updated__})")
-        print(f"[CPP-EXPR] DLL Signature: 16 parameters (ai/ao/tc/do/pid/do_out/ao_out/scale/static/button + outputs)")
+        print(f"[CPP-EXPR] DLL Signature: 16 parameters (NEW -- adds scale[])")
         
         self.dll = ctypes.CDLL(str(self.dll_path))
         
@@ -122,7 +129,9 @@ class CPPExpressionBackend:
             ctypes.POINTER(ctypes.c_double),  # pid
             ctypes.POINTER(ctypes.c_double),  # do_out
             ctypes.POINTER(ctypes.c_double),  # ao_out
-            ctypes.POINTER(ctypes.c_double),  # scale  (NEW in v3.3.0 — Scale: signal type)
+            ctypes.POINTER(ctypes.c_double),  # scale
+            ctypes.POINTER(ctypes.c_double),  # vfd_in
+            ctypes.POINTER(ctypes.c_double),  # vfd_out
             ctypes.POINTER(ctypes.c_double),  # static_vars
             ctypes.POINTER(ctypes.c_double),  # button_vars
             ctypes.POINTER(ctypes.c_double),  # expr_results
@@ -163,15 +172,14 @@ class CPPExpressionBackend:
         do_vals: List[float],
         pid_vals: List[float],
         button_vars: Optional[Dict[str, float]] = None,
-        scale_vals: Optional[List[float]] = None
+        scale_vals: Optional[List[float]] = None,
+        vfd_in_vals: Optional[List[float]] = None
     ) -> Dict:
         """
         Evaluate all expressions in one shot
         
         Args:
             button_vars: Dict of {varName: value} for button variables
-            scale_vals: Optional list of serial scale values (read-only inputs).
-                        Pass scale_mgr.get_values() from server.
         
         Returns:
             {
@@ -196,15 +204,21 @@ class CPPExpressionBackend:
         self.tc[:len(tc_vals)] = tc_vals
         self.do_state[:len(do_vals)] = do_vals
         self.pid[:len(pid_vals)] = pid_vals
-
-        # Scale values — copy in if provided, otherwise leave the array zeroed
-        # (zeroed scales are a safe default; expressions referencing missing
-        # scales will get 0.0, matching the Python evaluator's behavior).
+        
+        # Copy scale values into the scale buffer (zeroed default is safe;
+        # missing scales read 0.0, matching the Python evaluator).
         self.scale.fill(0.0)
         if scale_vals:
             n = min(len(scale_vals), len(self.scale))
             self.scale[:n] = scale_vals[:n]
-        
+
+        # VFD reads in (server-filled, from snapshot); writes out (NaN sentinel)
+        self.vfd_in.fill(0.0)
+        if vfd_in_vals:
+            n = min(len(vfd_in_vals), len(self.vfd_in))
+            self.vfd_in[:n] = vfd_in_vals[:n]
+        self.vfd_out.fill(np.nan)
+
         # Update button_vars from dict
         # CRITICAL: Reset ALL button vars to 0 first, then update from dict
         # This ensures released buttons (not in dict) return to 0
@@ -233,6 +247,8 @@ class CPPExpressionBackend:
             self.do_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.ao_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.scale.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            self.vfd_in.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            self.vfd_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.static_vars.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.button_vars.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.expr_results.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
@@ -251,6 +267,12 @@ class CPPExpressionBackend:
             'hw_writes_per_expr': [],
             'local_vars_per_expr': {}
         }
+
+        # VFD writes: non-NaN entries of vfd_out (approach B). Server drains -> request_write.
+        results['vfd_writes'] = []
+        for i, ref in enumerate(getattr(self, 'vfd_write_refs', [])):
+            if i < len(self.vfd_out) and not np.isnan(self.vfd_out[i]):
+                results['vfd_writes'].append({**ref, 'value': float(self.vfd_out[i])})
         
         # Collect global DO writes (check was_written flag, not value!)
         for i in range(64):
@@ -303,7 +325,16 @@ class CPPExpressionBackend:
                     expr_locals[var_name] = self.local_vars_out[local_offset + i]
                 results['local_vars_per_expr'][expr_idx] = expr_locals
                 local_offset += len(var_names)
-
+        
+        # Debug first call
+        if not hasattr(self, '_debug_locals_shown'):
+            self._debug_locals_shown = True
+            print(f"[CPP-DEBUG] local_var_names keys: {list(self.local_var_names.keys())}")
+            print(f"[CPP-DEBUG] local_vars_per_expr keys: {list(results['local_vars_per_expr'].keys())}")
+            if results['local_vars_per_expr']:
+                for idx, locals_dict in results['local_vars_per_expr'].items():
+                    print(f"[CPP-DEBUG] Expr {idx} locals: {locals_dict}")
+        
         return results
     
     def evaluate_pids(

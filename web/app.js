@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.44";  // 2026-06-12: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
+const UI_VERSION = "2.1.48";  // startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -2138,6 +2138,7 @@ function feedTick(msg){
   if (msg.math) state.math = msg.math;
   if (msg.expr) state.expr = msg.expr;
   if (msg.scales) state.scales = msg.scales;
+  if (msg.vfd) state.vfd = msg.vfd;
   if (msg.button_vars) state.buttonVars = {...(state.buttonVars||{}), ...msg.button_vars};
   if (msg.t != null) state.lastT = msg.t;  // for checklist _currentT() in live mode
   if (msg.static_vars && Object.keys(msg.static_vars).length > 0) {
@@ -2305,6 +2306,20 @@ document.addEventListener('DOMContentLoaded', () => {
   connect();
   hookLogButtons();
   hookScriptButtons();
+  // One-time VFD comms check at startup -> warn if a configured drive didn't answer.
+  setTimeout(() => {
+    fetch('/api/vfd/health').then(r => r.json()).then(h => {
+      const bad = (h.drives || []).filter(d => !d.comms_ok);
+      if (bad.length) {
+        const lines = bad.map(d =>
+          `\u2022 ${d.name} (${d.drive || '?'}) on ${d.port || '?'} @ ${d.baud || '?'} baud: ${d.error || 'no reply'}`
+        ).join('\n');
+        alert('\u26A0 VFD communication problem at startup\n\n' + lines +
+          '\n\nCheck the COM port, wiring, baud rate, and node address. The drive ' +
+          'will not respond to commands or report status until this is resolved.');
+      }
+    }).catch(() => {});
+  }, 1500);
 });
 
 /**
@@ -2413,6 +2428,7 @@ function wireUI(){
   $('#editConfig')?.addEventListener('click', ()=>openConfigForm());
   $('#editPID')?.addEventListener('click', ()=>openPidForm());
   $('#editMotor')?.addEventListener('click', ()=>openMotorEditor());
+  $('#editVFD')?.addEventListener('click', ()=>openVfdEditor());
   $('#editScales')?.addEventListener('click', ()=>openScalesEditor());
   $('#editLE')?.addEventListener('click', ()=>openLEEditor());  // Logic Elements
   $('#editMath')?.addEventListener('click', ()=>openMathEditor());  // Math Operators
@@ -3724,6 +3740,7 @@ function defaultsFor(type){
     case 'pidpanel': return { title:'PID', loopIndex:0, showControls:true };
     case 'aoslider': return { title:'AO', aoIndex:0, min:0, max:10, step:0.0025, live:true };
     case 'motor':    return { title:'Motor', motorIndex:0, showControls:true };
+    case 'vfd':      return { title:'VFD', vfdName:'', showControls:true, rpmStep:50 };
     case 'mathop':   return { title:'Math', mathIndex:0, showInputs:true };
     case 'expr':     return { title:'Expression', exprIndex:0, showSource:true, showOutput:true };
     case 'staticvar': return { title:'Static Var', varName:'', decimalPlaces:3 };
@@ -3795,6 +3812,51 @@ function defaultsFor(type){
     };
   }
   return {};
+}
+
+/* Build a COM-port <select> plus a 🔄 refresh button that re-queries the OS
+ * port list live (no page reload). onPick(value) fires on selection; the
+ * control keeps the current value selected across refreshes when still
+ * present. Used by the VFD and Motor editors so freshly-plugged adapters
+ * appear without an F5. */
+async function fetchSerialPorts() {
+  try {
+    const d = await (await fetch('/api/motors/ports', { cache: 'no-store' })).json();
+    return d.ports || [];
+  } catch (e) {
+    console.warn('port list fetch failed:', e);
+    return [];
+  }
+}
+
+function portSelectControl(currentValue, onPick) {
+  const sel = el('select', {});
+  const wrap = el('span', { style: 'display:inline-flex;gap:4px;align-items:center' });
+  const fill = (ports) => {
+    const prev = sel.value || currentValue;
+    sel.innerHTML = '';
+    const list = ports.length
+      ? ports.map(p => ({ v: p.port, t: `${p.port} - ${p.description}` }))
+      : Array.from({ length: 20 }, (_, i) => ({ v: `COM${i + 1}`, t: `COM${i + 1}` }));
+    list.forEach(o => sel.append(el('option', { value: o.v }, o.t)));
+    // keep prior selection if it still exists, else first
+    if (prev && list.some(o => o.v === prev)) sel.value = prev;
+    else if (list.length) { sel.value = list[0].v; onPick && onPick(sel.value); }
+  };
+  sel.onchange = () => onPick && onPick(sel.value);
+  const refresh = el('button', {
+    className: 'btn', title: 'Refresh COM port list',
+    style: 'padding:2px 6px',
+    onclick: async () => {
+      refresh.textContent = '…';
+      fill(await fetchSerialPorts());
+      refresh.textContent = '🔄';
+    }
+  }, '🔄');
+  wrap.append(sel, refresh);
+  // initial fill from a fresh query
+  fetchSerialPorts().then(fill);
+  return { wrap, sel, fill };
 }
 
 function tableForm(pairs) {
@@ -4763,6 +4825,42 @@ function openWidgetSettings(w) {
     })();
   }
 
+  if (w.type === 'vfd') {
+    // Populate a pulldown of configured VFD instance names (re-fetched each
+    // time settings opens, so newly-added instances show up immediately).
+    (async () => {
+      let instances = [];
+      try {
+        const d = await (await fetch('/api/vfd/instances')).json();
+        instances = d.instances || [];
+      } catch (e) { /* fall back to a free-text field below */ }
+
+      if (instances.length) {
+        const sel = el('select', {});
+        instances.forEach(inst => {
+          const inc = inst.include ? '✓' : '✗';
+          sel.append(el('option', {value: inst.name}, `${inst.name} (${inc})`));
+        });
+        sel.value = w.opts.vfdName || (instances[0] && instances[0].name) || '';
+        sel.onchange = () => { w.opts.vfdName = sel.value; renderPage(); };
+        if (!w.opts.vfdName && instances[0]) w.opts.vfdName = instances[0].name;
+        root.append(tableForm([
+          ['VFD instance', sel],
+          ['Show controls', inputChk(w.opts, 'showControls')],
+          ['RPM step', inputNum(w.opts, 'rpmStep', 10)],
+        ]));
+      } else {
+        root.append(tableForm([
+          ['VFD name', (()=>{ const i=el('input',{type:'text',value:w.opts.vfdName||''}); i.oninput=()=>w.opts.vfdName=i.value; return i; })()],
+          ['Show controls', inputChk(w.opts, 'showControls')],
+          ['RPM step', inputNum(w.opts, 'rpmStep', 10)],
+        ]));
+        root.append(el('p',{style:'font-size:12px;color:#e6a23c'},
+          'No VFD instances defined yet — add one in the VFDs editor.'));
+      }
+    })();
+  }
+
   if (w.type === 'le') {
     // Async load LEs for dropdown
     (async () => {
@@ -5610,6 +5708,7 @@ function renderWidget(w){
     case 'pidpanel': mountPIDPanel(w,body); break;
     case 'aoslider': mountAOSlider(w,body); break;
     case 'motor':    mountMotorController(w,body); break;
+    case 'vfd':      mountVFDWidget(w,body); break;
     case 'le':       mountLEWidget(w,body); break;
     case 'mathop':   mountMathOpWidget(w,body); break;
     case 'expr':     mountExprWidget(w,body); break;
@@ -7897,6 +7996,96 @@ function mountMotorController(w, body){
 }
 
 /* ------------------------ LE Widget ---------------------------- */
+
+/* ------------------------------- VFD widget -----------------------------
+ * Live status + manual control for one configured VFD instance (selected by
+ * name in widget settings). Status arrives in the tick frame under
+ * state.vfd[name]; commands go through the REST endpoints
+ * /api/vfd/{name}/{enable,disable,rpm,direction,fault_reset}. The instance
+ * itself (drive, motor, port) is configured in the VFDs editor; this widget
+ * just drives and displays it. */
+function mountVFDWidget(w, body){
+  const name = w.opts.vfdName || '';
+  const wrap = el('div', {className:'vfd-wrap', style:'display:flex;flex-direction:column;gap:6px;font-size:12px'});
+
+  // live readout grid
+  const grid = el('div', {style:'display:grid;grid-template-columns:auto auto;gap:2px 10px'});
+  const cells = {};
+  const addRow = (label, key) => {
+    grid.append(el('div',{style:'color:var(--muted)'}, label));
+    const v = el('div',{style:'font-variant-numeric:tabular-nums'}, '—');
+    cells[key] = v; grid.append(v);
+  };
+  addRow('RPM', 'rpm');
+  addRow('Output Hz', 'output_hz');
+  addRow('Current (A)', 'output_current_a');
+  addRow('Voltage (V)', 'output_voltage_v');
+  addRow('Bus (V)', 'bus_voltage_v');
+  addRow('Power (W)', 'output_power_w');
+  addRow('Direction', 'direction');
+  addRow('State', '_state');
+  addRow('Fault', 'fault_text');
+  wrap.append(grid);
+
+  let controlsBuilt = false, rpmInput = null;
+  if (w.opts.showControls && !IS_POPOUT){
+    const ctr = el('div', {style:'display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:4px'});
+    rpmInput = el('input', {type:'number', step:String(w.opts.rpmStep||50), value:'0',
+      style:'width:72px', title:'Target RPM'});
+    const post = (path, bodyObj) => fetch(`/api/vfd/${encodeURIComponent(name)}/${path}`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(bodyObj||{})
+      }).then(r=>r.json()).then(j=>{ if(!j.ok) alert(`VFD ${path} failed: ${j.error||'?'}`); })
+        .catch(e=>alert(`VFD ${path} failed: ${e.message}`));
+
+    const setRpmBtn = el('button',{className:'btn',onclick:()=>post('rpm',{rpm:parseFloat(rpmInput.value)||0})}, 'Set RPM');
+    const fwdBtn = el('button',{className:'btn',title:'Run forward',onclick:()=>post('enable',{reverse:false})}, '▶ Fwd');
+    const revBtn = el('button',{className:'btn',title:'Run reverse',onclick:()=>post('enable',{reverse:true})}, '◀ Rev');
+    const stopBtn = el('button',{className:'btn',title:'Stop',style:'background:#7a2233',onclick:()=>post('disable')}, '■ Stop');
+    const rstBtn = el('button',{className:'btn',title:'Fault reset',onclick:()=>post('fault_reset')}, '⟲ Reset');
+    ctr.append(rpmInput, setRpmBtn, fwdBtn, revBtn, stopBtn, rstBtn);
+    wrap.append(ctr);
+    controlsBuilt = true;
+  }
+  if (!name){
+    wrap.append(el('div',{style:'color:#e6a23c;margin-top:4px'},
+      '⚠ No VFD selected — open Settings and choose an instance.'));
+  }
+
+  body.append(wrap);
+
+  // live update hook: called every tick via onTick -> updateVFDWidgets
+  w._updateVfd = () => {
+    const st = (state.vfd || {})[name];
+    if (!st){ for (const k in cells) cells[k].textContent = '—'; return; }
+    const fmt = (v) => (v===null||v===undefined) ? '—' : v;
+    cells.rpm.textContent              = fmt(st.rpm);
+    cells.output_hz.textContent        = fmt(st.output_hz);
+    cells.output_current_a.textContent = fmt(st.output_current_a);
+    cells.output_voltage_v.textContent = fmt(st.output_voltage_v);
+    cells.bus_voltage_v.textContent    = fmt(st.bus_voltage_v);
+    cells.output_power_w.textContent   = fmt(st.output_power_w);
+    cells.direction.textContent        = fmt(st.direction);
+    cells._state.textContent           = st.enabled ? 'RUNNING' : 'stopped';
+    cells._state.style.color           = st.enabled ? '#9ece6a' : 'var(--muted)';
+    cells.fault_text.textContent       = fmt(st.fault_text);
+    cells.fault_text.style.color       = st.faulted ? '#f7768e' : 'var(--muted)';
+  };
+  w._updateVfd();
+}
+
+/* Called from onTick so every VFD widget refreshes from the latest frame. */
+function updateVFDWidgets(){
+  try {
+    document.querySelectorAll('.widget').forEach(node=>{
+      const id = (node.id||'').slice(2);
+      const pg = state.pages[activePageIndex];
+      const w = pg && (pg.widgets||[]).find(x=>x.id===id);
+      if (w && w.type==='vfd' && typeof w._updateVfd==='function') w._updateVfd();
+    });
+  } catch(e){}
+}
+
 function mountLEWidget(w, body){
   body.style.padding = '4px';
   body.style.fontSize = '10px';
@@ -9857,6 +10046,7 @@ function onTick(){
     // Live mode - update everything normally
     updateChartBuffers();
     updateDOButtons();
+    updateVFDWidgets();
   }
 }
 
@@ -11062,9 +11252,18 @@ async function openMotorEditor(){
 
   const saveAs = createSaveAsButton(() => ({motors}), 'motor.json');
   
+  // Live COM-port refresh: re-query the OS and rebuild the form so a
+  // freshly-plugged adapter shows up without an F5.
+  const refreshPortsBtn = el('button', { className: 'btn', onclick: async () => {
+    refreshPortsBtn.textContent = 'Refreshing…';
+    ports = await fetchSerialPorts();
+    buildForm();
+    refreshPortsBtn.textContent = '🔄 Refresh Ports';
+  }}, '🔄 Refresh Ports');
+
   root.append(
     title,
-    el('div', {style: 'display:flex;gap:8px;margin-bottom:12px'}, [loadBtn, addBtn]),
+    el('div', {style: 'display:flex;gap:8px;margin-bottom:12px'}, [loadBtn, addBtn, refreshPortsBtn]),
     el('div', {style: 'margin:12px 0'}, [
       el('p', {}, 'Configure Rattmotor YPMC-750W servo controllers:'),
       el('p', {style: 'font-size:12px;color:var(--muted)'}, 
@@ -11073,6 +11272,231 @@ async function openMotorEditor(){
     el('div', {style: 'overflow:auto;max-height:60vh'}, formContainer),
     el('div', {style:'display:flex;gap:8px;margin-top:8px'}, [save, saveAs])
   );
+  showModal(root, ()=>{ renderPage(); });
+}
+
+/* -------------------------- VFD config editor ---------------------------
+ * Three JSON libraries drive this:
+ *   /api/vfd/drives    -- drive MODELS (protocol + serial defaults)
+ *   /api/vfd/motors    -- motor nameplates (RPM<->Hz)
+ *   /api/vfd/instances -- live units, each binding a drive + motor + COM port
+ * The editor has three tabs. Instances use pulldowns populated from the
+ * drive and motor libraries, so adding a motor or drive in its tab makes it
+ * selectable for every instance. Saving instances rebuilds the controllers
+ * on the server and reports which connected. */
+async function openVfdEditor(){
+  const [drivesData, motorsData, instData] = await Promise.all([
+    fetch('/api/vfd/drives').then(r=>r.json()).catch(()=>({drives:[]})),
+    fetch('/api/vfd/motors').then(r=>r.json()).catch(()=>({motors:[]})),
+    fetch('/api/vfd/instances').then(r=>r.json()).catch(()=>({instances:[]})),
+  ]);
+  let ports = [];
+  try { ports = (await (await fetch('/api/motors/ports')).json()).ports || []; }
+  catch(e){ console.warn('VFD: port list failed', e); }
+
+  const drives    = drivesData.drives    || [];
+  const motors    = motorsData.motors    || [];
+  const instances = instData.instances   || [];
+
+  const root = el('div', {});
+  root.append(el('h2', {}, 'VFD Drives & Motors'));
+
+  // ---- simple tab strip ----
+  const tabBar = el('div', {style:'display:flex;gap:6px;margin-bottom:10px'});
+  const panes  = el('div', {});
+  const tabs = [
+    ['Instances', () => instancesPane()],
+    ['Drives',    () => drivesPane()],
+    ['Motors',    () => motorsPane()],
+  ];
+  let activeTab = 0;
+  function renderTabs(){
+    tabBar.innerHTML = '';
+    tabs.forEach(([label], i) => {
+      tabBar.append(el('button', {
+        className: 'btn' + (i===activeTab ? ' active' : ''),
+        onclick: () => { activeTab = i; draw(); }
+      }, label));
+    });
+  }
+  function draw(){
+    renderTabs();
+    panes.innerHTML = '';
+    panes.append(tabs[activeTab][1]());
+  }
+
+  const portOptions = (sel) => {
+    const s = el('select', {});
+    const list = ports.length ? ports.map(p=>p.port) :
+      Array.from({length:20}, (_,i)=>`COM${i+1}`);
+    list.forEach(p => s.append(el('option', {value:p}, p)));
+    if (ports.length) {
+      s.innerHTML = '';
+      ports.forEach(p => s.append(el('option', {value:p.port}, `${p.port} - ${p.description}`)));
+    }
+    s.value = sel || (list[0] || 'COM1');
+    return s;
+  };
+
+  // ---------- Instances tab ----------
+  function instancesPane(){
+    const wrap = el('div', {});
+    wrap.append(el('p', {style:'font-size:12px;color:var(--muted)'},
+      'Each instance binds a drive + a motor + a COM port. Include = build it at startup. Saving rebuilds and reconnects.'));
+    if (!drives.length)
+      wrap.append(el('p', {style:'color:#e6a23c'}, '⚠ No drives defined yet — add one in the Drives tab first.'));
+
+    const table = el('table', {className:'form'});
+    table.append(el('thead', {}, el('tr', {}, [
+      'Name','Include','Drive','Motor','Port','Baud','Parity','Stop','Addr','Timeout','Watchdog s','Auto-setup',''
+    ].map(h=>el('th',{},h)))));
+    const tb = el('tbody');
+
+    function rowFor(inst){
+      const driveSel = selectEnum(drives.map(d=>d.key), inst.drive_key || (drives[0]&&drives[0].key) || '', v=>{
+        inst.drive_key = v;
+        const d = drives.find(x=>x.key===v);
+        if (d) { // adopt the drive's serial defaults
+          inst.baud=d.default_baud; inst.parity=d.default_parity;
+          inst.stopbits=d.default_stopbits; inst.address=d.default_address;
+          draw();
+        }
+      });
+      // show labels in the dropdown
+      Array.from(driveSel.options).forEach(o=>{
+        const d = drives.find(x=>x.key===o.value); if (d) o.textContent = d.label || d.key;
+      });
+      const motorSel = selectEnum(motors.map(m=>m.key), inst.motor_key || (motors[0]&&motors[0].key) || '', v=>inst.motor_key=v);
+      Array.from(motorSel.options).forEach(o=>{
+        const m = motors.find(x=>x.key===o.value); if (m) o.textContent = m.label || m.key;
+      });
+      const psc = portSelectControl(inst.port, v=>inst.port=v);
+      const parSel = selectEnum(['N','E','O'], inst.parity||'N', v=>inst.parity=v);
+      const stopSel = selectEnum(['1','2'], String(inst.stopbits||1), v=>inst.stopbits=parseInt(v));
+      const baudSel = selectEnum(['9600','19200','38400','57600','115200'],
+                                 String(inst.baud||9600), v=>inst.baud=parseInt(v));
+      const baudApply = el('button', {className:'btn',
+        title:'Write this comm speed to the drive (it must be IDLE), then reopen the port to match. Save a new instance first.',
+        onclick: async()=>{
+          if(!confirm(`Change ${inst.name} comm speed to ${inst.baud} baud?\n\nThe drive must be IDLE/stopped. This writes the drive's baud parameter at its current speed, then reopens the port at ${inst.baud}.`)) return;
+          try{
+            const r = await (await fetch(`/api/vfd/${encodeURIComponent(inst.name)}/baud`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({baud:inst.baud})})).json();
+            if(r.ok) alert(`Baud ${r.detail||('-> '+inst.baud)}${r.verified?' (verified)':''}.`);
+            else alert('Baud change failed: '+(r.error||'unknown'));
+          }catch(e){ alert('Baud change failed: '+e.message); }
+        }}, '→drive');
+      const baudCell = el('div',{style:'display:flex;gap:4px;align-items:center'},[baudSel, baudApply]);
+      const del = el('button', {className:'btn', onclick:()=>{
+        const i = instances.indexOf(inst); if(i>=0){ instances.splice(i,1); draw(); }
+      }}, '✕');
+      return el('tr', {}, [
+        el('td',{},txt(inst,'name')),
+        el('td',{},chk(inst,'include')),
+        el('td',{},driveSel),
+        el('td',{},motorSel),
+        el('td',{},psc.wrap),
+        el('td',{},baudCell),
+        el('td',{},parSel),
+        el('td',{},stopSel),
+        el('td',{},num(inst,'address',1)),
+        el('td',{},num(inst,'timeout',0.1)),
+        el('td',{},num(inst,'watchdog_s',0.1)),
+        el('td',{},chk(inst,'auto_setup')),
+        el('td',{},del),
+      ]);
+    }
+    instances.forEach(inst => tb.append(rowFor(inst)));
+    table.append(tb);
+    wrap.append(el('div',{style:'overflow:auto;max-height:50vh'}, table));
+
+    const addBtn = el('button', {className:'btn', onclick:()=>{
+      const d0 = drives[0] || {};
+      instances.push({ name:`VFD ${instances.length+1}`, include:false,
+        drive_key:d0.key||'', motor_key:(motors[0]&&motors[0].key)||'',
+        port:(ports[0]&&ports[0].port)||'COM1',
+        baud:d0.default_baud||9600, parity:d0.default_parity||'N',
+        stopbits:d0.default_stopbits||2, address:d0.default_address||1,
+        timeout:0.5, watchdog_s:0, auto_setup:false });
+      draw();
+    }}, '+ Add instance');
+    wrap.append(el('div',{style:'margin-top:8px'}, addBtn));
+    return wrap;
+  }
+
+  // ---------- Drives tab ----------
+  function drivesPane(){
+    const wrap = el('div', {});
+    wrap.append(el('p', {style:'font-size:12px;color:var(--muted)'},
+      "Drive MODELS. 'profile' selects the built-in protocol map (gk3000 | h100). Serial fields are the model's defaults."));
+    const table = el('table', {className:'form'});
+    table.append(el('thead', {}, el('tr', {}, ['Key','Label','Profile','Baud','Parity','Stop','Addr','Notes',''].map(h=>el('th',{},h)))));
+    const tb = el('tbody');
+    drives.forEach(d=>{
+      const prof = selectEnum(['gk3000','h100'], d.profile||'gk3000', v=>d.profile=v);
+      const par  = selectEnum(['N','E','O'], d.default_parity||'N', v=>d.default_parity=v);
+      const stop = selectEnum(['1','2'], String(d.default_stopbits||2), v=>d.default_stopbits=parseInt(v));
+      const del  = el('button',{className:'btn',onclick:()=>{const i=drives.indexOf(d);if(i>=0){drives.splice(i,1);draw();}}},'✕');
+      tb.append(el('tr',{},[
+        el('td',{},txt(d,'key')), el('td',{},txt(d,'label')), el('td',{},prof),
+        el('td',{},num(d,'default_baud',1)), el('td',{},par), el('td',{},stop),
+        el('td',{},num(d,'default_address',1)), el('td',{},txt(d,'notes')), el('td',{},del),
+      ]));
+    });
+    table.append(tb);
+    wrap.append(el('div',{style:'overflow:auto;max-height:50vh'}, table));
+    wrap.append(el('div',{style:'margin-top:8px'}, el('button',{className:'btn',onclick:()=>{
+      drives.push({key:`drive${drives.length+1}`,label:'New drive',profile:'gk3000',
+        default_baud:9600,default_parity:'N',default_stopbits:2,default_address:1,notes:'',setup_params:[]});
+      draw();
+    }},'+ Add drive')));
+    return wrap;
+  }
+
+  // ---------- Motors tab ----------
+  function motorsPane(){
+    const wrap = el('div', {});
+    wrap.append(el('p', {style:'font-size:12px;color:var(--muted)'},
+      'Motor nameplates. RPM↔Hz uses rated RPM/Hz when both set (includes slip), else pole count.'));
+    const table = el('table', {className:'form'});
+    table.append(el('thead', {}, el('tr', {}, ['Key','Label','Poles','Rated Hz','Rated RPM','Rated A','Max Hz','Min Hz','Accel s','Decel s',''].map(h=>el('th',{},h)))));
+    const tb = el('tbody');
+    motors.forEach(m=>{
+      const del = el('button',{className:'btn',onclick:()=>{const i=motors.indexOf(m);if(i>=0){motors.splice(i,1);draw();}}},'✕');
+      tb.append(el('tr',{},[
+        el('td',{},txt(m,'key')), el('td',{},txt(m,'label')),
+        el('td',{},num(m,'poles',1)), el('td',{},num(m,'rated_hz',0.1)),
+        el('td',{},num(m,'rated_rpm',1)), el('td',{},num(m,'rated_current_a',0.1)),
+        el('td',{},num(m,'max_hz',0.1)), el('td',{},num(m,'min_hz',0.1)),
+        el('td',{},num(m,'accel_s',0.1)), el('td',{},num(m,'decel_s',0.1)), el('td',{},del),
+      ]));
+    });
+    table.append(tb);
+    wrap.append(el('div',{style:'overflow:auto;max-height:50vh'}, table));
+    wrap.append(el('div',{style:'margin-top:8px'}, el('button',{className:'btn',onclick:()=>{
+      motors.push({key:`motor${motors.length+1}`,label:'New motor',poles:4,rated_hz:50,
+        rated_rpm:1440,rated_current_a:0,max_hz:50,min_hz:0,accel_s:10,decel_s:10});
+      draw();
+    }},'+ Add motor')));
+    return wrap;
+  }
+
+  // ---- save: writes all three libraries; instances last (triggers rebuild) ----
+  const save = el('button', {className:'btn', onclick: async()=>{
+    try{
+      await fetch('/api/vfd/drives',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({drives})});
+      await fetch('/api/vfd/motors',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({motors})});
+      const r = await (await fetch('/api/vfd/instances',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({instances})})).json();
+      if (r.ok){
+        const lines = (r.results||[]).map(x=>`${x.name}: ${x.ok?'connected':'FAILED'+(x.error?' ('+x.error+')':'')}`);
+        alert('Saved.' + (lines.length ? '\n\n'+lines.join('\n') : ''));
+      } else {
+        alert('Save failed: ' + (r.error||'unknown'));
+      }
+    }catch(e){ alert('Save failed: '+e.message); }
+  }}, 'Save');
+
+  draw();
+  root.append(tabBar, panes, el('div',{style:'margin-top:10px'}, save));
   showModal(root, ()=>{ renderPage(); });
 }
 

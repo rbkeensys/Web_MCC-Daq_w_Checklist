@@ -4,8 +4,8 @@ Avoids vcvarsall.bat environment issues
 Version: 3.2.0
 Updated: 2026-03-26
 """
-__version__ = "3.2.0"
-__updated__ = "2026-03-26"
+__version__ = "3.2.1"
+__updated__ = "2026-06-15"  # 3.2.1: added /MD so the compiled DLL links the dynamic UCRT and shares python.exe's stdout fd; required for the console fd-capture (dup2) and browser console widget to receive the DLL's printf/[EXPR] output. Without it the DLL had its own static-CRT stdout pointing at the original console handle, bypassing the capture pipe.
 
 import subprocess
 import os
@@ -332,6 +332,9 @@ def compile_expressions(dll_name="compiled/expressions.dll"):
     cmd = [
         str(cl_exe),
         "/LD",              # Build DLL
+        "/MD",              # Dynamic UCRT: DLL shares python.exe's ucrtbase fd table so the
+                            # console fd-capture (os.dup2 on fd 1) actually sees the DLL's printf.
+                            # Default static CRT gives the DLL a private stdout the capture never sees.
         "/O2",              # Optimize for speed
         "/fp:fast",         # Fast floating point
         "/EHsc",            # Exception handling

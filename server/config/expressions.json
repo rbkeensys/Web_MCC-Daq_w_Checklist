@@ -161,6 +161,12 @@
       "enabled": true,
       "expression": "// Control the LN2 line vent to condition it's line leading to mix tank\n\n\nLN2Condition = static.LineConditionLN2\ntesting      = static.testState\n\nif ( LN2Condition and testing == 0 ) then\n    \"DO:S10_LN2CondVent\" = 1\nelse\n    \"DO:S10_LN2CondVent\" = 0\nendif\n\n",
       "execution_rate_hz": null
+    },
+    {
+      "name": "VFDTest",
+      "enabled": true,
+      "expression": "// Test my VFD\n\nprevData = static.prevVFDStat\nstate = static.vfdstate\n\nstart = buttonVars.startVFD\nstop  = buttonVars.stopVFD\n\nIDLE       = 0\nSTARTPARMS = 1\nSTOPPARMS  = 2\n\nif ( state == 0 ) then\n    data = \"VFD:VFD 1\".RPM\n    if ( prevData != data ) then\n        print(\"Data %d\", data)\n    endif\n    if ( start ) then \n        state = STARTPARMS\n        print(\"Going to write parms\")\n    endif\n    if ( stop ) then\n        state = STOPPARMS\n        print(\"Stopping VFD\")\n    endif\nelse if ( state == STARTPARMS ) then\n    print(\"writing start parms\")\n    \"VFD:VFD 1.ENABLE\" = 1            // 1 = enable (start), 0 = disable (stop)\n    \"VFD:VFD 1.RPM\"    = 1725         // set speed in RPM (converted to Hz via the motor)\n    \"VFD:VFD 1.HZ\"     = 30           // set speed in Hz (clamped to motor min/max)\n    \"VFD:VFD 1.DIR\"    = 0            // 0 = forward, 1 = reverse  (aliases DIRECTION / REVERSE)\n    if ( start == 0 ) then\n       state = IDLE\n       print(\"Going back to IDLE\")\n    endif\nelse if ( state == STOPPARMS ) then\n    print(\"writing stop parms\")\n    \"VFD:VFD 1.ENABLE\" = 0            // 1 = enable (start), 0 = disable (stop)\n    \"VFD:VFD 1.RPM\"    = 0         // set speed in RPM (converted to Hz via the motor)\n    \"VFD:VFD 1.HZ\"     = 0           // set speed in Hz (clamped to motor min/max)\n    \"VFD:VFD 1.DIR\"    = 0            // 0 = forward, 1 = reverse  (aliases DIRECTION / REVERSE)\n    if ( stop == 0 ) then\n       state = IDLE\n       print(\"Going back to IDLE\")\n    endif\nelse\n    state = IDLE\nendif\n\nstatic.vfdstate    = state\nstatic.prevVFDStat = data\n\n\n\n\n\n\n\n\n",
+      "execution_rate_hz": null
     }
   ]
 }

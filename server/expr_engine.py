@@ -26,20 +26,13 @@ VERSION 2.0 Changes:
 - Added buttonVars support for reading frontend button states
 - buttonVars are read-only in expressions (set by UI buttons)
 """
-__version__ = "2.3.0"
-__updated__ = "2026-05-19"  # Added print()/printf() to console via expr_print module
+__version__ = "2.2.0"
+__updated__ = "2026-06-15"  # 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
 
 import re
 import math
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
-
-# Shared print() formatting support (used by both this interpreter and the
-# C++ code generator in expr_to_cpp.py).
-try:
-    import expr_print
-except ImportError:
-    expr_print = None
 
 
 class GlobalVariables:
@@ -265,6 +258,9 @@ class Parser:
                         return self.make_node('DO_ASSIGN', signal_name, [expr])
                     elif signal_type == 'AO':
                         return self.make_node('AO_ASSIGN', signal_name, [expr])
+                    elif signal_type == 'VFD':
+                        # "VFD:Name.token" = expr  (queued to VFD worker)
+                        return self.make_node('VFD_ASSIGN', signal_name, [expr])
         
         # Not an assignment, just an expression
         return self.parse_or()
@@ -516,39 +512,9 @@ class Parser:
         return self.make_node('IF', None, [condition, then_expr, else_expr])
     
     def parse_function_call(self, name: str) -> ASTNode:
-        """Parse function call: func(arg1, arg2, ...)
-
-        print()/printf() are special-cased: the first argument is a literal
-        format string (lexed as a STRING token, which normally means a signal
-        reference). We capture it verbatim and produce a PRINT node so the
-        evaluator/codegen can treat it as a console-output statement rather
-        than a value-producing expression.
-        """
+        """Parse function call: func(arg1, arg2, ...)"""
         self.expect('LPAREN')
-
-        # ---- print()/printf() ----
-        if expr_print is not None and expr_print.is_print_name(name):
-            fmt = None
-            args = []
-            tok = self.current()
-            if tok and tok.type == 'STRING':
-                # First arg: the format string, taken literally.
-                fmt = self.advance().value
-                while self.current() and self.current().type == 'COMMA':
-                    self.advance()  # consume comma
-                    args.append(self.parse_or())
-            elif tok and tok.type != 'RPAREN':
-                # Someone passed a non-string first arg. Treat the whole list
-                # as args with an empty format — the evaluator will just print
-                # them space-separated as a fallback.
-                args.append(self.parse_or())
-                while self.current() and self.current().type == 'COMMA':
-                    self.advance()
-                    args.append(self.parse_or())
-            self.expect('RPAREN')
-            node = self.make_node('PRINT', fmt, args)
-            return node
-
+        
         args = []
         if self.current() and self.current().type != 'RPAREN':
             args.append(self.parse_or())
@@ -585,6 +551,7 @@ class Evaluator:
         self.result = 0.0
         # Track hardware writes that need to be applied
         self.hardware_writes: List[Dict[str, Any]] = []
+        self.vfd_writes: List[Dict[str, Any]] = []   # queued VFD param/register writes
         # Track which IF branches were taken (line_num -> 'then' or 'else')
         self.branch_paths: Dict[int, str] = {}
         # Track which lines actually executed
@@ -635,25 +602,11 @@ class Evaluator:
         for i, sig in enumerate(self.signal_state.get('expr_list', [])):
             key = f"EXPR:{sig['name']}"
             self._signal_cache[key] = {'type': 'expr', 'index': i}
-
-        # Cache Scale signals (read-only — serial scales feed values into
-        # state['scales'] via the SerialScaleManager telemetry path)
-        for i, sig in enumerate(self.signal_state.get('scale_list', [])):
-            key = f"SCALE:{sig['name']}"
-            self._signal_cache[key] = {'type': 'scale', 'index': i}
     
     def evaluate(self, statements: List[ASTNode]) -> float:
-        """Evaluate list of statements, return last value.
-
-        PRINT statements are evaluated for their side effect (console output)
-        but do NOT update `result` — otherwise a trailing print() would
-        clobber the expression's actual output value with 0.
-        """
+        """Evaluate list of statements, return last value"""
         for stmt in statements:
-            if getattr(stmt, 'type', None) == 'PRINT':
-                self.eval_node(stmt)  # side effect only
-            else:
-                self.result = self.eval_node(stmt)
+            self.result = self.eval_node(stmt)
         return self.result
     
     def eval_node(self, node: ASTNode) -> float:
@@ -742,8 +695,21 @@ class Evaluator:
             
             return value
         
+        elif node.type == 'VFD_ASSIGN':
+            # "VFD:Name.token" = value  -> queue a worker write (never blocks)
+            value = self.eval_node(node.children[0])
+            name, token = self._split_vfd_ref(node.value)
+            if name:
+                cmd = token.upper() if (token and token.upper() in self._VFD_CMD_TOKENS) else None
+                kind = 'cmd' if cmd else ('raw' if str(token).startswith('#') else 'param')
+                self.vfd_writes.append({'drive': name, 'token': token, 'value': float(value),
+                                        'kind': kind, 'cmd': cmd})
+            return value
+        
         elif node.type == 'SIGNAL':
-            # Signal reference: "AI:Tank"
+            # Signal reference: "AI:Tank"  (VFD reads routed to the live snapshot)
+            if isinstance(node.value, str) and node.value[:4].upper() == 'VFD:':
+                return self._resolve_vfd_read(node.value)
             return self.resolve_signal(node.value)
         
         elif node.type == 'SIGNAL_PROP':
@@ -823,29 +789,84 @@ class Evaluator:
         elif node.type == 'CALL':
             # Function call
             func_name = node.value.lower()
+
+            # print()/printf(): printf-style logging to stdout (captured by the
+            # console widget). The first arg may be a MESSAGE/format string,
+            # which parses as a SIGNAL node whose value is not a real TYPE:name
+            # reference. Mirrors the compiled C++ path's behavior and prefix.
+            if func_name in ('print', 'printf'):
+                children = node.children
+                if children and children[0].type == 'SIGNAL' \
+                        and not self._is_real_signal_ref(children[0].value):
+                    fmt = children[0].value
+                    rest = [self.eval_node(c) for c in children[1:]]
+                    try:
+                        msg = (fmt % tuple(rest)) if rest else fmt
+                    except (TypeError, ValueError):
+                        # Format/arg mismatch: print the message + raw values
+                        msg = fmt + (" " + " ".join(f"{v:g}" for v in rest) if rest else "")
+                    print(f"[EXPR] {msg}", flush=True)
+                    return rest[-1] if rest else 0.0
+                # No leading message string: numeric print of the args.
+                vals = [self.eval_node(c) for c in children]
+                if vals:
+                    print("[EXPR] " + " ".join(f"{v:g}" for v in vals), flush=True)
+                    return vals[-1]
+                print("[EXPR]", flush=True)
+                return 0.0
+
             if func_name not in self.FUNCTIONS:
                 raise ValueError(f"Unknown function: {func_name}")
             
             args = [self.eval_node(arg) for arg in node.children]
             return self.FUNCTIONS[func_name](*args)
-
-        elif node.type == 'PRINT':
-            # print("fmt", arg1, arg2, ...) -> write a line to the server console.
-            # node.value is the literal format string; node.children are the
-            # argument expressions (evaluated to numbers here).
-            fmt = node.value
-            arg_vals = [self.eval_node(arg) for arg in node.children]
-            if expr_print is not None:
-                if fmt is None:
-                    # No format string given — print args space-separated.
-                    fmt = ' '.join(['%g'] * len(arg_vals))
-                expr_print.do_print(fmt, arg_vals)
-            # print() has no useful value; evaluates to 0.0 so it can sit on a
-            # line by itself without affecting `result`.
-            return 0.0
         
         return 0.0
     
+    _KNOWN_SIG_TYPES = ('AI', 'AO', 'DO', 'TC', 'PID', 'MATH', 'LE', 'EXPR', 'SCALE', 'VFD')
+
+    def _is_real_signal_ref(self, sigval: str) -> bool:
+        """True if a quoted string is a real TYPE:name reference; False if it is
+        free text (a print message that may even contain a ':')."""
+        if ':' not in sigval:
+            return False
+        head = sigval.split(':', 1)[0].strip().upper()
+        return head in self._KNOWN_SIG_TYPES
+
+    # ---- VFD register/param read+write (Python path; serial via worker) ----
+    _VFD_REF_RE = __import__('re').compile(
+        r'^(?:VFD:)?([A-Za-z0-9_\- ]+?)(\.[A-Za-z0-9_.]+|#0[xX][0-9A-Fa-f]+|#[0-9]+)$')
+    _VFD_PROP_KEY = {'RPM':'rpm','HZ':'output_hz','FREQ':'output_hz',
+        'CURRENT':'output_current_a','AMPS':'output_current_a','I':'output_current_a',
+        'VOLTAGE':'output_voltage_v','V':'output_voltage_v','BUS':'bus_voltage_v',
+        'BUSV':'bus_voltage_v','DC':'bus_voltage_v','POWER':'output_power_w','W':'output_power_w',
+        'TEMP':'drive_temp_c','TEMPERATURE':'drive_temp_c','ENABLED':'enabled','RUNNING':'enabled',
+        'REVERSE':'__rev__','REV':'__rev__','FAULT':'faulted','FAULTCODE':'fault_code','WRITEFAULT':'__wf__'}
+    _VFD_CMD_TOKENS = {"ENABLE","DISABLE","RUN","STOP","RPM","HZ","FREQ","DIR","DIRECTION","REVERSE","REV","FORWARD","FWD","FAULT_RESET","RESET"}
+    @classmethod
+    def _split_vfd_ref(cls, value):
+        m = cls._VFD_REF_RE.match(str(value).strip())
+        if not m: return (None, None)
+        name = m.group(1).strip(); ref = m.group(2)
+        return (name, ref if ref.startswith('#') else ref[1:])
+    def _vfd_snap(self, name):
+        return (self.signal_state.get('vfd', {}) or {}).get(name, {}) or {}
+    def _resolve_vfd_read(self, value):
+        name, token = self._split_vfd_ref(value)
+        if not name: return 0.0
+        v = self._vfd_snap(name).get(token)
+        try: return float(v) if v is not None else 0.0
+        except (TypeError, ValueError): return 0.0
+    def _resolve_vfd_status(self, name, prop):
+        snap = self._vfd_snap(name); key = self._VFD_PROP_KEY.get(str(prop).upper())
+        if key == '__rev__': return 1.0 if snap.get('direction') == 'reverse' else 0.0
+        if key == '__wf__':  return 1.0 if snap.get('write_fault') else 0.0
+        if key is None: return 0.0
+        v = snap.get(key)
+        if isinstance(v, bool): return 1.0 if v else 0.0
+        try: return float(v) if v is not None else 0.0
+        except (TypeError, ValueError): return 0.0
+
     def resolve_signal(self, signal_ref: str) -> float:
         """Resolve signal reference using cached indices (OPTIMIZED)"""
         # Try cache first (FAST PATH - O(1) dictionary lookup)
@@ -904,20 +925,7 @@ class Evaluator:
                     if isinstance(val, dict):
                         return val.get('output', 0.0)
                     return float(val)
-
-            elif sig_type == 'scale':
-                # Scale values are tared floats fed in from SerialScaleManager.
-                # Read-only — assignments to "Scale:Foo" are not supported (a
-                # scale is a sensor, not an output).
-                values = self.signal_state.get('scales', [])
-                if idx < len(values):
-                    val = values[idx]
-                    try:
-                        return float(val)
-                    except (TypeError, ValueError):
-                        return 0.0
-                return 0.0
-
+            
             return 0.0
         
         # SLOW FALLBACK: Original method for signals not in cache
@@ -963,9 +971,6 @@ class Evaluator:
         elif signal_type == 'EXPR':
             signals = self.signal_state.get('expr_list', [])
             values = self.signal_state.get('expr', [])
-        elif signal_type == 'SCALE':
-            signals = self.signal_state.get('scale_list', [])
-            values = self.signal_state.get('scales', [])
         else:
             return 0.0
         
@@ -986,6 +991,8 @@ class Evaluator:
     
     def resolve_signal_property(self, signal_ref: str, prop: str) -> float:
         """Resolve signal property like 'PID:Motor'.OUT (OPTIMIZED)"""
+        if isinstance(signal_ref, str) and signal_ref[:4].upper() == 'VFD:':
+            return self._resolve_vfd_status(signal_ref.split(':', 1)[1], prop)
         # Try cache first for fast lookup
         cache_key = signal_ref.upper() if ':' in signal_ref else None
         if cache_key and cache_key in self._signal_cache:

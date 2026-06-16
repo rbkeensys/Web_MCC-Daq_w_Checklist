@@ -27,17 +27,24 @@ ENDIF
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Basic Syntax](#basic-syntax)
-3. [Signal References](#signal-references)
-4. [Signal Properties](#signal-properties)
-5. [Operators](#operators)
-6. [Control Flow](#control-flow)
-7. [Variables](#variables)
-8. [Hardware Outputs](#hardware-outputs)
-9. [Built-in Functions](#built-in-functions)
-10. [Advanced Integration](#advanced-integration)
-11. [Complete Examples](#complete-examples)
-12. [Best Practices](#best-practices)
+2. [Basic Syntax](#basic-syntax) — comments · assignments · multiple statements
+3. [Signal References](#signal-references) — read any signal as `"Type:Name"`
+    - [Analog In (AI)](#analog-inputs-ai) · [Analog Out (AO)](#analog-outputs-ao) · [Thermocouple (TC)](#thermocouples-tc) · [Digital Out (DO)](#digital-outputs-do)
+    - [PID](#pid-controllers-pid) · [Math](#math-operators-math) · [Logic Element (LE)](#logic-elements-le) · [Other Expression (Expr)](#other-expressions-expr)
+4. [Signal Properties](#signal-properties) — [PID properties](#pid-properties) (`.PV .SP .OUT` …)
+5. [Operators](#operators) — arithmetic · comparison · boolean
+6. [Control Flow](#control-flow) — [inline & block IF](#if-statements) · [nested IF](#nested-if-statements)
+7. [Variables](#variables) — [local](#local-variables) · [static](#static-variables) · [global](#global-variables)
+8. [Hardware Outputs](#hardware-outputs) — set DO / AO outputs
+9. [VFD Motor Drives](#vfd-motor-drives) — read status, set RPM/Hz, enable, direction
+    - [Read status](#reading-vfd-status) (`.RPM .HZ .CURRENT` …) · [read params/registers](#reading-vfd-parameters-and-registers)
+    - [Commands](#commanding-a-vfd) (`.ENABLE .RPM .HZ .DIR`) · [write params/registers](#writing-vfd-parameters-and-registers)
+10. [Built-in Functions](#built-in-functions) — [math](#mathematical-functions) · [trig](#trigonometric-functions) · [exponential](#exponential-functions)
+11. [Advanced Integration](#advanced-integration) — PID inputs · enable gates · chaining
+12. [Complete Examples](#complete-examples) — 6 worked examples
+13. [Best Practices](#best-practices) — 18 tips
+14. [Quick Reference Card](#quick-reference-card) — one-page cheat sheet
+15. [Troubleshooting](#troubleshooting) — common errors & fixes
 
 ---
 
@@ -168,40 +175,6 @@ IF "TC:Furnace" > 500 THEN
 - Values are in the configured temperature unit (typically °C or °F)
 - TC values include offset correction and filtering if configured
 - Update rate is typically slower than AI (10 Hz max)
-
----
-
-### Serial Scales (Scale)
-
-**Syntax:** `"Scale:ScaleName"`
-
-Read the value from a serial-attached scale (RS-232 / RS-485 / Moxa NPort, etc.).
-Scale references are **read-only** — assigning to `"Scale:Foo"` is not supported.
-
-**Examples:**
-```javascript
-// Read current weight
-weight = "Scale:HopperA"
-totalWeight = "Scale:HopperA" + "Scale:HopperB"
-
-// Use as a control input
-overweight = "Scale:Hopper" > 50.0
-IF "Scale:Hopper" > targetMass THEN
-    "DO:FeedValve" = 0       // Stop feed
-ELSE
-    "DO:FeedValve" = 1       // Open feed
-
-// Tare-aware computations (the Scale: value is already
-// post-offset — see the Tare button in the Zero/Tare dialog)
-netWeight = "Scale:Hopper" - emptyHopperWeight
-```
-
-**Notes:**
-- Values reflect the configured tare offset — `"Scale:X"` returns
-  what's displayed in chart/gauge/bar widgets.
-- Update rate is set by the scale itself (typically 1–10 Hz).
-- Names come from `Scale Editor` (Scales button in the toolbar). If you
-  rename a scale, expressions using the old name will warn and return 0.
 
 ---
 
@@ -1059,6 +1032,137 @@ ELSE IF static.ramp > target THEN
 
 ---
 
+## VFD Motor Drives
+
+Variable-frequency drives configured in the **VFDs** editor are addressed by
+their instance **name** (the `Name` column on the Instances tab). Each instance
+binds a drive model + a motor nameplate + a COM port, and the driver converts
+between RPM and Hz automatically using the motor's nameplate (rated RPM / rated
+Hz, falling back to pole count).
+
+All VFD serial traffic runs on a background worker thread, so VFD reads and writes
+in expressions never block the control loop: **reads** return the most recently
+polled value, and **commands/writes** are queued and applied at the drive's own pace.
+
+### Reading VFD status
+
+Live status for every connected VFD is published each acquisition cycle and is read
+with the `VFD:` prefix and a **property** — the dot goes *outside* the quotes:
+
+**Syntax:** `"VFD:InstanceName".PROPERTY`
+
+| Property      | Meaning                                  | Units |
+|---------------|------------------------------------------|-------|
+| `RPM`         | Shaft speed (drive-reported or derived)  | rpm   |
+| `HZ` / `FREQ` | Output frequency                         | Hz    |
+| `CURRENT`     | Output current                           | A     |
+| `VOLTAGE`     | Output voltage                           | V     |
+| `BUS`         | DC bus voltage                           | V     |
+| `POWER`       | Output power                             | W     |
+| `TEMP`        | Drive temperature (if reported)          | °C    |
+| `ENABLED`     | 1 if running, 0 if stopped               | bool  |
+| `REVERSE`     | 1 if reverse, 0 if forward               | bool  |
+| `FAULT`       | Fault code (0 = no fault)                | code  |
+| `WRITEFAULT`  | 1 if the last write to this drive failed | bool  |
+
+```
+# Alarm if the blower current climbs too high
+"DO:OverCurrentLamp" = IF "VFD:Blower".CURRENT > 6.5 THEN 1 ELSE 0
+
+# Track speed error against a setpoint
+rpmError = static.targetRpm - "VFD:Blower".RPM
+
+# Latch a fault flag
+IF "VFD:Blower".FAULT != 0 THEN
+    static.vfdFaulted = 1
+ENDIF
+```
+
+### Reading VFD parameters and registers
+
+You can also read any drive **parameter** by its native code, or a **raw Modbus
+register** by address. Here the token goes *inside* the quotes:
+
+**Syntax:** `"VFD:InstanceName.PARAM"` or `"VFD:InstanceName#0xADDR"`
+
+```
+maxFreq  = "VFD:Blower.P0.05"     # GK3000 parameter P0.05 (max frequency)
+baudCode = "VFD:Blower.PC.00"     # GK3000 PC.00 (baud-rate code)
+setReg   = "VFD:Blower#0x5000"    # raw holding register 0x5000
+```
+
+Parameter/register reads are polled only when an expression references them, so they
+start updating automatically once you use them. (Status properties above are always
+polled and need no setup.)
+
+### Commanding a VFD
+
+Expressions can command a drive directly. A **command target** on the left of an
+assignment routes through the same driver logic the VFD widget buttons use
+(`enable` / `disable` / `set_rpm` / `set_frequency` / `set_direction`), so all the
+rpm↔Hz↔percent scaling and run-word/coil encoding is handled for you:
+
+**Syntax:** `"VFD:InstanceName.COMMAND" = value`
+
+| Command       | Value             | Action                    |
+|---------------|-------------------|---------------------------|
+| `ENABLE`      | 1 = run, 0 = stop | Start / stop the drive    |
+| `RPM`         | rpm               | Speed setpoint (rpm → Hz) |
+| `HZ` / `FREQ` | Hz                | Output-frequency setpoint |
+| `DIR`         | 0 = fwd, 1 = rev  | Rotation direction        |
+| `STOP`        | (any)             | Stop the drive            |
+| `FAULT_RESET` | 1                 | Clear a drive fault       |
+
+Aliases: `RUN` = `ENABLE`; `DISABLE` = `STOP`; `DIRECTION` / `REVERSE` = `DIR`;
+`FORWARD` / `FWD` = direction forward; `RESET` = `FAULT_RESET`.
+
+```
+# Blower control driven from a state machine
+"VFD:Blower.RPM"    = static.targetRpm     # set the speed target (rpm)
+"VFD:Blower.DIR"    = 0                     # forward
+"VFD:Blower.ENABLE" = static.runBlower      # 1 = run, 0 = stop
+```
+
+**`.RPM` reads vs. writes.** On the *right* of an `=`, `"VFD:Blower".RPM` reads the
+drive's reported speed; on the *left*, `"VFD:Blower.RPM" = x` sets the target — they
+read naturally as "what is it doing" vs. "what should it do."
+
+**Commands are edge-sent.** Like DO/AO writes, a command is sent to the drive only
+**when its value changes** — `"VFD:Blower.ENABLE" = runFlag` issues one start when
+`runFlag` goes to 1 and one stop when it goes to 0, not a command every tick. This
+keeps the RS-485 bus quiet. Consequence: if the drive trips and stops on its own
+while your expression still holds `ENABLE = 1`, it is **not** re-commanded
+automatically — re-arm it explicitly:
+
+```
+# Re-enable once after the fault clears
+IF "VFD:Blower".FAULT == 0 AND static.runBlower >= 1 THEN
+    "VFD:Blower.ENABLE" = 1
+ENDIF
+```
+
+### Writing VFD parameters and registers
+
+For anything without a dedicated command, write a drive **parameter** or a **raw
+register** by putting the token *inside* the quotes (mirrors the read form):
+
+**Syntax:** `"VFD:InstanceName.PARAM" = value` or `"VFD:InstanceName#0xADDR" = value`
+
+```
+"VFD:Blower.P0.06"  = 4500       # GK3000 P0.06 (freq upper limit), raw register units
+"VFD:Blower#0x5000" = 5000       # raw setpoint register: 50% of max (GK3000: ±10000 = ±100%)
+"VFD:Blower#0x6000" = 1          # raw run word (drive-specific)
+```
+
+> **Heads-up.** Parameter values are written in the drive's **raw register units**
+> (per its manual's resolution column — e.g. a 0.1 Hz parameter takes `300` for 30.0
+> Hz). For normal control prefer the command targets above (`.RPM`, `.HZ`, `.ENABLE`,
+> `.DIR`) — they do the scaling and encoding for you; raw writes are for advanced or
+> one-off cases. Writes are edge-sent (only on change), and raw `#` register writes
+> skip read-back verification (a command/run register can't be read back).
+
+---
+
 ## Built-in Functions
 
 ### Mathematical Functions
@@ -1133,55 +1237,6 @@ pH = -LOG10(concentration)
 ```javascript
 area = POW(radius, 2) * 3.14159
 volume = POW(side, 3)
-```
-
----
-
-## Console Output: print()
-
-**print("format", arg1, arg2, ...)** writes a line to the **server console**
-(the terminal/window running the server), not the browser. Use it to watch
-values during operation without cluttering the UI.
-
-The format string uses C `printf` conventions:
-
-```javascript
-print("Pressure %2.1f psi, valve=%d", static.pressure, buttonVars.valve)
-print("Tank=%.2f  Hopper=%.2f", "AI:Tank", "Scale:Hopper")
-print("State %d  progress %d%%", state, pct)
-```
-
-**Format specifiers** (each consumes one argument):
-
-| Spec | Meaning | Example arg → output |
-|------|---------|----------------------|
-| `%f`, `%F` | fixed-point float | `3.14159` → `3.141590` |
-| `%.2f` | float, 2 decimals | `3.14159` → `3.14` |
-| `%6.1f` | float, width 6, 1 decimal | `3.1` → `   3.1` |
-| `%e`, `%g` | scientific / general float | `1234.5` → `1.2345e+03` |
-| `%d`, `%i` | integer (value truncated toward zero) | `3.9` → `3` |
-| `%x`, `%X` | hexadecimal integer | `255` → `ff` |
-| `%o` | octal integer | `8` → `10` |
-| `%c` | character from code point | `65` → `A` |
-| `%%` | a literal percent sign (no argument) | → `%` |
-
-**Notes:**
-- All expression values are numbers. Integer specifiers (`%d`, `%x`, etc.)
-  use the truncated integer part of the value.
-- `%s` is **not** supported — there are no string variables to print.
-- A newline is added automatically; each `print()` is its own console line.
-- `print()` has no value and never affects the expression's output, so you
-  can drop it on its own line anywhere (including as the last line) without
-  changing what the expression computes.
-- Output is prefixed with `[EXPR-PRINT]` in the Python evaluator. In the C++
-  backend it is emitted directly via `printf`.
-- Any input is fair game: locals, `static.name`, `buttonVars.name`,
-  `"AI:..."`, `"Scale:..."`, `"PID:..."`, etc.
-
-```javascript
-// Example: trace a fill state machine
-weight = "Scale:Hopper"
-print("fill state=%d  weight=%.2f  target=%.1f", state, weight, static.target)
 ```
 
 ---
@@ -1977,6 +2032,29 @@ result
 "PID:Name".OUT   // Output
 "PID:Name".MIN   // Min clamp
 "PID:Name".MAX   // Max clamp
+```
+
+### VFD Motor Drives
+```javascript
+// Read status (dot OUTSIDE quotes)
+"VFD:Name".RPM       // reported speed   (also .HZ .CURRENT .VOLTAGE
+"VFD:Name".FAULT     //   .BUS .POWER .TEMP .ENABLED .REVERSE .WRITEFAULT)
+
+// Read a parameter / raw register (token INSIDE quotes)
+"VFD:Name.P0.05"     // drive parameter
+"VFD:Name#0x5000"    // raw Modbus register
+
+// Commands (LEFT of =) — scaling/encoding handled for you
+"VFD:Name.ENABLE" = 1      // 1 = run, 0 = stop  (alias RUN; STOP/DISABLE)
+"VFD:Name.RPM"    = 1725   // speed setpoint, rpm
+"VFD:Name.HZ"     = 30     // speed setpoint, Hz   (alias FREQ)
+"VFD:Name.DIR"    = 0      // 0 = fwd, 1 = rev     (alias DIRECTION/REVERSE)
+"VFD:Name.FAULT_RESET" = 1
+// commands & writes are edge-sent (only when the value changes)
+
+// Write a parameter / raw register (raw drive units)
+"VFD:Name.P0.06"  = 4500
+"VFD:Name#0x5000" = 5000
 ```
 
 ### Operators
