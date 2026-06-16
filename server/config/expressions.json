@@ -171,13 +171,13 @@
     {
       "name": "VFDRpmFromAO",
       "enabled": true,
-      "expression": "// Convert 0-10V AO to VFD rpm\n\nmanual = static.manualRPM\n\nif ( manual == 0 ) then\n    volt = \"AO:AO0\"\n    rpm = volt * 431.35\nelse if ( manual > 0 and manual < 4400 ) then\n    rpm = manual\nelse\n    rpm = 0\nendif\n\nstatic.rpmSet = rpm\n",
+      "expression": "// Convert 0-10V AO to VFD rpm\n\nmanual = static.manualRPM\n\nif ( manual == 0 ) then\n    volt = \"AO:AO0\"\n    rpm = volt * 402.5\nelse if ( manual > 0 and manual < 4025 ) then\n    rpm = manual\nelse\n    rpm = 0\nendif\n\nstatic.rpmSet = rpm\n",
       "execution_rate_hz": null
     },
     {
       "name": "monitorMotor",
       "enabled": true,
-      "expression": "// Read the VFD for motor performance values\n\n\nrpm = \"VFD:VFD 1\".RPM\nvoltage = \"VFD:VFD 1\".VOLTAGE\ncurrent = \"VFD:VFD 1\".CURRENT\npowerkw = \"VFD:VFD 1\".POWER\ntorque  = \"VFD:VFD 1\".TORQUE\naccel   = \"VFD:VFD 1.P0.12\"\naccelRaw = \"VFD:VFD 1#0xF012\"\n\nstatic.vfdOutVolt = voltage\nstatic.vfdOutAmps = current\nstatic.vfdOutPwr  = powerkw\nstatic.vfdTorque  = torque\nstatic.accel      = accel\nstatic.accelraw   = accelRaw",
+      "expression": "// Read the VFD for motor performance values\n\n\nrpm = \"VFD:VFD 1\".RPM\nvoltage = \"VFD:VFD 1\".VOLTAGE\ncurrent = \"VFD:VFD 1\".CURRENT\npowerkw = \"VFD:VFD 1\".POWER\ntorque  = \"VFD:VFD 1\".TORQUE\naccel   = \"VFD:VFD 1.P0.12\"\naccelRaw = \"VFD:VFD 1#0xF012\"\nsink    = \"VFD:VFD 1.P07.06\"\n\nstatic.vfdOutVolt = voltage\nstatic.vfdOutAmps = current\nstatic.vfdOutPwr  = powerkw\nstatic.vfdTorque  = torque\nstatic.accel      = accel\nstatic.accelraw   = accelRaw\nstatic.sink       = sink",
       "execution_rate_hz": null
     }
   ]

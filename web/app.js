@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.48";  // startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
+const UI_VERSION = "2.1.50";  // 2026-06-16: chart "Keep×" spinner (1-100, default 4) sets how much history to retain in multiples of the span -- live keeps keep*span of scrollback, paused keeps ~keep*span split around the freeze (so memory is user-bounded; 100 ~= 100 spans). Filter[Hz] box narrowed to make room. Prev 2.1.49: paused charts stay filled -- the live-buffer trim now also honors the Pause-button flag (w.opts.paused), not only the zoom/pan freeze (w.view.paused); a button-paused chart previously kept doing buf.shift() each tick and wiped its left edge as new samples arrived. Span-change trim is skipped while paused too. Pairs with vfd_driver.py worker carry-forward (holds the last-good VFD reading instead of emitting 0 on a missed Modbus read, so .RPM etc. no longer drop to 0 during AO-slider command bursts). Prev 2.1.48: startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -3733,7 +3733,7 @@ async function addExprWidget() {
 // Update defaultsFor to give charts reasonable initial spans:
 function defaultsFor(type){
   switch(type){
-    case 'chart':    return { title:'Chart', series:[], span:60, paused:false, scale:'auto', min:0, max:10, filterHz:0, cursorMode:'follow' };
+    case 'chart':    return { title:'Chart', series:[], span:60, paused:false, scale:'auto', min:0, max:10, filterHz:0, bufMult:4, cursorMode:'follow' };
     case 'gauge':    return { title:'Gauge', needles:[], scale:'manual', min:0, max:10 };
     case 'bars':     return { title:'Bars', series:[], scale:'manual', min:0, max:10 };
     case 'dobutton': return { title:'Button', outputType:'do', doIndex:0, varName:'button1', activeHigh:true, mode:'toggle', buzzHz:10, actuationTime:0, _timer:null };
@@ -5939,14 +5939,25 @@ function widgetOptions(w){
       }
       const buf = chartBuffers.get(w.id);
       if (buf && buf.length) {
-        const t = performance.now()/1000;
-        const bufferDepth = newSpan * 1.2;
-        while (buf.length && (t - buf[0].t) > bufferDepth) buf.shift();
+        const frozen = (w.view && w.view.paused) || (w.opts && w.opts.paused);
+        if (!frozen) {
+          const t = performance.now()/1000;
+          const bufferDepth = newSpan * 1.2;
+          while (buf.length && (t - buf[0].t) > bufferDepth) buf.shift();
+        }
       }
     };
 
-    const filt=el('input',{type:'number', value:w.opts.filterHz||0, min:0, step:'any', style:'width:80px'});
+    const filt=el('input',{type:'number', value:w.opts.filterHz||0, min:0, step:'any', style:'width:52px'});
     filt.oninput=()=>{ w.opts.filterHz=parseFloat(filt.value)||0; };
+
+    // History-retention multiplier ("Keep×"): how much data to keep, in
+    // multiples of the chart span (1-100). Live keeps keep*span of scrollback;
+    // paused keeps ~keep*span split around the freeze. Default 4 (~4 spans).
+    const keep=el('input',{type:'number', value:(w.opts.bufMult||4), min:1, max:100, step:1,
+      title:'History kept = this × span (1–100). e.g. 100 ≈ 100 spans of data.',
+      style:'width:46px'});
+    keep.oninput=()=>{ w.opts.bufMult = Math.max(1, Math.min(100, parseInt(keep.value)||4)); };
 
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
     yGrid.oninput=()=>{ w.opts.yGridLines=parseInt(yGrid.value)||5; };
@@ -5996,6 +6007,7 @@ function widgetOptions(w){
     opts.push(
       el('span',{},'Span[s]:'), span,
       el('span',{},'Filter[Hz]:'), filt,
+      el('span',{title:'History kept = this × span (1–100)'},'Keep×:'), keep,
       el('span',{},'Y Grid:'), yGrid,
       pause,
       zoomBadge,
@@ -6884,24 +6896,43 @@ function updateChartBuffers(){
         cf._t = t;
         chartFilters.set(w.id, cf);
       }
-      buf.push({t, v: filtered});
-
-      // Buffer depth: keep enough for full span PLUS room to pan while paused.
-      // When zoom-paused, tFreeze is the right edge — we must not trim anything
-      // that the user might pan back to.  Keep the larger of:
-      //   (a) opts.span * 2   (generous live buffer, handles any zoom-out)
-      //   (b) distance from buf[0] to now, capped at 3600s
       const chartSpan = Math.max(1, w.opts.span || 10);
-      const maxDepth = Math.min(3600, chartSpan * 2);
+      // History retention is user-controlled via the "Keep×" spinner: keep
+      // bufMult spans of data (1-100, default 4). maxDepth is the total kept;
+      // when paused it is split half/half around the freeze edge so you can pan
+      // both back and forward. Memory scales with bufMult, by design.
+      const bufMult = Math.max(1, Math.min(100, Math.round(w.opts.bufMult || 4)));
+      const maxDepth = chartSpan * bufMult;
+      const half = maxDepth / 2;
 
-      // Only trim when NOT zoom-paused (live scrolling mode)
-      if (!w.view || !w.view.paused) {
-        while (buf.length > 1 && (t - buf[0].t) > maxDepth) {
-          buf.shift();
-        }
+      // Pause state and the frozen right edge (the Pause button uses
+      // w.opts.tFreeze; a zoom/pan freeze uses w.view.tFreeze).
+      const frozen = (w.view && w.view.paused) || (w.opts && w.opts.paused);
+      const tF = (w.opts && w.opts.paused && Number.isFinite(w.opts.tFreeze)) ? w.opts.tFreeze
+               : (w.view && w.view.paused && Number.isFinite(w.view.tFreeze)) ? w.view.tFreeze
+               : t;
+
+      // Append. While paused, keep recording up to `half` past the freeze edge
+      // (so you can pan forward into what happened during the pause), then stop,
+      // so a long pause stays bounded to ~maxDepth total. Short pauses never
+      // reach the cap. The filter state above still advances, so resume stays
+      // continuous.
+      const newest = buf.length ? buf[buf.length - 1].t : t;
+      if (!frozen || (newest - tF) <= half) {
+        buf.push({ t, v: filtered });
       }
-      // When paused, never trim — the buffer is finite and bounded by maxDepth
-      // The next time the user unpauses, trimming resumes naturally.
+
+      // Trim the front. Live: rolling maxDepth ending at "now" (= bufMult spans
+      // of scrollback). Paused: keep `half` before the frozen edge (with the
+      // forward margin above, net retention ~= maxDepth = bufMult * span). The
+      // pause check honors BOTH the Pause button (w.opts.paused) and a zoom/pan
+      // freeze (w.view.paused) -- checking only the latter is what used to let a
+      // button-paused chart keep trimming and wipe its left edge.
+      if (frozen) {
+        while (buf.length > 1 && (tF - buf[0].t) > half) buf.shift();
+      } else {
+        while (buf.length > 1 && (t - buf[0].t) > maxDepth) buf.shift();
+      }
 
       chartBuffers.set(w.id, buf);
     }
