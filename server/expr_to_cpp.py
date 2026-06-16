@@ -15,7 +15,7 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 """
 
 __version__ = "3.3.0"
-__updated__ = "2026-06-15"  # 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
+__updated__ = "2026-06-15"  # 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
 
 import json
 import os
@@ -61,10 +61,12 @@ class SignalMap:
                 self.do_map[ch['name']] = do_index
                 do_index += 1
             
+            # Include ALL AOs regardless of include flag (expressions may
+            # reference them), indexed by physical position so the index matches
+            # the AO snapshot array (get_ao_snapshot/_ao_vals). Mirrors DO above.
             for ch in board.get('analogOutputs', []):
-                if ch.get('include', True):
-                    self.ao_map[ch['name']] = ao_index
-                    ao_index += 1
+                self.ao_map[ch['name']] = ao_index
+                ao_index += 1
         
         # TC channels
         tc_index = 0
@@ -94,7 +96,8 @@ class SignalMap:
             elif sig_name.isdigit():
                 return int(sig_name)
             else:
-                print(f"[CPP-WARN] Unknown AI signal: {sig_name}, using index 0")
+                print(f"[CPP-WARN] Unknown AI signal '{sig_name}' not in config, using index 0")
+                print(f"[CPP-WARN] Available AIs: {list(self.ai_map.keys())}")
                 return 0
         elif sig_type == 'AO':
             if sig_name in self.ao_map:
@@ -102,7 +105,8 @@ class SignalMap:
             elif sig_name.isdigit():
                 return int(sig_name)
             else:
-                print(f"[CPP-WARN] Unknown AO signal: {sig_name}, using index 0")
+                print(f"[CPP-WARN] Unknown AO signal '{sig_name}' not in config, using index 0")
+                print(f"[CPP-WARN] Available AOs: {list(self.ao_map.keys())}")
                 return 0
         elif sig_type == 'DO':
             if sig_name in self.do_map:

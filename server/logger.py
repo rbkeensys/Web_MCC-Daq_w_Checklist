@@ -266,6 +266,19 @@ class SessionLogger:
     # Public API
     # ------------------------------------------------------------------
 
+    def add_columns(self, cols):
+        """Pre-register columns introduced after the header settled (e.g. new
+        gvar_/bvar_ columns from an expression recompile) so they don't each
+        trigger a separate slow-path rewrite as frames arrive. Already-known
+        columns are skipped. Before the header is written this is a no-op --
+        _finalise_header() (and write()'s auto-add) will pick the columns up."""
+        if not getattr(self, "_settled", False):
+            return
+        for c in (cols or []):
+            if c not in self._col_idx:
+                self._rewrite_with_new_col(c)
+
+
     def write(self, frame: dict):
         if not self._settled:
             self._pending_frames.append(frame)

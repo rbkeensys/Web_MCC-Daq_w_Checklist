@@ -85,7 +85,35 @@ class CPPExpressionBackend:
             self.buttonvar_map = metadata.get('buttonvar_map', {})
             self.vfd_read_refs = metadata.get('vfd_read_refs', [])    # -> vfd_in[] order
             self.vfd_write_refs = metadata.get('vfd_write_refs', [])  # -> vfd_out[] order
-            
+
+            # --- Size the metadata-driven buffers to FIT the compiled DLL. ---
+            # static_vars / button_vars are indexed by a flat counter, expr_results
+            # and the per-expr write arrays by expression number, and local_vars_out
+            # is packed (sum of all locals). The C++ takes these as raw pointers and
+            # writes by index, so an undersized Python buffer is an out-of-bounds
+            # write (heap corruption) -- NOT just a read-back IndexError. Grow to the
+            # actual count + headroom; never shrink below the original defaults.
+            HEAD = 64
+            need_static = (max(self.staticvar_map.values()) + 1) if self.staticvar_map else 0
+            need_button = (max(self.buttonvar_map.values()) + 1) if self.buttonvar_map else 0
+            need_local  = sum(len(v) for v in (self.local_var_names or {}).values())
+            n_static = max(self.static_vars.shape[0], need_static + HEAD)
+            n_button = max(self.button_vars.shape[0], need_button + HEAD)
+            n_local  = max(self.local_vars_out.shape[0], need_local + HEAD)
+            n_expr   = max(self.expr_results.shape[0],
+                           self.do_writes_per_expr.shape[0], self.num_expressions + HEAD)
+            self.static_vars    = np.zeros(n_static, dtype=np.float64)
+            self.button_vars    = np.zeros(n_button, dtype=np.float64)
+            self.local_vars_out = np.zeros(n_local,  dtype=np.float64)
+            self.expr_results   = np.zeros(n_expr,   dtype=np.float64)
+            self.do_writes_per_expr      = np.zeros((n_expr, 64), dtype=np.float64)
+            self.do_was_written_per_expr = np.zeros((n_expr, 64), dtype=np.float64)
+            self.ao_writes_per_expr      = np.zeros((n_expr, 16), dtype=np.float64)
+            self.ao_was_written_per_expr = np.zeros((n_expr, 16), dtype=np.float64)
+            print(f"[CPP-EXPR] Buffers sized: static={n_static} (need {need_static}), "
+                  f"button={n_button} (need {need_button}), locals={n_local} (need {need_local}), "
+                  f"expr={n_expr} (num {self.num_expressions})")
+
             # Initialize static_vars from metadata (default values)
             if 'static_var_defaults' in metadata:
                 for var_name, default_val in metadata['static_var_defaults'].items():

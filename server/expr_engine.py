@@ -932,6 +932,7 @@ class Evaluator:
         # This shouldn't happen in normal operation, but provides safety
         return self._resolve_signal_slow(signal_ref)
     
+    _warned_unknown = set()   # signal refs already warned about (once each)
     def _resolve_signal_slow(self, signal_ref: str) -> float:
         """Original slow method - fallback for cache misses"""
         # Parse signal reference: "TYPE:Name"
@@ -975,6 +976,10 @@ class Evaluator:
             return 0.0
         
         # Find signal by name and return value
+        names = [sig.get('name') for sig in signals]
+        if signal_name not in names and signal_ref not in Evaluator._warned_unknown:
+            Evaluator._warned_unknown.add(signal_ref)
+            print(f"[EXPR] Unknown signal '{signal_ref}': no {signal_type} channel named '{signal_name}'. Available {signal_type}: {names}")
         for i, sig in enumerate(signals):
             if sig.get('name') == signal_name:
                 if i < len(values):

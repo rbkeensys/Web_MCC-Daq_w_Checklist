@@ -2,7 +2,7 @@
   "boards1608": [
     {
       "boardNum": 0,
-      "sampleRateHz": 50.0,
+      "sampleRateHz": 160.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -153,7 +153,7 @@
           "maxV": 10.0,
           "startupV": 0.0,
           "include": true,
-          "enable_gate": true,
+          "enable_gate": false,
           "enable_kind": "le",
           "enable_index": 0
         },
@@ -171,7 +171,7 @@
     },
     {
       "boardNum": 2,
-      "sampleRateHz": 50.0,
+      "sampleRateHz": 160.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -317,7 +317,7 @@
       ],
       "analogOutputs": [
         {
-          "name": "AO0",
+          "name": "AO2",
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
@@ -327,7 +327,7 @@
           "enable_index": 0
         },
         {
-          "name": "AO1",
+          "name": "AO3",
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
