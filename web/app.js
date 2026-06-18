@@ -2427,7 +2427,6 @@ function wireUI(){
   $('#gridBtn')?.addEventListener('click', openGridDialog);
   $('#editConfig')?.addEventListener('click', ()=>openConfigForm());
   $('#editPID')?.addEventListener('click', ()=>openPidForm());
-  $('#editMotor')?.addEventListener('click', ()=>openMotorEditor());
   $('#editVFD')?.addEventListener('click', ()=>openVfdEditor());
   $('#editScales')?.addEventListener('click', ()=>openScalesEditor());
   $('#editLE')?.addEventListener('click', ()=>openLEEditor());  // Logic Elements
