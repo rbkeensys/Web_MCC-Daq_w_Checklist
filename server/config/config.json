@@ -13,7 +13,7 @@
         { "name": "DemisterFlood", "slope": 1.0, "offset": 0.0, "cutoffHz": 5.0, "units": "V",    "include": true },
         { "name": "CondLevel",     "slope": 1.0, "offset": 0.0, "cutoffHz": 5.0, "units": "V",    "include": true },
         { "name": "FeedPress",     "slope": 1.0, "offset": 0.0, "cutoffHz": 2.0, "units": "psia", "include": false },
-        { "name": "AI6",           "slope": 1.0, "offset": 0.0, "cutoffHz": 1.0, "units": "",     "include": false },
+        { "name": "CondFlow",      "slope": 1.0, "offset": 0.0, "cutoffHz": 0.0, "units": "L/min", "include": true, "counter_num": 0, "pulses_per_unit": 22000.0, "counter_window_s": 1.0 },
         { "name": "AI7",           "slope": 1.0, "offset": 0.0, "cutoffHz": 1.0, "units": "",     "include": false }
       ],
       "digitalOutputs": [

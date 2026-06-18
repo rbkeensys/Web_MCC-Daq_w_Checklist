@@ -1473,6 +1473,13 @@ async def acq_loop():
                 y = lpf.apply(i, y)
                 ai_scaled.append(y)
 
+            # --- Counter-sourced AI channels (e.g. condensate flow on CTR0) ---
+            # Overwrite their slot with a computed rate (eng units/min) from the HW counter.
+            try:
+                mcc.apply_counter_rates(ai_scaled, time.perf_counter())
+            except Exception as e:
+                print(f"[MCC-Hub] counter read failed: {e}")
+
             # Get DO/AO snapshot BEFORE PID and LE evaluation
             # (needed for both LE inputs and PID gate checking)
             ao = mcc.get_ao_snapshot()

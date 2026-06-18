@@ -27,6 +27,12 @@ class AnalogCfg(BaseModel):
     cutoffHz: float = 0.0
     units: str = ""
     include: bool = True
+    # Counter-sourced channel: if counter_num is set, this AI's value is the
+    # E-1608 hardware counter CTR<n> read as a rate (engineering units / minute),
+    # not its physical AI pin. Used for pulse flow meters.
+    counter_num: Optional[int] = None
+    pulses_per_unit: float = 1.0       # K-factor, pulses per engineering unit (e.g. 22000 pulses/L)
+    counter_window_s: float = 1.0      # rate averaging window, seconds
 
 class DigitalOutCfg(BaseModel):
     name: str = "DO"
