@@ -15,8 +15,8 @@ Expression interface (see EXPRESSION_REFERENCE.md, "Stepper Drives (STEP)"):
   read   "STEP:Name".VEL/.POS/.RUNNING/.ENABLED/.COMPLETE/.ALARM
   command "STEP:Name.ENABLE/.VELOCITY/.MOVE/.MOVETO/.STOP/.JOG/.RESET" = value
 """
-__version__ = "1.1.0"
-__updated__ = "2026-06-18"  # 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
+__version__ = "1.2.0"
+__updated__ = "2026-06-18"  # 1.2.0: StepperConfig adds full_step_deg + ml_per_rev (pump calibration) for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
 
 import struct
 import time
@@ -174,12 +174,14 @@ DM556RS = StepperProfile(name="STEPPERONLINE DM556RS")
 @dataclass
 class StepperConfig:
     name: str = "Stepper"
-    steps_per_rev: int = 10000      # Pr0.00 microstep
+    steps_per_rev: int = 10000      # Pr0.00 microstep (pulses/rev the driver commands)
+    full_step_deg: float = 1.8      # motor native step angle (informational; 1.8 = 200 steps/rev)
     peak_current_a: float = 2.0     # -> Pr5.00 in 0.1 A units
     reverse: bool = False           # Pr0.03 direction
     max_rpm: float = 3000.0         # clamp for set_velocity
     accel: int = 100                # ms / 1000 rpm
     decel: int = 100                # ms / 1000 rpm
+    ml_per_rev: float = 0.0         # peristaltic pump calibration: mL per motor rev (0 = unset)
 
 
 # ---------------------------------------------------------------------------
@@ -552,11 +554,13 @@ def _config_from_cfg(d: dict) -> StepperConfig:
     return StepperConfig(
         name=d.get("name", "Stepper"),
         steps_per_rev=int(d.get("steps_per_rev", 10000)),
+        full_step_deg=float(d.get("full_step_deg", 1.8)),
         peak_current_a=float(d.get("peak_current_a", 2.0)),
         reverse=bool(d.get("reverse", False)),
         max_rpm=float(d.get("max_rpm", 3000.0)),
         accel=int(d.get("accel", 100)),
         decel=int(d.get("decel", 100)),
+        ml_per_rev=float(d.get("ml_per_rev", 0.0)),
     )
 
 

@@ -11327,29 +11327,37 @@ async function openMotorEditor(){
  * selectable for every instance. Saving instances rebuilds the controllers
  * on the server and reports which connected. */
 async function openVfdEditor(){
-  const [drivesData, motorsData, instData] = await Promise.all([
+  const [drivesData, motorsData, instData, stepCfgData, stepInstData, stepDrvData] = await Promise.all([
     fetch('/api/vfd/drives').then(r=>r.json()).catch(()=>({drives:[]})),
     fetch('/api/vfd/motors').then(r=>r.json()).catch(()=>({motors:[]})),
     fetch('/api/vfd/instances').then(r=>r.json()).catch(()=>({instances:[]})),
+    fetch('/api/stepper/configs').then(r=>r.json()).catch(()=>({configs:[]})),
+    fetch('/api/stepper/instances').then(r=>r.json()).catch(()=>({instances:[]})),
+    fetch('/api/stepper/drives').then(r=>r.json()).catch(()=>({drives:[]})),
   ]);
   let ports = [];
   try { ports = (await (await fetch('/api/motors/ports')).json()).ports || []; }
-  catch(e){ console.warn('VFD: port list failed', e); }
+  catch(e){ console.warn('MOD Drv: port list failed', e); }
 
   const drives    = drivesData.drives    || [];
   const motors    = motorsData.motors    || [];
   const instances = instData.instances   || [];
+  const stepConfigs   = stepCfgData.configs    || [];
+  const stepInstances = stepInstData.instances || [];
+  const stepDrives    = stepDrvData.drives     || [];
 
   const root = el('div', {});
-  root.append(el('h2', {}, 'VFD Drives & Motors'));
+  root.append(el('h2', {}, 'MOD Drives — VFD + Stepper'));
 
   // ---- simple tab strip ----
   const tabBar = el('div', {style:'display:flex;gap:6px;margin-bottom:10px'});
   const panes  = el('div', {});
   const tabs = [
-    ['Instances', () => instancesPane()],
-    ['Drives',    () => drivesPane()],
-    ['Motors',    () => motorsPane()],
+    ['VFD Units',     () => instancesPane()],
+    ['VFD Drives',    () => drivesPane()],
+    ['Motors',        () => motorsPane()],
+    ['Stepper Units', () => stepperUnitsPane()],
+    ['Steppers',      () => steppersPane()],
   ];
   let activeTab = 0;
   function renderTabs(){
@@ -11535,17 +11543,93 @@ async function openVfdEditor(){
     return wrap;
   }
 
-  // ---- save: writes all three libraries; instances last (triggers rebuild) ----
+  // ---------- Steppers tab (stepper library) ----------
+  function steppersPane(){
+    const wrap = el('div', {});
+    wrap.append(el('p', {style:'font-size:12px;color:var(--muted)'},
+      'Stepper library — motor + driver specifics. Pulses/rev is the driver microstep (Pr0.00). '
+      + 'mL/rev calibrates dose volume → steps for Profile-Position moves.'));
+    const table = el('table', {className:'form'});
+    table.append(el('thead', {}, el('tr', {}, ['Key','Label','Pulses/rev','°/step','Peak A','Max RPM','Accel','Decel','Reverse','mL/rev',''].map(h=>el('th',{},h)))));
+    const tb = el('tbody');
+    stepConfigs.forEach(c=>{
+      const del = el('button',{className:'btn',onclick:()=>{const i=stepConfigs.indexOf(c);if(i>=0){stepConfigs.splice(i,1);draw();}}},'✕');
+      tb.append(el('tr',{},[
+        el('td',{},txt(c,'key')), el('td',{},txt(c,'name')),
+        el('td',{},num(c,'steps_per_rev',1)), el('td',{},num(c,'full_step_deg',0.01)),
+        el('td',{},num(c,'peak_current_a',0.1)), el('td',{},num(c,'max_rpm',1)),
+        el('td',{},num(c,'accel',1)), el('td',{},num(c,'decel',1)),
+        el('td',{},chk(c,'reverse')), el('td',{},num(c,'ml_per_rev',0.01)), el('td',{},del),
+      ]));
+    });
+    table.append(tb);
+    wrap.append(el('div',{style:'overflow:auto;max-height:50vh'}, table));
+    wrap.append(el('div',{style:'margin-top:8px'}, el('button',{className:'btn',onclick:()=>{
+      stepConfigs.push({key:`stepper${stepConfigs.length+1}`,name:'New stepper',steps_per_rev:10000,
+        full_step_deg:1.8,peak_current_a:2.0,max_rpm:600,accel:200,decel:200,reverse:false,ml_per_rev:0});
+      draw();
+    }},'+ Add stepper')));
+    return wrap;
+  }
+
+  // ---------- Stepper Units tab (instances) ----------
+  function stepperUnitsPane(){
+    const wrap = el('div', {});
+    wrap.append(el('p', {style:'font-size:12px;color:var(--muted)'},
+      'Each unit binds a stepper drive model + a stepper-library entry + a COM port. '
+      + 'Include = build at startup. Saving rebuilds and reconnects.'));
+    if (!stepDrives.length)
+      wrap.append(el('p', {style:'color:#e6a23c'}, '⚠ No stepper drive models available.'));
+    const table = el('table', {className:'form'});
+    table.append(el('thead', {}, el('tr', {}, ['Name','Include','Drive','Stepper','Port','Baud','Parity','Stop','Addr','Timeout','Poll ms','Auto-setup',''].map(h=>el('th',{},h)))));
+    const tb = el('tbody');
+    stepInstances.forEach(inst=>{
+      const driveSel = selectEnum(stepDrives.map(d=>d.key), inst.drive_key || (stepDrives[0]&&stepDrives[0].key) || '', v=>inst.drive_key=v);
+      Array.from(driveSel.options).forEach(o=>{ const d=stepDrives.find(x=>x.key===o.value); if(d) o.textContent=d.label||d.key; });
+      const cfgSel = selectEnum(stepConfigs.map(c=>c.key), inst.config_key || (stepConfigs[0]&&stepConfigs[0].key) || '', v=>inst.config_key=v);
+      Array.from(cfgSel.options).forEach(o=>{ const c=stepConfigs.find(x=>x.key===o.value); if(c) o.textContent=c.name||c.key; });
+      const psc = portSelectControl(inst.port, v=>inst.port=v);
+      const parSel = selectEnum(['N','E','O'], inst.parity||'N', v=>inst.parity=v);
+      const stopSel = selectEnum(['1','2'], String(inst.stopbits||1), v=>inst.stopbits=parseInt(v));
+      const baudSel = selectEnum(['9600','19200','38400','57600','115200'], String(inst.baud||38400), v=>inst.baud=parseInt(v));
+      const pollInp = el('input',{type:'number',min:0,step:10,value:(inst.poll_rate_ms!=null?inst.poll_rate_ms:100),style:'width:62px',
+        title:'Stepper read poll period (ms). 0 = continuous.'});
+      pollInp.oninput=()=>{const v=parseInt(pollInp.value,10); inst.poll_rate_ms=Number.isFinite(v)?Math.max(0,v):100;};
+      const del = el('button',{className:'btn',onclick:()=>{const i=stepInstances.indexOf(inst);if(i>=0){stepInstances.splice(i,1);draw();}}},'✕');
+      tb.append(el('tr',{},[
+        el('td',{},txt(inst,'name')), el('td',{},chk(inst,'include')),
+        el('td',{},driveSel), el('td',{},cfgSel), el('td',{},psc),
+        el('td',{},baudSel), el('td',{},parSel), el('td',{},stopSel),
+        el('td',{},num(inst,'address',1)), el('td',{},num(inst,'timeout',0.1)),
+        el('td',{},pollInp), el('td',{},chk(inst,'auto_setup')), el('td',{},del),
+      ]));
+    });
+    table.append(tb);
+    wrap.append(el('div',{style:'overflow:auto;max-height:50vh'}, table));
+    wrap.append(el('div',{style:'margin-top:8px'}, el('button',{className:'btn',onclick:()=>{
+      const d0 = stepDrives[0] || {key:'dm556rs'};
+      stepInstances.push({name:`Stepper${stepInstances.length+1}`,include:false,drive_key:d0.key,
+        config_key:(stepConfigs[0]&&stepConfigs[0].key)||'',port:(ports[0]&&ports[0].port)||'COM1',
+        baud:38400,parity:'N',stopbits:1,address:1,timeout:0.5,auto_setup:true,poll_rate_ms:100});
+      draw();
+    }},'+ Add stepper unit')));
+    return wrap;
+  }
+
+  // ---- save: writes VFD libraries + stepper libraries; instances last (trigger rebuild) ----
   const save = el('button', {className:'btn', onclick: async()=>{
     try{
       await fetch('/api/vfd/drives',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({drives})});
       await fetch('/api/vfd/motors',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({motors})});
+      await fetch('/api/stepper/configs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({configs:stepConfigs})});
       const r = await (await fetch('/api/vfd/instances',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({instances})})).json();
-      if (r.ok){
-        const lines = (r.results||[]).map(x=>`${x.name}: ${x.ok?'connected':'FAILED'+(x.error?' ('+x.error+')':'')}`);
+      const sr = await (await fetch('/api/stepper/instances',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({instances:stepInstances})})).json();
+      if (r.ok && sr.ok){
+        const fmt = x=>`${x.name}: ${x.ok?'connected':'FAILED'+(x.error?' ('+x.error+')':'')}`;
+        const lines = (r.results||[]).map(fmt).concat((sr.results||[]).map(fmt));
         alert('Saved.' + (lines.length ? '\n\n'+lines.join('\n') : ''));
       } else {
-        alert('Save failed: ' + (r.error||'unknown'));
+        alert('Save failed: ' + ((!r.ok&&r.error)||(!sr.ok&&sr.error)||'unknown'));
       }
     }catch(e){ alert('Save failed: '+e.message); }
   }}, 'Save');
