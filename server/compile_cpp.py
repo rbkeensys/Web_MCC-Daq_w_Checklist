@@ -9,6 +9,7 @@ __updated__ = "2026-06-15"  # 3.2.1: added /MD so the compiled DLL links the dyn
 
 import subprocess
 import os
+import math
 from pathlib import Path
 import glob
 
@@ -95,6 +96,7 @@ def append_pid_code():
         code.append("struct PIDState {")
         code.append("    double integral;")
         code.append("    double prev_error;")
+        code.append("    double d_filt;")
         code.append("    bool initialized;")
         code.append("};")
         code.append("")
@@ -122,7 +124,8 @@ def append_pid_code():
             kp = loop.get('kp', 0.0)
             ki = loop.get('ki', 0.0)
             kd = loop.get('kd', 0.0)
-            
+            d_filter_hz = loop.get('d_filter_hz', 0.0) or 0.0
+
             # Output and integral limits
             out_min = loop.get('out_min', -10.0) if loop.get('out_min') is not None else -10.0
             out_max = loop.get('out_max', 10.0) if loop.get('out_max') is not None else 10.0
@@ -156,6 +159,7 @@ def append_pid_code():
                 
                 code.append(f"            pid_states[{i}].integral = 0.0;")
                 code.append(f"            pid_states[{i}].prev_error = 0.0;")
+                code.append(f"            pid_states[{i}].d_filt = 0.0;")
                 code.append(f"            pid_states[{i}].initialized = false;")
                 code.append(f"            pid_outputs[{i}] = 0.0;")
                 
@@ -196,11 +200,20 @@ def append_pid_code():
             code.append(f"        {indent}// Proportional")
             code.append(f"        {indent}double P = {kp} * error;")
             code.append(f"        {indent}")
-            code.append(f"        {indent}// Derivative on measurement")
+            code.append(f"        {indent}// Derivative on measurement (optional one-pole low-pass)")
             code.append(f"        {indent}double D = 0.0;")
             code.append(f"        {indent}if (pid_states[{i}].initialized) {{")
             code.append(f"        {indent}    double d_meas = (pv - pid_states[{i}].prev_error) / dt;")
-            code.append(f"        {indent}    D = -{kd} * d_meas;")
+            if d_filter_hz and d_filter_hz > 0.0:
+                d_tau = 1.0 / (2.0 * math.pi * d_filter_hz)
+                code.append(f"        {indent}    // low-pass cutoff {d_filter_hz} Hz (tau={d_tau:.6g}s)")
+                code.append(f"        {indent}    double d_alpha = dt / ({d_tau!r} + dt);")
+                code.append(f"        {indent}    pid_states[{i}].d_filt += d_alpha * (d_meas - pid_states[{i}].d_filt);")
+            else:
+                code.append(f"        {indent}    pid_states[{i}].d_filt = d_meas;")
+            code.append(f"        {indent}    D = -{kd} * pid_states[{i}].d_filt;")
+            code.append(f"        {indent}}} else {{")
+            code.append(f"        {indent}    pid_states[{i}].d_filt = 0.0;")
             code.append(f"        {indent}}}")
             code.append(f"        {indent}pid_states[{i}].prev_error = pv;  // Store measurement")
             code.append(f"        {indent}pid_states[{i}].initialized = true;")

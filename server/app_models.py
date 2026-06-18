@@ -226,6 +226,7 @@ class PIDRec(BaseModel):
     kp: float = 0.0
     ki: float = 0.0
     kd: float = 0.0
+    d_filter_hz: Optional[float] = None  # Derivative low-pass cutoff (Hz); None/0 = off (raw first-difference)
     # Output limits - can be fixed or dynamic
     out_min: Optional[float] = None  # Fixed min value
     out_max: Optional[float] = None  # Fixed max value

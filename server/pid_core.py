@@ -1,4 +1,5 @@
 # server/pid_core.py - PID with anti-windup on OUTPUT saturation
+import math
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 
@@ -15,6 +16,7 @@ class LoopDef:
     kp: float = 0.0
     ki: float = 0.0
     kd: float = 0.0
+    d_filter_hz: Optional[float] = None  # Derivative low-pass cutoff (Hz); None/0 = off
     out_min: Optional[float] = None  # Output clamp min
     out_max: Optional[float] = None  # Output clamp max
     i_min: Optional[float] = None    # Integral clamp min
@@ -30,6 +32,7 @@ class _PID:
         self.d = d
         self.integral = 0.0
         self.prev_measurement = None
+        self.d_meas_filt = 0.0
         self.tick_counter = 0
         self.last_u = 0.0
         # Telemetry cache
@@ -56,11 +59,21 @@ class _PID:
         # Proportional
         P = self.d.kp * error
         
-        # Derivative on measurement (filtered, no setpoint kick)
+        # Derivative on measurement (no setpoint kick), optional one-pole low-pass
         D = 0.0
         if self.prev_measurement is not None:
             d_meas = (pv - self.prev_measurement) / max(1e-6, dt)
-            D = -self.d.kd * d_meas
+            fc = self.d.d_filter_hz
+            if fc is not None and fc > 0.0:
+                # Low-pass the derivative to suppress measurement-noise chatter
+                tau = 1.0 / (2.0 * math.pi * fc)
+                alpha = dt / (tau + dt)
+                self.d_meas_filt += alpha * (d_meas - self.d_meas_filt)
+            else:
+                self.d_meas_filt = d_meas
+            D = -self.d.kd * self.d_meas_filt
+        else:
+            self.d_meas_filt = 0.0
         self.prev_measurement = pv
         
         # Predict output BEFORE updating integral
