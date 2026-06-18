@@ -15,12 +15,15 @@ Expression interface (see EXPRESSION_REFERENCE.md, "Stepper Drives (STEP)"):
   read   "STEP:Name".VEL/.POS/.RUNNING/.ENABLED/.COMPLETE/.ALARM
   command "STEP:Name.ENABLE/.VELOCITY/.MOVE/.MOVETO/.STOP/.JOG/.RESET" = value
 """
-__version__ = "1.0.0"
-__updated__ = "2026-06-18"  # 1.0.0: DM556RS profile + StepperController (PR velocity/position)
+__version__ = "1.1.0"
+__updated__ = "2026-06-18"  # 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
 
 import struct
 import time
+import json
+import queue as _queue
 import threading
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 
@@ -427,3 +430,244 @@ class StepperController:
         except StepperError as e:
             self._last_write_fault = str(e)
             return False
+
+
+# ---------------------------------------------------------------------------
+#  Worker (background serial I/O per drive) — mirrors VFDWorker
+# ---------------------------------------------------------------------------
+class StepperWorker:
+    def __init__(self, name: str, ctrl: StepperController,
+                 poll_period: float = 0.1, write_queue_max: int = 256):
+        self.name = name
+        self.ctrl = ctrl
+        self.poll_period = max(0.0, float(poll_period))   # 0 == continuous
+        self._watch: Dict[str, int] = {}                  # token -> Modbus addr
+        self._snapshot: dict = {}
+        self._snap_lock = threading.Lock()
+        self._wq = _queue.Queue(maxsize=int(write_queue_max))
+        self._stop = threading.Event()
+        self._thread = None
+        self._overflow = 0
+
+    def set_watch(self, tokens):
+        watch = {}
+        for tok in tokens or []:
+            try:
+                watch[tok] = int(tok[1:], 0) if tok.startswith("#") \
+                    else self.ctrl.profile.param_to_register(tok)
+            except Exception:
+                pass
+        self._watch = watch
+
+    def request_write(self, token: str, value: float, save=False, verify=None) -> bool:
+        try:
+            self._wq.put_nowait(("w", token, int(round(float(value)))))
+            return True
+        except _queue.Full:
+            self._overflow += 1
+            return False
+
+    def request_command(self, cmd: str, value: float) -> bool:
+        try:
+            self._wq.put_nowait(("c", str(cmd).upper(), float(value)))
+            return True
+        except _queue.Full:
+            self._overflow += 1
+            return False
+
+    def _drain_writes(self):
+        while True:
+            try:
+                kind, a, b = self._wq.get_nowait()
+            except _queue.Empty:
+                return
+            try:
+                if kind == "c":
+                    self.ctrl.request_command(a, b)
+                else:
+                    self.ctrl.write_param(a, int(b))
+            except Exception:
+                pass
+
+    def snapshot(self) -> dict:
+        with self._snap_lock:
+            return dict(self._snapshot)
+
+    def get_value(self, token: str):
+        with self._snap_lock:
+            return self._snapshot.get(token)
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run, name=f"stepper-worker-{self.name}", daemon=True)
+        self._thread.start()
+
+    def stop(self, join_timeout: float = 2.0):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=join_timeout)
+
+    def _run(self):
+        while not self._stop.is_set():
+            t0 = time.time()
+            self._drain_writes()                       # writes first -> responsive
+            snap = {}
+            try:
+                snap.update(self.ctrl.read_status())
+                snap["ok"] = True
+            except Exception as e:
+                snap["ok"] = False
+                snap["error"] = str(e)
+            for tok, addr in list(self._watch.items()):
+                try:
+                    snap[tok] = self.ctrl.read_register(addr)
+                except Exception:
+                    pass
+            # carry forward last-good for readings missed this cycle (avoid 0-glitch)
+            prev = self._snapshot or {}
+            for k, pv in prev.items():
+                if k in ("ok", "error") or pv is None:
+                    continue
+                if snap.get(k) is None:
+                    snap[k] = pv
+            with self._snap_lock:
+                self._snapshot = snap
+            dt = self.poll_period - (time.time() - t0)
+            if dt > 0:
+                self._stop.wait(dt)
+
+
+# ---------------------------------------------------------------------------
+#  Manager (loads config, owns controllers + workers) — mirrors VFDManager
+# ---------------------------------------------------------------------------
+STEPPER_PROFILES = {"dm556rs": DM556RS}   # drive_key -> code-defined profile
+
+
+def _config_from_cfg(d: dict) -> StepperConfig:
+    if not d:
+        return StepperConfig()
+    return StepperConfig(
+        name=d.get("name", "Stepper"),
+        steps_per_rev=int(d.get("steps_per_rev", 10000)),
+        peak_current_a=float(d.get("peak_current_a", 2.0)),
+        reverse=bool(d.get("reverse", False)),
+        max_rpm=float(d.get("max_rpm", 3000.0)),
+        accel=int(d.get("accel", 100)),
+        decel=int(d.get("decel", 100)),
+    )
+
+
+class StepperManager:
+    """Loads stepper_configs.json / stepper_instances.json and owns one
+    StepperController + StepperWorker per included instance, keyed by name.
+    Drive *profiles* are code-defined (STEPPER_PROFILES) and chosen by drive_key."""
+
+    def __init__(self, cfg_dir):
+        self.cfg_dir = Path(cfg_dir)
+        self.configs: dict = {}       # key -> stepper config dict
+        self.instances: list = []
+        self.controllers: dict = {}   # name -> StepperController
+        self.workers: dict = {}       # name -> StepperWorker
+
+    def load_files(self):
+        def _read(name, default):
+            p = self.cfg_dir / name
+            if not p.exists():
+                return default
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                return default
+        cfgs = _read("stepper_configs.json", {"configs": []})
+        inst = _read("stepper_instances.json", {"instances": []})
+        self.configs = {x["key"]: x for x in cfgs.get("configs", []) if "key" in x}
+        self.instances = inst.get("instances", [])
+
+    def disconnect_all(self):
+        self.stop_workers()
+        for c in self.controllers.values():
+            try:
+                c.disconnect()
+            except Exception:
+                pass
+        self.controllers = {}
+
+    def build(self, connect: bool = True, do_setup: bool = True):
+        """(Re)build controllers from the included instances. One instance per
+        serial port. Returns list of (name, ok, error)."""
+        self.disconnect_all()
+        results = []
+        seen_ports = {}
+        for inst in self.instances:
+            if not inst.get("include"):
+                continue
+            name = inst.get("name", "Stepper")
+            port = inst.get("port", "COM1")
+            if port in seen_ports:
+                results.append((name, False,
+                                f"port {port} already used by '{seen_ports[port]}'"))
+                continue
+            seen_ports[port] = name
+            try:
+                profile = STEPPER_PROFILES.get((inst.get("drive_key") or "").lower())
+                if profile is None:
+                    raise StepperError(f"drive_key '{inst.get('drive_key')}' not found")
+                config = _config_from_cfg(self.configs.get(inst.get("config_key"), {}))
+                ctrl = StepperController(
+                    profile, port, baud=inst.get("baud"), parity=inst.get("parity"),
+                    stopbits=inst.get("stopbits"), address=inst.get("address"),
+                    timeout=float(inst.get("timeout", 0.5)), config=config)
+                ok = ctrl.connect() if connect else True
+                if ok and connect and do_setup and inst.get("auto_setup"):
+                    try:
+                        ctrl.read_status()
+                        ctrl.apply_setup()
+                    except Exception:
+                        pass
+                self.controllers[name] = ctrl
+                results.append((name, ok, None if ok else "connect failed"))
+            except Exception as e:
+                results.append((name, False, str(e)))
+        return results
+
+    def get(self, name):
+        return self.controllers.get(name)
+
+    def start_workers(self, poll_period: float = 0.1):
+        self.stop_workers()
+        for name, ctrl in self.controllers.items():
+            inst = next((i for i in self.instances if i.get("name") == name), {})
+            pr = inst.get("poll_rate_ms", None)
+            period = (float(pr) / 1000.0) if pr is not None else poll_period
+            w = StepperWorker(name, ctrl, poll_period=period)
+            self.workers[name] = w
+            w.start()
+
+    def stop_workers(self):
+        for w in self.workers.values():
+            try:
+                w.stop()
+            except Exception:
+                pass
+        self.workers = {}
+
+    def set_watch_all(self, tokens_by_drive: dict):
+        for name, toks in (tokens_by_drive or {}).items():
+            w = self.workers.get(name)
+            if w:
+                w.set_watch(toks)
+
+    def request_command(self, name: str, cmd: str, value: float) -> bool:
+        w = self.workers.get(name)
+        return w.request_command(cmd, value) if w else False
+
+    def request_write(self, name: str, token: str, value: float,
+                      save=False, verify=None) -> bool:
+        w = self.workers.get(name)
+        return w.request_write(token, value, save=save, verify=verify) if w else False
+
+    def snapshot_all(self) -> dict:
+        return {name: w.snapshot() for name, w in self.workers.items()}
