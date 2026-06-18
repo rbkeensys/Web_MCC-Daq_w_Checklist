@@ -1,7 +1,8 @@
 # Expression Language Reference Guide
 
-**Version 1.2** | MCC DAQ System | Expression Engine Documentation  
-**Updated:** January 2026 - Added ENDIF requirement, nested IF examples, Math/Expr as PID inputs, enable gates
+**Version 1.3** | MCC DAQ System | Expression Engine Documentation  
+**Updated:** June 2026 - Added Stepper Drives (`STEP:`) and counter-sourced AI channels (pulse flow meters on CTR0)  
+**Previous:** v1.2 (Jan 2026) - ENDIF requirement, nested IF examples, Math/Expr as PID inputs, enable gates
 
 ---
 
@@ -39,6 +40,7 @@ ENDIF
 9. [VFD Motor Drives](#vfd-motor-drives) — read status, set RPM/Hz, enable, direction
     - [Read status](#reading-vfd-status) (`.RPM .HZ .CURRENT` …) · [read params/registers](#reading-vfd-parameters-and-registers)
     - [Commands](#commanding-a-vfd) (`.ENABLE .RPM .HZ .DIR`) · [write params/registers](#writing-vfd-parameters-and-registers)
+9b. [Stepper Drives (STEP)](#stepper-drives-step) — velocity & position moves, enable, jog (`.VELOCITY .MOVE .ENABLE`)
 10. [Built-in Functions](#built-in-functions) — [math](#mathematical-functions) · [trig](#trigonometric-functions) · [exponential](#exponential-functions)
 11. [Advanced Integration](#advanced-integration) — PID inputs · enable gates · chaining
 12. [Complete Examples](#complete-examples) — 6 worked examples
@@ -126,6 +128,7 @@ highPressure = "AI:Pressure" > 100
 - AI values are already scaled according to channel configuration (slope and offset)
 - AI values include low-pass filtering if configured
 - Names are case-sensitive and must match exactly
+- An AI channel can be **counter-sourced**: if configured with a counter (CTR0) in the channel editor, its value is a pulse-meter **rate in engineering units per minute** — e.g. `"AI:CondFlow"` reads L/min from a flow meter wired to the E-1608 `CTR` pin, not a voltage. Read it like any other AI.
 
 ---
 
@@ -1163,6 +1166,81 @@ register** by putting the token *inside* the quotes (mirrors the read form):
 
 ---
 
+## Stepper Drives (STEP)
+
+Modbus stepper drives configured in the **MOD Drv** editor are addressed by their
+instance **name**, exactly like VFDs, but with the `STEP:` prefix. Each instance binds a
+stepper drive model (e.g. **DM556RS**) + a stepper config + a COM port. As with VFDs, all
+serial traffic runs on a background worker thread, so reads return the latest polled value
+and commands are queued — expressions never block the control loop.
+
+Two motion modes: **Profile Velocity** (run continuously at an rpm — e.g. a feed/dosing
+pump's rate) and **Profile Position** (move an exact number of steps — a precise dose).
+
+### Reading stepper status
+
+**Syntax:** `"STEP:InstanceName".PROPERTY` (dot OUTSIDE the quotes)
+
+| Property        | Meaning                               | Units |
+|-----------------|---------------------------------------|-------|
+| `VEL` / `RPM`   | Actual velocity                       | rpm   |
+| `POS`           | Actual position                       | steps |
+| `RUNNING`       | 1 if moving, 0 if stopped             | bool  |
+| `ENABLED`       | 1 if the drive is enabled             | bool  |
+| `COMPLETE`      | 1 when the last move/path finished    | bool  |
+| `ALARM`/`FAULT` | Alarm code (0 = none)                 | code  |
+| `WRITEFAULT`    | 1 if the last write to this drive failed | bool |
+
+```
+# Latch a fault if the feed pump alarms
+IF "STEP:Feed".ALARM != 0 THEN
+    static.feedFault = 1
+ENDIF
+```
+
+### Commanding a stepper
+
+**Syntax:** `"STEP:InstanceName.COMMAND" = value` (token INSIDE the quotes)
+
+| Command                | Value                     | Action                                  |
+|------------------------|---------------------------|-----------------------------------------|
+| `ENABLE`               | 1 = enable, 0 = disable   | Energize / de-energize the drive        |
+| `VELOCITY`/`VEL`/`RPM` | rpm (sign = direction)    | Profile Velocity: run continuously      |
+| `MOVE`                 | steps (relative, signed)  | Profile Position: move N steps from here|
+| `MOVETO`               | steps (absolute)          | Profile Position: move to absolute pos  |
+| `STOP`                 | (any)                     | Quick stop                              |
+| `JOG`                  | +1 / -1 / 0               | Jog CW / CCW / stop                     |
+| `ALARM_RESET`/`RESET`  | 1                         | Clear a drive alarm                     |
+
+Aliases: `RUN` = `ENABLE`; `DISABLE` = `STOP`. Commands are **edge-sent** (issued only when
+the value changes), like VFD and DO/AO writes.
+
+```
+# Feedwater pump: continuous dosing rate from the level / mass-balance loop
+"STEP:Feed.ENABLE"   = static.runFeed         # 1 = enable
+"STEP:Feed.VELOCITY" = "PID:SumpLevel".OUT    # rpm = controller output
+
+# Or a precise primed dose of 5000 steps
+"STEP:Feed.MOVE" = 5000
+```
+
+### Reading / writing stepper parameters and registers
+
+Like VFDs, read or write any drive **parameter** (`Pr` code) or **raw Modbus register** by
+putting the token inside the quotes:
+
+```
+peakCur = "STEP:Feed.Pr5.00"     # peak-current parameter
+vel0    = "STEP:Feed#0x6203"     # raw PR0 velocity register
+"STEP:Feed#0x6203" = 600         # raw write (advanced; prefer the commands above)
+```
+
+> For normal control use the command targets (`.VELOCITY`, `.MOVE`, `.ENABLE`) — they handle
+> the PR-path setup and trigger encoding for you. Raw `#`-register writes skip read-back
+> verification. The full DM556RS register map is in `DM556RS_MODBUS.md`.
+
+---
+
 ## Built-in Functions
 
 ### Mathematical Functions
@@ -2055,6 +2133,25 @@ result
 // Write a parameter / raw register (raw drive units)
 "VFD:Name.P0.06"  = 4500
 "VFD:Name#0x5000" = 5000
+```
+
+### Stepper Drives (STEP)
+```javascript
+// Read status (dot OUTSIDE quotes)
+"STEP:Name".VEL      // actual rpm   (also .POS .RUNNING .ENABLED
+"STEP:Name".ALARM    //   .COMPLETE .WRITEFAULT)
+
+// Commands (LEFT of =) — PR-path setup/trigger handled for you
+"STEP:Name.ENABLE"   = 1       // 1 = enable, 0 = disable
+"STEP:Name.VELOCITY" = 600     // continuous run, rpm (sign = direction)
+"STEP:Name.MOVE"     = 5000    // relative move, steps (.MOVETO = absolute)
+"STEP:Name.STOP"     = 1       // quick stop      (.JOG = +1/-1/0)
+"STEP:Name.RESET"    = 1       // clear alarm
+// edge-sent (only when the value changes)
+
+// Parameter / raw register (prefer commands above)
+"STEP:Name.Pr5.00"  = 32       // peak current param
+"STEP:Name#0x6203"  = 600      // raw PR0 velocity register
 ```
 
 ### Operators
