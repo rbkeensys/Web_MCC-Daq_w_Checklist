@@ -10678,7 +10678,10 @@ async function openConfigForm(providedConfig = null, banner = null){
             offset: 0.0,
             cutoffHz: 0.1,
             units: 'V',
-            include: true
+            include: true,
+            counter_num: null,        // null = normal AI pin; 0 = hardware counter CTR0 as a rate
+            pulses_per_unit: 1.0,     // K-factor (pulses per engineering unit)
+            counter_window_s: 1.0     // rate averaging window (s)
           });
         }
         
@@ -10851,7 +10854,11 @@ async function openConfigForm(providedConfig = null, banner = null){
         `offset`,     inputNum(a,'offset',0.000001),
         `cutoffHz`,   inputNum(a,'cutoffHz',0.1),
         `units`,      inputText(a,'units'),
-        `include`,    inputChk(a,'include')
+        `include`,    inputChk(a,'include'),
+        // Counter source: '—' = normal AI pin; '0' = driven by hardware counter CTR0 as a rate
+        `CTR`,        selectEnum(['—','0'], a.counter_num==null?'—':String(a.counter_num), v=>{ a.counter_num = (v==='—'?null:parseInt(v,10)); }),
+        `pulses/unit`,inputNum(a,'pulses_per_unit',1),
+        `ctr win(s)`, inputNum(a,'counter_window_s',0.1)
       ]);
       if (analogRows.length > 0) {
         analogSections.push(fieldset(`Analogs - Board #${board.boardNum} (Y = m·X + b)`, tableFormRows(analogRows)));
