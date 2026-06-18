@@ -1,0 +1,152 @@
+ #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T
+ #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T
+ #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T
+Date: ____________3-18-2026______________________
+Time: ________________________________________
+Place: _________Glen Rose_____________
+Conditions: ____________________________________
+_______Purpose / Objectives ____Test Fire Mixed LOX/CH4 in SS Pipe_________
+___Assuming He Press and Purge, Spark Ignition (same logic is on for pyro)___
+___Prop orifice into pipe is 0.0625"
+___Uses ultra low cracking SS check valves on prop and purge
+___SS "T" mixes prop with M/F coupler stuffed with SS to provide mixing
+___-4 AN Braided SS Teflon hose to chamber
+
+CREW: ___TD__,  PAD1___
+
+
+
+
+ITEMS IN ITALLICS  OR  GRAY  TEXT ARE INFORMATIONAL ONLY AND NOT TO BE CALLED OUT
+0   |TD  |Load current CHECKLIST if you haven't done so already                           |X   |0.0    |        |11:18:32|1
+1   |TD  |Comm Check,  PAD1                                                               |X   |1.1    |11:18:32|11:18:33|1
+2   |PAD1|Verify all containment ready, blocks and shields                                |X   |1.0    |11:18:33|11:18:34|1
+
+      TEST will have previously started Command and Control App
+3   |PAD1|Has tightness check been completed                                              |X   |0.5    |11:18:34|11:18:35|1
+4   |PAD1|Verify LOX and Fuel Vents Open                                                  |O   |2.2    |11:18:35|11:18:39|1
+5   |PAD1|Verify no propellants loaded                                                    |O   |0.0    |        |        |1
+6   |PAD1|Verify Helium Bottle Valve Closed                                               |O   |0.0    |        |        |1
+7   |PAD1|Verify Helium Regulator Fully OFF                                               |O   |0.0    |        |        |1
+======================= PRE-TEST CHECKS ==================================================
+10  |TD  |Verify controls of the following:                                               |O   |0.0    |        |        |1
+11  |    |       LOX Vent                                                                 |O   |0.0    |        |        |1
+12  |    |       LOX Outlet                                                               |O   |0.0    |        |        |1
+13  |    |       Fuel Vent                                                                |O   |0.0    |        |        |1
+14  |    |       Fuel Outlet                                                              |O   |0.0    |        |        |1
+15  |    |       Purge                                                                    |O   |0.0    |        |        |1
+16  |    |       Zero Pressure Transducers,    LOX Zero ____________,  Fuel Zero _________|O   |0.0    |        |        |1
+17  |PAD1|Verify clear for Spark check, test and verify                                   |O   |0.0    |        |        |1
+=========================================================================================
+20  |TD  |On control app restart log, note name ______________________________            |O   |0.0    |        |        |1
+
+=========================== LOAD LOX TANK ================================================
+30  |PAD1|Disconnect LOX Vent Manifold                                                    |O   |0.0    |        |        |1
+31  |PAD1|Disconnect LOX Liquid Feed                                                      |O   |0.0    |        |        |1
+32  |PAD1|Cap LOX Liquid Feed                                                             |O   |0.0    |        |        |1
+33  |PAD1|Fill Tank From LOX Dewar                                                        |O   |0.0    |        |        |1
+34  |PAD1|Close Pressure Builder on LOX Dewar                                             |O   |0.0    |        |        |1
+35  |PAD1|Cap LOX Run Tank                                                                |O   |0.0    |        |        |1
+36  |PAD1|Return to test site                                                             |O   |0.0    |        |        |1
+37  |PAD1|Uncap LOX Liquid Feed, Connect to Test Fixture                                  |O   |0.0    |        |        |1
+38  |PAD1|Connect LOX vent manifold                                                       |O   |0.0    |        |        |1
+39  |PAD1|Verify LOX Connections                                                          |O   |0.0    |        |        |1
+40  |PAD1|Temporarily close LOX Vent                                                      |O   |0.0    |        |        |1
+41  |TD  |Verify pressure increases, test LOX Vent Solenoid Valve, verify press drops     |O   |0.0    |        |        |1
+42  |PAD1|Open LOX Manual Vent                                                            |O   |0.0    |        |        |1
+=========================================================================================
+=========================== LOAD FUEL TANK ===============================================
+50  |PAD1|Disconnect Fuel Vent Manifold                                                   |O   |0.0    |        |        |1
+51  |PAD1|Disconnect Fuel Liquid Feed                                                     |O   |0.0    |        |        |1
+52  |PAD1|Cap Fuel Liquid Feed                                                            |O   |0.0    |        |        |1
+53  |PAD1|Fill Tank From Fuel Dewar                                                       |O   |0.0    |        |        |1
+54  |PAD1|Close Pressure Builder on Fuel Dewar                                            |O   |0.0    |        |        |1
+55  |PAD1|Cap Fuel Run Tank                                                               |O   |0.0    |        |        |1
+56  |PAD1|Return to test site                                                             |O   |0.0    |        |        |1
+57  |PAD1|Uncap Fuel Liquid Feed, Connect to Test Fixture                                 |O   |0.0    |        |        |1
+58  |PAD1|Connect Fuel Vent Manifold                                                      |O   |0.0    |        |        |1
+59  |PAD1|Verify Fuel Connections                                                         |O   |0.0    |        |        |1
+60  |PAD1|Temporarily close Fuel Vent                                                     |O   |0.0    |        |        |1
+61  |TD  |Verify pressure increases, test Fuel Vent Solenoid Valve, verify press drops    |O   |0.0    |        |        |1
+62  |PAD1|Open Fuel Manual Vent                                                           |O   |0.0    |        |        |1
+==========================================================================================
+============================= START HAZARDOUS OPS =======================================
+70  |TD  |Turn on  'Vent ALL'  button,    verify  ON / GREEN                              |O   |0.0    |        |        |1
+71  |PAD1|Load Liquid Nitrogen                                                            |O   |0.0    |        |        |1
+72  |PAD1|Verify camera positions                                                         |O   |0.0    |        |        |1
+73  |PAD1|Verify Helium Regulator is still OFF                                            |O   |0.0    |        |        |1
+74  |PAD1|Close LOX and Fuel Manual Vents                                                 |O   |0.0    |        |        |1
+75  |PAD1|Open Helium Bottle Valve, report pressure ________________________              |O   |0.0    |        |        |1
+76  |PAD1|Set Helium regulator to : _____50_____psi                                       |O   |0.0    |        |        |1
+============================= START PRESSURIZATION =======================================
+81  |PAD1|Start Recording CAM1 (normal speed)                                             |O   |0.0    |        |        |1
+82  |PAD1|Retreat for test, report when ready                                             |O   |0.0    |        |        |1
+83  |TD  |Turn OFF 'Vent ALL'                                                             |O   |0.0    |        |        |1
+84  |TD  |Begin pressurization                                                            |O   |0.0    |        |        |1
+85  |TD  |Announce when pressurization is complete                                        |O   |0.0    |        |        |1
+============================= PRESS COMPLETE ============================================
+92  |PAD1|Go, NOGO for test?                                                              |O   |0.0    |        |        |1
+        If NOGO, check with PAD1 on scrub or hold
+        IF SCRUB, Go to Appendix A - SCRUB
+95  |TD  |'ARMING THE SYSTEM'                                                             |O   |0.0    |        |        |1
+96  |TD  |Arm ignition    and   SPARK                                                     |O   |0.0    |        |        |1
+97  |PAD1|Start Camera 2  (Slow Motion)                                                   |O   |0.0    |        |        |1
+============================== FIRING SEQUENCE ==========================================
+100 |TD  |Start SPARK                                                                     |X   |2.3    |11:18:39|11:18:41|1
+101 |TD  |>< Press    RUN TEST   Button                                                   |O   |2.0    |11:18:41|11:18:45|1
+Test is automated, ensures mixed out is on for 15 seconds and fires spark
+NOTE: the automated test DOES NOT ARM ignition or spark!
+
+===================== APPENDIX - A       SCRUB / TEST COMPLETE ===============================
+200 |TD  |Press  'Vent ALL',     verify ON / GREEN                                        |O   |7.4    |11:18:45|        |1
+201 |TD  |Turn OFF LOX and Fuel Pressurization                                            |O   |0.0    |        |        |1
+202 |TD  |Turn OFF   'Ignition ARM'                                                       |O   |0.0    |        |        |1
+203 |TD  |Turn OFF   'MIXED Out'                                                          |O   |0.0    |        |        |1
+204 |TD  |Announce when safe to approach (<5psi)                                          |O   |0.0    |        |        |1
+205 |PAD1|Open Manual Vents                                                               |O   |0.0    |        |        |1
+206 |TD  |Turn OFF   'Vent ALL'                                                           |O   |0.0    |        |        |1
+=========================================================================================
+=========================== POST TEST TASKS ==============================================
+300 |PAD1|Open LN2 Dewar Vent                                                             |O   |0.0    |        |        |1
+301 |PAD1|Close LN2 Dewar Pressure-builder                                                |O   |0.0    |        |        |1
+302 |PAD1|Open LOX Dewar Vent                                                             |O   |0.0    |        |        |1
+303 |PAD1|Close LOX Dewar Pressure-builder                                                |O   |0.0    |        |        |1
+304 |PAD1|Open LNG Dewar Vent                                                             |O   |0.0    |        |        |1
+305 |PAD1|Close LNG Dewar Pressure-builder                                                |O   |0.0    |        |        |1
+306 |PAD1|Turn of Helium Regulator                                                        |O   |0.0    |        |        |1
+307 |PAD1|Report final Helium pressure __________________                                 |O   |0.0    |        |        |1
+308 |PAD1|Close  Helium  bottle valve                                                     |O   |0.0    |        |        |1
+309 |ALL |TURN OFF RADIOS                                                                 |O   |0.0    |        |        |1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

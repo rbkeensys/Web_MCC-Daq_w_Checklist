@@ -1,0 +1,724 @@
+{
+  "pages": [
+    {
+      "name": "Page 1",
+      "widgets": [
+        {
+          "id": "fcbb45d1-965d-452b-a7f4-9248c6c1cb40",
+          "type": "shape",
+          "x": 15,
+          "y": 995,
+          "w": 376,
+          "h": 157.00000000000023,
+          "opts": {
+            "kind": "polygon",
+            "strokeColor": "#ff0000",
+            "strokeWidth": 6,
+            "fillColor": "#ffff00",
+            "x1": 40,
+            "y1": 40,
+            "x2": 140,
+            "y2": 140,
+            "arrowStart": false,
+            "arrowEnd": false,
+            "sides": 4,
+            "cornerRadius": 10,
+            "rotation": 0,
+            "constrainAngles": true,
+            "vertices": [
+              {
+                "x": 374.99999999999994,
+                "y": 1011
+              },
+              {
+                "x": 375,
+                "y": 1136.0000000000002
+              },
+              {
+                "x": 31.000000000000036,
+                "y": 1136.0000000000002
+              },
+              {
+                "x": 31,
+                "y": 1011
+              }
+            ]
+          },
+          "_editHandles": [
+            {},
+            {},
+            {},
+            {}
+          ],
+          "_editGrabbers": [],
+          "_editing": false,
+          "_shapeNoCornerResize": true,
+          "groupId": "gmqh37jvbz2zq"
+        },
+        {
+          "id": "de20f196-d9a9-4e16-9d3c-2394aee6ce96",
+          "type": "chart",
+          "x": 700,
+          "y": 5,
+          "w": 1445,
+          "h": 410,
+          "opts": {
+            "title": "Chart",
+            "series": [
+              {
+                "kind": "ao",
+                "index": 0,
+                "name": "RPM Command",
+                "displayScale": 402.5,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "prevRpmRead",
+                "name": "RPM(VFD)",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "manualRPM",
+                "name": "Manual RPM",
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "manual",
+            "min": 0,
+            "max": 3450,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 10,
+            "tFreeze": null
+          },
+          "view": {
+            "span": 60,
+            "paused": false,
+            "tFreeze": 0
+          },
+          "_zoomBadgeEl": {},
+          "_clipBtn": {},
+          "_pauseBtn": {},
+          "_clippedData": null,
+          "_canvas": {},
+          "_legend": {},
+          "_saveBtn": {}
+        },
+        {
+          "id": "c80e75b1-9b1a-419f-b548-659ac25c603d",
+          "type": "console",
+          "x": 695,
+          "y": 815,
+          "w": 1190,
+          "h": 400,
+          "opts": {
+            "title": "Console",
+            "fontSize": 12,
+            "wrap": false,
+            "autoscroll": true,
+            "maxLines": 5000,
+            "showStream": "both"
+          }
+        },
+        {
+          "id": "f9c8cbc5-eb75-4d16-b5bb-034e813c242b",
+          "type": "dobutton",
+          "x": 55,
+          "y": 1025,
+          "w": 140,
+          "h": 100,
+          "opts": {
+            "title": "Start VFD",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "startVFD",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8,
+          "groupId": "gmqh37jvbz2zq"
+        },
+        {
+          "id": "a5019d07-9d3b-45e9-9f6e-67cde8e6bbeb",
+          "type": "dobutton",
+          "x": 210,
+          "y": 1025,
+          "w": 145,
+          "h": 100,
+          "opts": {
+            "title": "Stop VFD",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "stopVFD",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8,
+          "groupId": "gmqh37jvbz2zq"
+        },
+        {
+          "id": "9b78f28b-9a6f-4aef-84c2-1752cf61a8ec",
+          "type": "staticvar",
+          "x": 85,
+          "y": 440,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "rpmSet",
+            "varName": "rpmSet",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "31a40ee5-900b-40fa-b97f-e3d82e6bbdfb",
+          "type": "aoslider",
+          "x": 390,
+          "y": 995,
+          "w": 280,
+          "h": 180,
+          "opts": {
+            "title": "RPM Setting",
+            "aoIndex": 0,
+            "min": 0,
+            "max": 10,
+            "step": 0.0025,
+            "live": true,
+            "minV": 0,
+            "maxV": 10
+          }
+        },
+        {
+          "id": "04f31756-96e4-4b5d-bb46-2b6bb1a34244",
+          "type": "staticvar",
+          "x": 355,
+          "y": 440,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "manualRPM",
+            "varName": "manualRPM",
+            "decimalPlaces": 1
+          }
+        },
+        {
+          "id": "0f055339-a7c9-4b39-8e30-50ca0f377748",
+          "type": "gauge",
+          "x": 25,
+          "y": 5,
+          "w": 655,
+          "h": 425,
+          "opts": {
+            "title": "Gauge",
+            "needles": [
+              {
+                "kind": "static",
+                "index": "rpmSet",
+                "name": "RPM Cmd",
+                "displayScale": 1,
+                "displayOffset": 0,
+                "target": {
+                  "mode": "fixed",
+                  "value": 4025
+                },
+                "targetColor": "#ff4d4d"
+              },
+              {
+                "kind": "static",
+                "index": "prevRpmRead",
+                "name": "RPM Read",
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "scale": "manual",
+            "min": 0,
+            "max": 4500,
+            "decimals": 3,
+            "divisions": 5
+          }
+        },
+        {
+          "id": "c20a0efb-1c30-459f-8628-94234a89e9ed",
+          "type": "expr",
+          "x": 1910,
+          "y": 885,
+          "w": 280,
+          "h": 230,
+          "opts": {
+            "title": "monitorMotor",
+            "exprIndex": 29,
+            "showSource": true,
+            "showOutput": true
+          }
+        },
+        {
+          "id": "3d9887d8-320c-45ca-aec5-28846397fd3c",
+          "type": "chart",
+          "x": 700,
+          "y": 420,
+          "w": 1445,
+          "h": 385,
+          "opts": {
+            "title": "Chart",
+            "series": [
+              {
+                "kind": "static",
+                "index": "vfdOutVolt",
+                "name": "V",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "vfdOutAmps",
+                "name": "I",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "vfdOutPwr",
+                "name": "W",
+                "displayScale": 1000,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "vfdTorque",
+                "name": "torque",
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "auto",
+            "min": 0,
+            "max": 10,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 5,
+            "tFreeze": null
+          },
+          "_pauseBtn": {},
+          "_zoomBadgeEl": {},
+          "_clipBtn": {},
+          "_saveBtn": {},
+          "_canvas": {},
+          "_legend": {},
+          "view": {
+            "span": 60,
+            "paused": false,
+            "tFreeze": 0
+          }
+        },
+        {
+          "id": "ae2294ed-c004-4651-846a-b0c66d63f09e",
+          "type": "gauge",
+          "x": 30,
+          "y": 550,
+          "w": 645,
+          "h": 430,
+          "opts": {
+            "title": "Gauge",
+            "needles": [
+              {
+                "kind": "static",
+                "index": "vfdOutPwr",
+                "name": "Watts",
+                "displayScale": 1000,
+                "displayOffset": 0,
+                "target": {
+                  "mode": "fixed",
+                  "value": 1500
+                },
+                "targetColor": "#ff4d4d"
+              }
+            ],
+            "scale": "manual",
+            "min": 0,
+            "max": 1500,
+            "decimals": 3,
+            "divisions": 5
+          }
+        },
+        {
+          "id": "649c6792-f5c1-4781-8455-a0958496e02b",
+          "type": "expr",
+          "x": 1900,
+          "y": 530,
+          "w": 345,
+          "h": 290,
+          "opts": {
+            "title": "VFDTest",
+            "exprIndex": 27,
+            "showSource": true,
+            "showOutput": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Page 2",
+      "widgets": [
+        {
+          "id": "231ae33e-d757-4e4e-9fe4-7780c30545e5",
+          "type": "staticvar",
+          "x": 1348,
+          "y": 464,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "preStartTime",
+            "varName": "preStartTime",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "ce7dd14e-4c9a-4bf2-8891-80c823ea6589",
+          "type": "staticvar",
+          "x": 1346,
+          "y": 558,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "prePurgeTime",
+            "varName": "prePurgeTime",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "8b18ce71-7259-4ad3-b17f-d7db8474b54c",
+          "type": "staticvar",
+          "x": 1347,
+          "y": 653,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "ignitionTime",
+            "varName": "ignitionTime",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "f2f5c796-5a2f-4ed8-a794-1a6438491d44",
+          "type": "staticvar",
+          "x": 1354,
+          "y": 938,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "postPurgeTime",
+            "varName": "postPurgeTime",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "3cb0fa84-f2e5-4668-bf0a-4d066bdf3da9",
+          "type": "staticvar",
+          "x": 1579,
+          "y": 601,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "pressTimeOut",
+            "varName": "pressTimeOut",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "0a149602-4700-463d-8454-1050b069a8be",
+          "type": "staticvar",
+          "x": 1349,
+          "y": 748,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "runTime",
+            "varName": "runTime",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "d9e2d101-a0cd-42cd-98ce-c041ef14ccc8",
+          "type": "staticvar",
+          "x": 465,
+          "y": 21,
+          "w": 218,
+          "h": 91,
+          "opts": {
+            "title": "runTankSetPoint",
+            "varName": "runTankSetPoint",
+            "decimalPlaces": 1
+          }
+        },
+        {
+          "id": "b171c7ba-acc6-46a9-ad4d-816255c041df",
+          "type": "staticvar",
+          "x": 355,
+          "y": 125,
+          "w": 223,
+          "h": 90,
+          "opts": {
+            "title": "RunTankMaxP",
+            "varName": "RunTankMaxP",
+            "decimalPlaces": 1
+          }
+        },
+        {
+          "id": "10b48f99-9997-4a17-997b-580d103db0d2",
+          "type": "staticvar",
+          "x": 238,
+          "y": 20,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "pressureSetPoint",
+            "varName": "pressureSetPoint",
+            "decimalPlaces": 1
+          }
+        },
+        {
+          "id": "8e61f83e-d190-448a-8d84-ef33db4b09cc",
+          "type": "staticvar",
+          "x": 1352,
+          "y": 842,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "postVentTime",
+            "varName": "postVentTime",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "a60e0e0e-51fc-48b2-b6b8-f5fa9503638a",
+          "type": "dobutton",
+          "x": 25,
+          "y": 66,
+          "w": 144,
+          "h": 93,
+          "opts": {
+            "title": "S1",
+            "outputType": "do",
+            "doIndex": 1,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "aa107d2d-0d1f-4d86-acc2-13b24ce6504d",
+          "type": "dobutton",
+          "x": 26,
+          "y": 165,
+          "w": 144,
+          "h": 94,
+          "opts": {
+            "title": "S2",
+            "outputType": "do",
+            "doIndex": 3,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "0b375437-57bb-435b-bae4-e322d01daf64",
+          "type": "dobutton",
+          "x": 27,
+          "y": 266,
+          "w": 143,
+          "h": 90,
+          "opts": {
+            "title": "S3",
+            "outputType": "do",
+            "doIndex": 10,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "eb419e0a-6027-4d9d-8ebe-88c172d9f1ba",
+          "type": "dobutton",
+          "x": 25,
+          "y": 365,
+          "w": 145,
+          "h": 89,
+          "opts": {
+            "title": "S4",
+            "outputType": "do",
+            "doIndex": 9,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "b286cce8-cc30-4aa0-b68d-a46bd7748ade",
+          "type": "dobutton",
+          "x": 25,
+          "y": 461,
+          "w": 145,
+          "h": 92,
+          "opts": {
+            "title": "S5",
+            "outputType": "do",
+            "doIndex": 0,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "f2714c3d-6e34-4e78-a7f0-02e3ef3c7b07",
+          "type": "dobutton",
+          "x": 25,
+          "y": 560,
+          "w": 145,
+          "h": 91,
+          "opts": {
+            "title": "S6",
+            "outputType": "do",
+            "doIndex": 2,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "11198bdc-91cd-4896-8bee-24b6cc9bac36",
+          "type": "dobutton",
+          "x": 25,
+          "y": 762,
+          "w": 147,
+          "h": 94,
+          "opts": {
+            "title": "S8",
+            "outputType": "do",
+            "doIndex": 6,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "a7c59e86-2b5f-493f-a220-140c39535f2b",
+          "type": "dobutton",
+          "x": 27,
+          "y": 863,
+          "w": 148,
+          "h": 88,
+          "opts": {
+            "title": "S9",
+            "outputType": "do",
+            "doIndex": 5,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "c53a005d-1085-4191-b26c-4be5ec7fb862",
+          "type": "dobutton",
+          "x": 29,
+          "y": 959,
+          "w": 147,
+          "h": 93,
+          "opts": {
+            "title": "S10",
+            "outputType": "do",
+            "doIndex": 11,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "941eae4c-9a1a-47d1-b990-ef03a29ddf48",
+          "type": "dobutton",
+          "x": 22,
+          "y": 661,
+          "w": 148,
+          "h": 95,
+          "opts": {
+            "title": "S7",
+            "outputType": "do",
+            "doIndex": 4,
+            "varName": "button1",
+            "activeHigh": true,
+            "mode": "momentary",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        }
+      ]
+    }
+  ],
+  "grid": {
+    "enabled": true,
+    "size": 5,
+    "show": true,
+    "color": "#333333"
+  },
+  "checklist": {
+    "top": "315px",
+    "left": "1055px",
+    "width": "1420px",
+    "height": "150px",
+    "display": "none",
+    "fileName": "checklist_MIX_Testing.txt",
+    "content": " #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\nDate: ____________6-9-2026______________________\nTime: ________________________________________\nPlace: _________Glen Rose_____________\nConditions: ____________________________________\n_______Purpose / Objectives ____Test Fire Mixed LOX/CH4 with Short Engine_________\n___Assuming He Press and Purge, Pyro Ignition ___\n___LOX Conditions line from pump to engine, Nitrogen dilutes mix in mini-dewar\n\nCREW: ___TD__,  PAD1___\n\nITEMS IN ITALLICS  OR  GRAY  TEXT ARE INFORMATIONAL ONLY AND NOT TO BE CALLED OUT\n5   |TD  |Load current CHECKLIST   \"checklist_MIX_Testing.txt\"  if you haven't done so    |O   |0.0    |        |        |1\n10  |TD  |Comm Check,  PAD1                                                               |O   |0.0    |        |        |1\n15  |PAD1|Verify all containment ready, blocks and shields                                |O   |0.0    |        |        |1\n20  |TD  |Verify  'Ignition ARM'   is off                                                 |O   |0.0    |        |        |1\n\n      TEST will have previously started Command and Control App\n25  |PAD1|Has tightness check been completed                                              |O   |0.0    |        |        |1\n30  |PAD1|Verify LOX, Fuel and Nitrogen Vents Closed, Liquid Lines Open, Pressure Builders|O   |0.0    |        |        |1\n35  |PAD1|Verify Helium Bottle Valve Closed                                               |O   |0.0    |        |        |1\n40  |PAD1|Verify Helium Regulator Fully OFF                                               |O   |0.0    |        |        |1\n======================= PRE-TEST CHECKS ==================================================\n45  |TD  |On control app restart log, note name ______________________________            |O   |0.0    |        |        |1\n50  |PAD1|Verify the following (PAGE2 of control panel):                                  |O   |0.0    |        |        |1\n55  |    |       S1 - LOX Fill                                                            |O   |0.0    |        |        |1\n60  |    |       S2 - Fuel Fill                                                           |O   |0.0    |        |        |1\n65  |    |       S3 - MIX Into Engine                                                     |O   |0.0    |        |        |1\n70  |    |       S4 - Run Tank Vent                                                       |O   |0.0    |        |        |1\n75  |    |       S5 - Condition Vent                                                      |O   |0.0    |        |        |1\n80  |    |       S6 - LN2 Dilute                                                          |O   |0.0    |        |        |1\n85  |    |       S7 - MIX Out                                                             |O   |0.0    |        |        |1\n90  |    |       S8 - Helium                                                              |O   |0.0    |        |        |1\n95  |    |       S9 - LOX Condition                                                       |O   |0.0    |        |        |1\n100 |    |       S10 - LN2 Vent                                                           |O   |0.0    |        |        |1\n105 |    |       Pump Motor                                                               |O   |0.0    |        |        |1\n110 |TD  |Zero Pressure Transducers,    LOX Zero ____________,  Fuel Zero _________       |O   |0.0    |        |        |1\n115 |PAD1|Disconnect Igniter, connect indicator                                           |O   |0.0    |        |        |1\n120 |TD  |Turn on    'Ignition ARM'                                                       |O   |0.0    |        |        |1\n125 |PAD1|Verify igniter with indicator      (TD FLASH IGNITER)                           |O   |0.0    |        |        |1\n130 |TD  |Turn off   'Ignition ARM'                                                       |O   |0.0    |        |        |1\n135 |PAD1|Connect Igniter                                                                 |O   |0.0    |        |        |1\n140 |PAD1|Verify camera positions                                                         |O   |0.0    |        |        |1\n145 |PAD1|Open Helium Bottle Valve, report pressure ________________________              |O   |0.0    |        |        |1\n150 |PAD1|Set Helium regulator to : _____55_____psi                                       |O   |0.0    |        |        |1\n155 |PAD1|Turn gaseous Oxygen to pump ON                                                  |O   |0.0    |        |        |1\n160 |PAD1|Retreat to safe position                                                        |O   |0.0    |        |        |1\n=============================== START HAZARDOUS OPS ====================================\n=========================== BEGIN CONDITIONING MIX FILL LINE===============================\n165 |TD  |Turn ON    \"S9 - LOX Condition\"                                                 |O   |0.0    |        |        |1\n170 |TD  |Wait for liquid to show out of   S4 - Engine Vent                               |O   |0.0    |        |        |1\n175 |TD  |Switch on LOX Maintain                                                          |O   |0.0    |        |        |1\n=========================================================================================\n=========================== BEGIN CONDITIONING LN2 =======================================\n180 |TD  |Turn ON   \"S10 - LN2 Condition Vent\"                                            |O   |0.0    |        |        |1\n185 |TD  |Wait for liquid to show out of S10 - Vent                                       |O   |0.0    |        |        |1\n190 |TD  |Switch on LN2 Maintain                                                          |O   |0.0    |        |        |1\n==========================================================================================\n============================= PRELIMINARY FUEL CONDITION =================================\n195 |TD  |Turn on  \"S2 - Fuel Direct\"                                                     |O   |0.0    |        |        |1\n200 |TD  |Wait for liquid to show in mix tank                                             |O   |0.0    |        |        |1\n205 |TD  |Flush Mix tank with LN2, use     \"S6 - Dilute\", short bursts, keep as gas!      |O   |0.0    |        |        |1\n==========================================================================================\n===================================== FILL MIX TANK ========================================\n210 |TD  |Verify desired LOX amount variable is set to   600 grams                        |O   |0.0    |        |        |1\n215 |TD  |Turn ON   \"S1 - Fill LOX \"                                                      |O   |0.0    |        |        |1\n220 |TD  |Once LOX is filled, turn on   \"Load Prop\"                                       |O   |0.0    |        |        |1\n225 |TD  |Turn on Pump and pump out mix tank                                              |O   |0.0    |        |        |1\n230 |TD  |Press    \"Backflush Eng\"   to clear engine and line                             |O   |0.0    |        |        |1\n235 |TD  |Set desired LOX amount to test condition 200 grams,   verify_________g          |O   |0.0    |        |        |1\n240 |TD  |Turn ON   \"S1 - Fill LOX\",   wait for quantity to load                          |O   |0.0    |        |        |1\n245 |TD  |Turn ON   \"Fill Fuel\",  wait for gas to increase weight,   press \"Gas Offset\"   |O   |0.0    |        |        |1\n250 |TD  |Verify load matches desired MR                                                  |O   |0.0    |        |        |1\n255 |TD  |Turn ON   \"Load Prop\"                                                           |O   |0.0    |        |        |1\n260 |TD  |Turn ON  PUMP,    wait for load to finish                                       |O   |0.0    |        |        |1\n265 |TD  |Turn OFF Pump                                                                   |O   |0.0    |        |        |1\n270 |TD  |Turn OFF \"Load Prop\"                                                            |O   |0.0    |        |        |1\n275 |TD  |Press  \"Backflush Line\"                                                         |O   |0.0    |        |        |1\n==========================================================================================\n============================== START TEST SEQUENCE =======================================\n280 |PAD1|Start Recording CAM1 (normal speed)                                             |O   |0.0    |        |        |1\n285 |TD  |Announce   'ARMING THE SYSTEM'                                                  |O   |0.0    |        |        |1\n290 |TD  |Press   'Ignition ARM'                                                          |O   |0.0    |        |        |1\n295 |PAD1|Start High Speed Recording                                                      |O   |0.0    |        |        |1\n================================ FIRING SEQUENCE ========================================\n300 |TD  |Press    RUN TEST   Button                                                      |O   |0.0    |        |        |1\nTest is automated, purges lines, pressurizes run tank and runs test.\nNOTE: the automated test DOES NOT ARM ignition!\n\n===================== APPENDIX - A       EMERGENCY MIX DUMP ===============================\n305 |TD  |TURN OFF ALL BUT LN2 Cond                                                       |O   |0.0    |        |        |1\n310 |TD  |Turn   ON    \"S6 Dilute\"                                                        |O   |0.0    |        |        |1\n315 |TD  |Wait for double the weight                                                      |O   |0.0    |        |        |1\n320 |TD  |Turn  ON    \"S7 Chill Out\"                                                      |O   |0.0    |        |        |1\n325 |TD  |Turn  ON  Pump                                                                  |O   |0.0    |        |        |1\n330 |TD  |When weight is at minimum, turn   OFF   Pump                                    |O   |0.0    |        |        |1\n335 |    |Turn OFF   \"S7 Chill Out\"                                                       |O   |0.0    |        |        |1\n GOTO APPENDIX B  - SCRUB\n \n===================== APPENDIX - B       SCRUB / TEST COMPLETE ===============================\n340 |TD  |Press  'Purge'                                                                  |O   |0.0    |        |        |1\n345 |TD  |Turn on   \"S6 Dilute\"    Wait for 2X weight dilution                            |O   |0.0    |        |        |1\n350 |TD  |Turn OFF   'Ignition ARM'                                                       |O   |0.0    |        |        |1\n355 |    |Turn on   \"S6 Dilute\"   again and double the weight                             |O   |0.0    |        |        |1\n360 |TD  |Announce when safe to approach                                                  |O   |0.0    |        |        |1\n365 |PAD1|All dewars:  Turn off liquid lines, pressure builder and gas use                |O   |0.0    |        |        |1\n370 |TD  |All dewars:   Turn on vents                                                     |O   |0.0    |        |        |1\n=========================================================================================\n=========================== POST TEST TASKS ==============================================\n375 |PAD1|Open LN2 Dewar Vent                                                             |O   |0.0    |        |        |1\n380 |PAD1|Close LN2 Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n385 |PAD1|Open LOX Dewar Vent                                                             |O   |0.0    |        |        |1\n390 |PAD1|Close LOX Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n395 |PAD1|Open LNG Dewar Vent                                                             |O   |0.0    |        |        |1\n400 |PAD1|Close LNG Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n405 |PAD1|Turn of Helium Regulator                                                        |O   |0.0    |        |        |1\n410 |PAD1|Report final Helium pressure __________________                                 |O   |0.0    |        |        |1\n415 |PAD1|Close  Helium  bottle valve                                                     |O   |0.0    |        |        |1\n420 |ALL |TURN OFF RADIOS                                                                 |O   |0.0    |        |        |1\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+  }
+}
