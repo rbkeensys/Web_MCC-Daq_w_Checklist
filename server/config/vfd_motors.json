@@ -1,0 +1,17 @@
+{
+  "motors": [
+    {
+      "key": "regen_blower",
+      "label": "Regen Blower 2-pole 60Hz 3450rpm 1.5kW (max 75Hz, 25% overspeed)",
+      "poles": 2,
+      "rated_hz": 70,
+      "rated_rpm": 4025,
+      "rated_current_a": 0,
+      "max_hz": 70,
+      "min_hz": 0,
+      "accel_s": 1,
+      "decel_s": 1,
+      "note": "rated 60Hz/3450rpm; max_hz=75 = allowed 25% overspeed (P0.05 == 0x5000 % base, keep equal). accel_s/decel_s -> GK3000 P0.12/P0.13 at 0.1 s/count; set to 20 s to match the drive's existing ramp."
+    }
+  ]
+}

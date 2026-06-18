@@ -1,0 +1,602 @@
+{
+  "drive_type": "h100",
+  "drive_name": "QNK H100 (5.5S2-1B) / V70",
+  "source": "QNK/H100 user manual Ch.5-6 (uploaded pp.20-21,31,78-81) + verified H100 profile in vfd_driver.py",
+  "address_rule": "F<nnn>: holding-register address = decimal nnn as hex. e.g. F100->0x0064, F005->0x0005, F164->0x00A4. (Verified in manual p79.)",
+  "access_legend": {
+    "rw": "changeable while running (manual \u25a2)",
+    "stop": "changeable only when stopped (manual \u00d7)",
+    "ro": "read-only (manual \u0394)"
+  },
+  "param_read_fn": "0x03",
+  "param_write_fn": "0x06",
+  "monitor_read_fn": "0x04",
+  "command_model": "coils via fn 0x05 (writable cmd coils from 0x0048; run 0x0049 fwd / 0x004A rev / 0x004B stop per profile). Freq setpoint = comm special var 0x0201 (fn 0x06), direct 0.1Hz.",
+  "notes": [
+    "CURATED subset mirroring vfd_params_gk3000.json -- not the full F000-F185 table.",
+    "06H writes a single holding reg for all params; F013/F172 are 06H-only (no 10H, no response frame).",
+    "Comm-special variables (>=0x0200) are RAM-only; F-params persist to EEPROM (don't rewrite frequently).",
+    "Freq limits: F005 = max operating frequency (upper), F011 = lower frequency limit.",
+    "UNVERIFIED: F140/F141/F142 decimal scaling -- confirm before build_motor_setup writes H100 nameplate values."
+  ],
+  "baud_param": {
+    "token": "F164",
+    "address": "0x00A4",
+    "code_map": {
+      "4800": 0,
+      "9600": 1,
+      "19200": 2,
+      "38400": 3
+    },
+    "max_baud": 38400,
+    "note": "H100 cannot exceed 38400."
+  },
+  "parameters": [
+    {
+      "code": "F000",
+      "name": "Parameter locking",
+      "address": "0x0000",
+      "unit": "",
+      "default": 0,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "values": {
+        "0": "invalid",
+        "1": "valid"
+      }
+    },
+    {
+      "code": "F001",
+      "name": "Control mode (run command source)",
+      "address": "0x0001",
+      "unit": "",
+      "default": 0,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "values": {
+        "0": "keypad",
+        "1": "external terminal",
+        "2": "communication"
+      },
+      "note": "set 2 for comms control"
+    },
+    {
+      "code": "F002",
+      "name": "Frequency setting selection",
+      "address": "0x0002",
+      "unit": "",
+      "default": 3,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "values": {
+        "0": "keypad",
+        "1": "AI1",
+        "2": "communication",
+        "3": "potentiometer",
+        "4": "AI2",
+        "5": "PFI",
+        "6": "AI1+AI2"
+      },
+      "note": "set 2 for comms setpoint (written to special var 0x0201)"
+    },
+    {
+      "code": "F003",
+      "name": "Main frequency",
+      "address": "0x0003",
+      "unit": "0.1Hz",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.0~1000.0Hz; comm value 300 = 30.0Hz"
+    },
+    {
+      "code": "F004",
+      "name": "Reference frequency",
+      "address": "0x0004",
+      "unit": "Hz",
+      "default": 50.0,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.1~1000.0Hz"
+    },
+    {
+      "code": "F005",
+      "name": "Maximum operating frequency",
+      "address": "0x0005",
+      "unit": "Hz",
+      "default": 50.0,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "10.0~1000.0Hz -- UPPER freq limit"
+    },
+    {
+      "code": "F006",
+      "name": "Intermediate frequency",
+      "address": "0x0006",
+      "unit": "Hz",
+      "default": 5.0,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F007",
+      "name": "Minimum frequency",
+      "address": "0x0007",
+      "unit": "Hz",
+      "default": 0.5,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.1~20.0Hz"
+    },
+    {
+      "code": "F008",
+      "name": "Maximum voltage",
+      "address": "0x0008",
+      "unit": "V",
+      "default": "220/380",
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F009",
+      "name": "Intermediate voltage",
+      "address": "0x0009",
+      "unit": "V",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F010",
+      "name": "Low-frequency torque boost voltage",
+      "address": "0x000A",
+      "unit": "V",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.1~50.0V"
+    },
+    {
+      "code": "F011",
+      "name": "Lower frequency limit",
+      "address": "0x000B",
+      "unit": "Hz",
+      "default": 0,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.0~1000.0Hz -- LOWER freq limit"
+    },
+    {
+      "code": "F012",
+      "name": "Drive control mode",
+      "address": "0x000C",
+      "unit": "",
+      "default": 1,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "values": {
+        "0": "V/F",
+        "1": "vector control"
+      }
+    },
+    {
+      "code": "F013",
+      "name": "Parameter resetting",
+      "address": "0x000D",
+      "unit": "",
+      "default": 0,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "values": {
+        "8": "restore ex-factory"
+      },
+      "note": "06H-only write, no response frame"
+    },
+    {
+      "code": "F014",
+      "name": "Acceleration time I",
+      "address": "0x000E",
+      "unit": "s",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.1~650.00s"
+    },
+    {
+      "code": "F015",
+      "name": "Deceleration time I",
+      "address": "0x000F",
+      "unit": "s",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.1~650.00s"
+    },
+    {
+      "code": "F016",
+      "name": "Acceleration time II",
+      "address": "0x0010",
+      "unit": "s",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F017",
+      "name": "Deceleration time II",
+      "address": "0x0011",
+      "unit": "s",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F018",
+      "name": "Acceleration time III",
+      "address": "0x0012",
+      "unit": "s",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F019",
+      "name": "Deceleration time III",
+      "address": "0x0013",
+      "unit": "s",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F020",
+      "name": "Acceleration time IV (jogging)",
+      "address": "0x0014",
+      "unit": "s",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F021",
+      "name": "Deceleration time IV (jogging)",
+      "address": "0x0015",
+      "unit": "s",
+      "default": null,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F022",
+      "name": "Emergency stop deceleration time",
+      "address": "0x0016",
+      "unit": "s",
+      "default": 0.0,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.1~650.00s; 0.00 = coast to stop"
+    },
+    {
+      "code": "F023",
+      "name": "Reverse prohibit",
+      "address": "0x0017",
+      "unit": "",
+      "default": 1,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "values": {
+        "0": "prohibit",
+        "1": "allow"
+      }
+    },
+    {
+      "code": "F024",
+      "name": "Stop key valid",
+      "address": "0x0018",
+      "unit": "",
+      "default": 1,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "values": {
+        "0": "invalid",
+        "1": "valid"
+      }
+    },
+    {
+      "code": "F025",
+      "name": "Start mode",
+      "address": "0x0019",
+      "unit": "",
+      "default": 0,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "values": {
+        "0": "from start frequency",
+        "1": "frequency tracking"
+      }
+    },
+    {
+      "code": "F027",
+      "name": "Starting frequency",
+      "address": "0x001B",
+      "unit": "Hz",
+      "default": 0.5,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.1~30.0Hz"
+    },
+    {
+      "code": "F028",
+      "name": "Stop frequency",
+      "address": "0x001C",
+      "unit": "Hz",
+      "default": 0.5,
+      "access": "rw",
+      "source": "H100 manual Ch.5",
+      "note": "0.1~30.0Hz"
+    },
+    {
+      "code": "F029",
+      "name": "Start braking time",
+      "address": "0x001D",
+      "unit": "s",
+      "default": 0.0,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F030",
+      "name": "Stop braking time",
+      "address": "0x001E",
+      "unit": "s",
+      "default": 0.0,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F031",
+      "name": "DC braking level",
+      "address": "0x001F",
+      "unit": "%",
+      "default": 2.0,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F032",
+      "name": "Frequency tracking time",
+      "address": "0x0020",
+      "unit": "s",
+      "default": 5.0,
+      "access": "rw",
+      "source": "H100 manual Ch.5"
+    },
+    {
+      "code": "F140",
+      "name": "Rated power of motor",
+      "address": "0x008C",
+      "unit": "kW?",
+      "default": null,
+      "access": "stop",
+      "source": "H100 manual p31",
+      "note": "set per nameplate; decimal SCALE UNVERIFIED -- confirm before nameplate writes"
+    },
+    {
+      "code": "F141",
+      "name": "Rated voltage of motor",
+      "address": "0x008D",
+      "unit": "V",
+      "default": null,
+      "access": "stop",
+      "source": "H100 manual p31",
+      "note": "scale unverified"
+    },
+    {
+      "code": "F142",
+      "name": "Rated current of motor",
+      "address": "0x008E",
+      "unit": "A?",
+      "default": null,
+      "access": "stop",
+      "source": "H100 manual p31",
+      "note": "scale unverified"
+    },
+    {
+      "code": "F143",
+      "name": "Number of motor poles",
+      "address": "0x008F",
+      "unit": "",
+      "default": 4,
+      "access": "stop",
+      "source": "H100 manual p31",
+      "note": "02~22, integer"
+    },
+    {
+      "code": "F144",
+      "name": "Rated rotating speed of motor",
+      "address": "0x0090",
+      "unit": "rpm",
+      "default": 1440,
+      "access": "stop",
+      "source": "H100 manual p31",
+      "note": "00~9999, integer (regen_blower = 3450)"
+    },
+    {
+      "code": "F145",
+      "name": "Automatic torque compensation",
+      "address": "0x0091",
+      "unit": "%",
+      "default": 2.0,
+      "access": "rw",
+      "source": "H100 manual p31"
+    },
+    {
+      "code": "F146",
+      "name": "Motor no-load current",
+      "address": "0x0092",
+      "unit": "%",
+      "default": 40,
+      "access": "rw",
+      "source": "H100 manual p31"
+    },
+    {
+      "code": "F147",
+      "name": "Motor slip compensation",
+      "address": "0x0093",
+      "unit": "",
+      "default": 0.0,
+      "access": "rw",
+      "source": "H100 manual p31"
+    },
+    {
+      "code": "F148",
+      "name": "Motor slip compensation max frequency",
+      "address": "0x0094",
+      "unit": "Hz",
+      "default": 2.0,
+      "access": "rw",
+      "source": "H100 manual p31"
+    },
+    {
+      "code": "F149",
+      "name": "Motor slip compensation filtering time",
+      "address": "0x0095",
+      "unit": "ms",
+      "default": 10,
+      "access": "rw",
+      "source": "H100 manual p31"
+    },
+    {
+      "code": "F150",
+      "name": "AVR function",
+      "address": "0x0096",
+      "unit": "",
+      "default": 1,
+      "access": "rw",
+      "source": "H100 manual p31",
+      "values": {
+        "0": "off",
+        "1": "on"
+      }
+    },
+    {
+      "code": "F163",
+      "name": "Communication address",
+      "address": "0x00A3",
+      "unit": "",
+      "default": 1,
+      "access": "stop",
+      "source": "H100 manual p78",
+      "note": "1-250"
+    },
+    {
+      "code": "F164",
+      "name": "Communication transmission speed",
+      "address": "0x00A4",
+      "unit": "",
+      "default": 2,
+      "access": "stop",
+      "source": "H100 manual p78",
+      "values": {
+        "0": 4800,
+        "1": 9600,
+        "2": 19200,
+        "3": 38400
+      },
+      "note": "MAX 38400; no 57600/115200"
+    },
+    {
+      "code": "F165",
+      "name": "Communication data mode",
+      "address": "0x00A5",
+      "unit": "",
+      "default": 3,
+      "access": "stop",
+      "source": "H100 manual p78",
+      "values": {
+        "0": "8N1 ASCII",
+        "1": "8E1 ASCII",
+        "2": "8O1 ASCII",
+        "3": "8N1 RTU",
+        "4": "8E1 RTU",
+        "5": "8O1 RTU"
+      }
+    },
+    {
+      "code": "F169",
+      "name": "Communication protocol selection",
+      "address": "0x00A9",
+      "unit": "",
+      "default": 1,
+      "access": "stop",
+      "source": "H100 manual p79",
+      "values": {
+        "0": "standard Modbus",
+        "1": "H100 protocol"
+      },
+      "note": "must be 0 for standard Modbus"
+    }
+  ],
+  "monitor_registers": [
+    {
+      "name": "Output frequency",
+      "unit": "Hz",
+      "address": "0x0000",
+      "scale": 0.1
+    },
+    {
+      "name": "Set frequency",
+      "unit": "Hz",
+      "address": "0x0001",
+      "scale": 0.1
+    },
+    {
+      "name": "Output current",
+      "unit": "A",
+      "address": "0x0002",
+      "scale": 0.1
+    },
+    {
+      "name": "Output speed (rpm)",
+      "unit": "rpm",
+      "address": "0x0003",
+      "scale": 1
+    },
+    {
+      "name": "Bus voltage",
+      "unit": "V",
+      "address": "0x0004",
+      "scale": 1
+    },
+    {
+      "name": "Output voltage",
+      "unit": "V",
+      "address": "0x0005",
+      "scale": 1
+    },
+    {
+      "name": "Temperature",
+      "unit": "C",
+      "address": "0x0006",
+      "scale": 1
+    },
+    {
+      "name": "Fault code",
+      "unit": "",
+      "address": "0x000A",
+      "scale": 1
+    },
+    {
+      "name": "Run hours",
+      "unit": "h",
+      "address": "0x000B",
+      "scale": 1
+    },
+    {
+      "name": "Output power",
+      "unit": "kW",
+      "address": "0x000C",
+      "scale": 0.1
+    }
+  ]
+}

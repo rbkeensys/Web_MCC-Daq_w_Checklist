@@ -1,0 +1,19 @@
+{
+  "instances": [
+    {
+      "name": "VFD 1",
+      "include": true,
+      "drive_key": "gk3000",
+      "motor_key": "regen_blower",
+      "port": "COM3",
+      "baud": 115200,
+      "parity": "N",
+      "stopbits": 2,
+      "address": 1,
+      "timeout": 0.5,
+      "watchdog_s": 0,
+      "auto_setup": true,
+      "poll_rate_ms": 100
+    }
+  ]
+}

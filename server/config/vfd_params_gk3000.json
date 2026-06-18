@@ -1,0 +1,632 @@
+{
+  "drive_type": "gk3000",
+  "drive_name": "ATO GK3000",
+  "source": "ATO GK3000 user manual Ch.5 (function parameter table) + Ch.9 (Modbus map) + Group PC comms table (manual pp.85-86)",
+  "address_rule": "P<group>.<reg>: address = 0xF000 + group_hex*0x100 + reg_decimal. e.g. P0.03->0xF003, P6.10->0xF60A, PB.16->0xFB10",
+  "param_read_fn": "0x03",
+  "param_write_fn": "0x06",
+  "param_save_fn": "0x07",
+  "access_legend": {
+    "rw": "modifiable while running",
+    "stop": "modifiable only when stopped",
+    "ro": "read-only"
+  },
+  "parameters": [
+    {
+      "code": "P0.00",
+      "name": "Control mode",
+      "address": "0xF000",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    },
+    {
+      "code": "P0.01",
+      "name": "Main frequency source 1 selection",
+      "address": "0xF001",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    },
+    {
+      "code": "P0.02",
+      "name": "Setting running frequency",
+      "address": "0xF002",
+      "unit": "Hz",
+      "default": 50.0,
+      "access": "rw"
+    },
+    {
+      "code": "P0.03",
+      "name": "Command source selection",
+      "address": "0xF003",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "P0.04",
+      "name": "Rotation direction",
+      "address": "0xF004",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "P0.05",
+      "name": "Maximum frequency",
+      "address": "0xF005",
+      "unit": "Hz",
+      "default": 50.0,
+      "access": "stop"
+    },
+    {
+      "code": "P0.06",
+      "name": "Frequency upper limit",
+      "address": "0xF006",
+      "unit": "Hz",
+      "default": 50.0,
+      "access": "rw"
+    },
+    {
+      "code": "P0.07",
+      "name": "Frequency lower limit",
+      "address": "0xF007",
+      "unit": "Hz",
+      "default": 0.0,
+      "access": "rw"
+    },
+    {
+      "code": "P0.08",
+      "name": "Source of frequency upper limit",
+      "address": "0xF008",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    },
+    {
+      "code": "P0.09",
+      "name": "Frequency upper limit offset",
+      "address": "0xF009",
+      "unit": "Hz",
+      "default": 0.0,
+      "access": "rw"
+    },
+    {
+      "code": "P0.10",
+      "name": "Carrier frequency",
+      "address": "0xF00A",
+      "unit": "kHz",
+      "default": null,
+      "access": "rw"
+    },
+    {
+      "code": "P0.11",
+      "name": "Carrier freq adjust with temperature",
+      "address": "0xF00B",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "P0.12",
+      "name": "Acceleration time 0",
+      "address": "0xF00C",
+      "unit": "s",
+      "default": null,
+      "access": "rw"
+    },
+    {
+      "code": "P0.13",
+      "name": "Deceleration time 0",
+      "address": "0xF00D",
+      "unit": "s",
+      "default": null,
+      "access": "rw"
+    },
+    {
+      "code": "P0.14",
+      "name": "Accel/Decel time unit",
+      "address": "0xF00E",
+      "unit": "",
+      "default": 1,
+      "access": "stop"
+    },
+    {
+      "code": "P0.21",
+      "name": "Frequency command resolution",
+      "address": "0xF015",
+      "unit": "",
+      "default": 2,
+      "access": "stop"
+    },
+    {
+      "code": "P0.25",
+      "name": "G/P type setting",
+      "address": "0xF019",
+      "unit": "",
+      "default": 1,
+      "access": "ro"
+    },
+    {
+      "code": "P0.27",
+      "name": "Serial communication protocol",
+      "address": "0xF01B",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    },
+    {
+      "code": "P1.00",
+      "name": "Start mode",
+      "address": "0xF100",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "P1.01",
+      "name": "Startup frequency",
+      "address": "0xF101",
+      "unit": "Hz",
+      "default": 0.0,
+      "access": "rw"
+    },
+    {
+      "code": "P1.05",
+      "name": "Stop mode",
+      "address": "0xF105",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "P1.08",
+      "name": "DC braking time when stop",
+      "address": "0xF108",
+      "unit": "s",
+      "default": 0.0,
+      "access": "rw"
+    },
+    {
+      "code": "P1.13",
+      "name": "Accel/Decel mode",
+      "address": "0xF10D",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    },
+    {
+      "code": "P2.00",
+      "name": "JOG running frequency",
+      "address": "0xF200",
+      "unit": "Hz",
+      "default": 5.0,
+      "access": "rw"
+    },
+    {
+      "code": "P2.03",
+      "name": "Acceleration time 1",
+      "address": "0xF203",
+      "unit": "s",
+      "default": null,
+      "access": "rw"
+    },
+    {
+      "code": "P2.04",
+      "name": "Deceleration time 1",
+      "address": "0xF204",
+      "unit": "s",
+      "default": null,
+      "access": "rw"
+    },
+    {
+      "code": "P2.13",
+      "name": "Reverse control",
+      "address": "0xF20D",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "P2.34",
+      "name": "Output overcurrent threshold",
+      "address": "0xF222",
+      "unit": "%",
+      "default": 200.0,
+      "access": "rw"
+    },
+    {
+      "code": "P5.00",
+      "name": "V/F curve setting",
+      "address": "0xF500",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    },
+    {
+      "code": "P5.01",
+      "name": "Torque boost",
+      "address": "0xF501",
+      "unit": "%",
+      "default": null,
+      "access": "rw"
+    },
+    {
+      "code": "P6.00",
+      "name": "PID setting source",
+      "address": "0xF600",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "P6.01",
+      "name": "PID digital setting",
+      "address": "0xF601",
+      "unit": "%",
+      "default": 50,
+      "access": "rw"
+    },
+    {
+      "code": "P6.02",
+      "name": "PID feedback source",
+      "address": "0xF602",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "P6.05",
+      "name": "Proportional gain KP1",
+      "address": "0xF605",
+      "unit": "",
+      "default": 20.0,
+      "access": "rw"
+    },
+    {
+      "code": "P6.06",
+      "name": "Integral time TI1",
+      "address": "0xF606",
+      "unit": "s",
+      "default": 2.0,
+      "access": "rw"
+    },
+    {
+      "code": "P6.07",
+      "name": "Differential time TD1",
+      "address": "0xF607",
+      "unit": "s",
+      "default": 0.0,
+      "access": "rw"
+    },
+    {
+      "code": "P7.08",
+      "name": "Accumulative running time",
+      "address": "0xF708",
+      "unit": "h",
+      "default": null,
+      "access": "ro"
+    },
+    {
+      "code": "P7.09",
+      "name": "Software version 1",
+      "address": "0xF709",
+      "unit": "",
+      "default": null,
+      "access": "ro"
+    },
+    {
+      "code": "P8.00",
+      "name": "Motor type selection",
+      "address": "0xF800",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    },
+    {
+      "code": "P8.01",
+      "name": "Rated motor power",
+      "address": "0xF801",
+      "unit": "kW",
+      "default": null,
+      "access": "stop"
+    },
+    {
+      "code": "P8.02",
+      "name": "Rated motor voltage",
+      "address": "0xF802",
+      "unit": "V",
+      "default": null,
+      "access": "stop"
+    },
+    {
+      "code": "P8.03",
+      "name": "Rated motor current",
+      "address": "0xF803",
+      "unit": "A",
+      "default": null,
+      "access": "stop"
+    },
+    {
+      "code": "P8.04",
+      "name": "Rated motor frequency",
+      "address": "0xF804",
+      "unit": "Hz",
+      "default": null,
+      "access": "stop"
+    },
+    {
+      "code": "P8.05",
+      "name": "Rated motor rotational speed",
+      "address": "0xF805",
+      "unit": "rpm",
+      "default": null,
+      "access": "stop"
+    },
+    {
+      "code": "P8.37",
+      "name": "Auto-tuning selection",
+      "address": "0xF825",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    },
+    {
+      "code": "P9.00",
+      "name": "Speed/Torque control mode",
+      "address": "0xF900",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    },
+    {
+      "code": "P9.11",
+      "name": "Torque upper limit (speed mode)",
+      "address": "0xF90B",
+      "unit": "%",
+      "default": 150.0,
+      "access": "rw"
+    },
+    {
+      "code": "PA.00",
+      "name": "Motor overload protection selection",
+      "address": "0xFA00",
+      "unit": "",
+      "default": 1,
+      "access": "rw"
+    },
+    {
+      "code": "PA.01",
+      "name": "Motor overload protection gain",
+      "address": "0xFA01",
+      "unit": "",
+      "default": 1.0,
+      "access": "rw"
+    },
+    {
+      "code": "PA.04",
+      "name": "Over voltage stall protective voltage",
+      "address": "0xFA04",
+      "unit": "%",
+      "default": 130,
+      "access": "rw"
+    },
+    {
+      "code": "PA.09",
+      "name": "Fault auto reset times",
+      "address": "0xFA09",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "PC.00",
+      "name": "Baud rate",
+      "address": "0xFC00",
+      "unit": "",
+      "default": 5,
+      "access": "rw",
+      "values": {
+        "0": 300,
+        "1": 600,
+        "2": 1200,
+        "3": 2400,
+        "4": 4800,
+        "5": 9600,
+        "6": 19200,
+        "7": 38400,
+        "8": 57600,
+        "9": 115200
+      },
+      "note": "MODBUS baud code. GK3000 supports up to 115200 (code 9)."
+    },
+    {
+      "code": "PC.01",
+      "name": "Modbus data format",
+      "address": "0xFC01",
+      "unit": "",
+      "default": 0,
+      "access": "rw",
+      "values": {
+        "0": "8N2 (no check)",
+        "1": "8E1 (even)",
+        "2": "8O1 (odd)",
+        "3": "8N1 (no check)"
+      }
+    },
+    {
+      "code": "PC.02",
+      "name": "Local address",
+      "address": "0xFC02",
+      "unit": "",
+      "default": 1,
+      "access": "rw",
+      "values": {
+        "0": "broadcast",
+        "1-247": "node address"
+      }
+    },
+    {
+      "code": "PC.03",
+      "name": "Modbus response delay",
+      "address": "0xFC03",
+      "unit": "ms",
+      "default": 2,
+      "access": "rw"
+    },
+    {
+      "code": "PC.04",
+      "name": "Serial port comm timeout",
+      "address": "0xFC04",
+      "unit": "s",
+      "default": 0.0,
+      "access": "rw"
+    },
+    {
+      "code": "PC.05",
+      "name": "Modbus protocol data format",
+      "address": "0xFC05",
+      "unit": "",
+      "default": 0,
+      "access": "rw",
+      "values": {
+        "0": "non-standard Modbus",
+        "1": "standard Modbus"
+      },
+      "note": "standard Modbus requires 1; manual default is 0."
+    },
+    {
+      "code": "PC.06",
+      "name": "Comm reading current resolution",
+      "address": "0xFC06",
+      "unit": "",
+      "default": 0,
+      "access": "rw",
+      "values": {
+        "0": "0.01A",
+        "1": "0.1A"
+      }
+    },
+    {
+      "code": "Pd.00",
+      "name": "User password",
+      "address": "0xFD00",
+      "unit": "",
+      "default": 0,
+      "access": "rw"
+    },
+    {
+      "code": "Pd.01",
+      "name": "Restore default setting",
+      "address": "0xFD01",
+      "unit": "",
+      "default": 0,
+      "access": "stop"
+    }
+  ],
+  "monitor_registers": [
+    {
+      "code": "b0.00",
+      "name": "Operating frequency",
+      "unit": "Hz",
+      "address": "0x7000",
+      "scale": 0.01
+    },
+    {
+      "code": "b0.01",
+      "name": "Set frequency",
+      "unit": "Hz",
+      "address": "0x7001",
+      "scale": 0.01
+    },
+    {
+      "code": "b0.02",
+      "name": "Bus voltage",
+      "unit": "V",
+      "address": "0x7002",
+      "scale": 0.1
+    },
+    {
+      "code": "b0.03",
+      "name": "Output voltage",
+      "unit": "V",
+      "address": "0x7003",
+      "scale": 1
+    },
+    {
+      "code": "b0.04",
+      "name": "Output current",
+      "unit": "A",
+      "address": "0x7004",
+      "scale": 0.01
+    },
+    {
+      "code": "b0.05",
+      "name": "Output power",
+      "unit": "kW",
+      "address": "0x7005",
+      "scale": 0.1
+    },
+    {
+      "code": "b0.06",
+      "name": "Output torque",
+      "unit": "%",
+      "address": "0x7006",
+      "scale": 0.1
+    },
+    {
+      "code": "b0.07",
+      "name": "DI input status",
+      "unit": "",
+      "address": "0x7007",
+      "scale": 1
+    },
+    {
+      "code": "b0.08",
+      "name": "DO output status",
+      "unit": "",
+      "address": "0x7008",
+      "scale": 1
+    },
+    {
+      "code": "b0.14",
+      "name": "Load speed display",
+      "unit": "Hz",
+      "address": "0x700E",
+      "scale": 1
+    },
+    {
+      "code": "b0.26",
+      "name": "Current running time",
+      "unit": "min",
+      "address": "0x701A",
+      "scale": 0.1
+    },
+    {
+      "code": "b0.34",
+      "name": "Motor temperature",
+      "unit": "C",
+      "address": "0x7022",
+      "scale": 1
+    }
+  ],
+  "baud_param": {
+    "token": "PC.00",
+    "address": "0xFC00",
+    "code_map": {
+      "300": 0,
+      "600": 1,
+      "1200": 2,
+      "2400": 3,
+      "4800": 4,
+      "9600": 5,
+      "19200": 6,
+      "38400": 7,
+      "57600": 8,
+      "115200": 9
+    },
+    "max_baud": 115200,
+    "note": "GK3000 PC.00 covers 300..115200. Data format is a SEPARATE param (PC.01); changing baud does not change parity/stop."
+  }
+}

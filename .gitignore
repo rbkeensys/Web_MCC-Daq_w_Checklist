@@ -1,0 +1,28 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+
+# --- Build artifacts ---
+build/
+dist/
+compiled/
+*.obj
+*.exe
+
+# --- Editor ---
+.idea/
+
+# --- Emergency edit backups (now redundant with git history) ---
+*.bak
+*.bak_*
+*- Copy.*
+* - Copy.*
+
+# --- Logs / runtime ---
+logs/
+*.log
+
+# --- Secrets / TLS (never commit private keys) ---
+*.pem
+server/config/ssl/

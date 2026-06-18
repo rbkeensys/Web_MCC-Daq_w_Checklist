@@ -1,0 +1,100 @@
+{
+  "drives": [
+    {
+      "key": "gk3000",
+      "profile": "gk3000",
+      "label": "ATO GK3000 (2S0037G 3.7kW)",
+      "default_baud": 9600,
+      "default_parity": "N",
+      "default_stopbits": 2,
+      "default_address": 1,
+      "notes": "Freq setpoint is % of max freq (0x5000, +/-10000 = +/-100% of P0.05). REQUIRES P0.03=2 (comm command/run) AND P0.01=9 (comm frequency source). Max/upper/lower freq limits (P0.05/06/07) are applied from the MOTOR's max_hz/min_hz (vfd_motors.json), not here -- keep motor.max_hz == drive max freq. Default 9600 8-N-2.",
+      "setup_params": [
+        {
+          "name": "P0.01",
+          "register": 61441,
+          "value": 9,
+          "desc": "frequency source 1 = 485 communication (honor the 0x5000 setpoint)"
+        },
+        {
+          "name": "P0.03",
+          "register": 61443,
+          "value": 2,
+          "desc": "command source = serial"
+        },
+        {
+          "name": "PC.02",
+          "register": 64514,
+          "value": 1,
+          "desc": "local address (1)"
+        },
+        {
+          "name": "PC.00",
+          "register": 64512,
+          "value": 5,
+          "desc": "baud 9600"
+        },
+        {
+          "name": "PC.01",
+          "register": 64513,
+          "value": 0,
+          "desc": "8-N-2"
+        },
+        {
+          "name": "PC.05",
+          "register": 64517,
+          "value": 1,
+          "desc": "standard Modbus"
+        }
+      ]
+    },
+    {
+      "key": "h100",
+      "profile": "h100",
+      "label": "QNK H100 (5.5S2-1B) / V70",
+      "default_baud": 19200,
+      "default_parity": "N",
+      "default_stopbits": 1,
+      "default_address": 1,
+      "notes": "Setpoint is direct 0.1Hz (0x0201). REQUIRES F001=2 (run src), F002=2 (freq src), F169=0 (standard Modbus). Default 19200 8-N-1.",
+      "setup_params": [
+        {
+          "name": "F001",
+          "register": 1,
+          "value": 2,
+          "desc": "run source = comms"
+        },
+        {
+          "name": "F002",
+          "register": 2,
+          "value": 2,
+          "desc": "freq source = comms"
+        },
+        {
+          "name": "F163",
+          "register": 163,
+          "value": 1,
+          "desc": "address (1)"
+        },
+        {
+          "name": "F164",
+          "register": 164,
+          "value": 2,
+          "desc": "baud 19200"
+        },
+        {
+          "name": "F165",
+          "register": 165,
+          "value": 3,
+          "desc": "8-N-1 RTU"
+        },
+        {
+          "name": "F169",
+          "register": 169,
+          "value": 0,
+          "desc": "standard Modbus"
+        }
+      ]
+    }
+  ]
+}
