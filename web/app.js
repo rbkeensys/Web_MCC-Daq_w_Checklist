@@ -11549,7 +11549,7 @@ async function openVfdEditor(){
       'Stepper library — motor + driver specifics. Pulses/rev is the driver microstep (Pr0.00). '
       + 'mL/rev calibrates dose volume → steps for Profile-Position moves.'));
     const table = el('table', {className:'form'});
-    table.append(el('thead', {}, el('tr', {}, ['Key','Label','Pulses/rev','°/step','Peak A','Max RPM','Accel','Decel','Reverse','mL/rev',''].map(h=>el('th',{},h)))));
+    table.append(el('thead', {}, el('tr', {}, ['Key','Label','Pulses/rev','°/step','Peak A','Max RPM','Accel','Decel','Reverse',''].map(h=>el('th',{},h)))));
     const tb = el('tbody');
     stepConfigs.forEach(c=>{
       const del = el('button',{className:'btn',onclick:()=>{const i=stepConfigs.indexOf(c);if(i>=0){stepConfigs.splice(i,1);draw();}}},'✕');
@@ -11558,14 +11558,14 @@ async function openVfdEditor(){
         el('td',{},num(c,'steps_per_rev',1)), el('td',{},num(c,'full_step_deg',0.01)),
         el('td',{},num(c,'peak_current_a',0.1)), el('td',{},num(c,'max_rpm',1)),
         el('td',{},num(c,'accel',1)), el('td',{},num(c,'decel',1)),
-        el('td',{},chk(c,'reverse')), el('td',{},num(c,'ml_per_rev',0.01)), el('td',{},del),
+        el('td',{},chk(c,'reverse')), el('td',{},del),
       ]));
     });
     table.append(tb);
     wrap.append(el('div',{style:'overflow:auto;max-height:50vh'}, table));
     wrap.append(el('div',{style:'margin-top:8px'}, el('button',{className:'btn',onclick:()=>{
       stepConfigs.push({key:`stepper${stepConfigs.length+1}`,name:'New stepper',steps_per_rev:10000,
-        full_step_deg:1.8,peak_current_a:2.0,max_rpm:600,accel:200,decel:200,reverse:false,ml_per_rev:0});
+        full_step_deg:1.8,peak_current_a:2.0,max_rpm:600,accel:200,decel:200,reverse:false});
       draw();
     }},'+ Add stepper')));
     return wrap;

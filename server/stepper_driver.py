@@ -15,8 +15,8 @@ Expression interface (see EXPRESSION_REFERENCE.md, "Stepper Drives (STEP)"):
   read   "STEP:Name".VEL/.POS/.RUNNING/.ENABLED/.COMPLETE/.ALARM
   command "STEP:Name.ENABLE/.VELOCITY/.MOVE/.MOVETO/.STOP/.JOG/.RESET" = value
 """
-__version__ = "1.2.0"
-__updated__ = "2026-06-18"  # 1.2.0: StepperConfig adds full_step_deg + ml_per_rev (pump calibration) for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
+__version__ = "1.3.0"
+__updated__ = "2026-06-18"  # 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
 
 import struct
 import time
@@ -181,7 +181,6 @@ class StepperConfig:
     max_rpm: float = 3000.0         # clamp for set_velocity
     accel: int = 100                # ms / 1000 rpm
     decel: int = 100                # ms / 1000 rpm
-    ml_per_rev: float = 0.0         # peristaltic pump calibration: mL per motor rev (0 = unset)
 
 
 # ---------------------------------------------------------------------------
@@ -560,7 +559,6 @@ def _config_from_cfg(d: dict) -> StepperConfig:
         max_rpm=float(d.get("max_rpm", 3000.0)),
         accel=int(d.get("accel", 100)),
         decel=int(d.get("decel", 100)),
-        ml_per_rev=float(d.get("ml_per_rev", 0.0)),
     )
 
 
