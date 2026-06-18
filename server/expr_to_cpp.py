@@ -14,8 +14,8 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 - NUMBER, PLUS, MINUS, MULT, DIV, MOD, POWER
 """
 
-__version__ = "3.3.0"
-__updated__ = "2026-06-15"  # 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
+__version__ = "3.4.0"
+__updated__ = "2026-06-18"  # 3.4.0: STEP: stepper-drive refs (reads/status/commands) reuse the vfd_in[]/vfd_out[] machinery tagged manager='stepper'; VFD refs + DLL signature unchanged. 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
 
 import json
 import os
@@ -30,6 +30,7 @@ from expr_engine import Lexer, Parser
 
 
 _VFD_CMD_TOKENS = {"ENABLE","DISABLE","RUN","STOP","RPM","HZ","FREQ","DIR","DIRECTION","REVERSE","REV","FORWARD","FWD","FAULT_RESET","RESET"}  # semantic VFD write targets (routed to controller methods)
+_STEP_CMD_TOKENS = {"ENABLE","DISABLE","RUN","STOP","VELOCITY","VEL","RPM","MOVE","MOVETO","JOG","ALARM_RESET","RESET"}  # semantic stepper write targets
 
 class SignalMap:
     """Maps signal names to array indices"""
@@ -165,17 +166,31 @@ class CPPCodeGenerator:
         name = m.group(1).strip(); ref = m.group(2)
         if ref.startswith('#'): return (name, ref, 'raw')
         return (name, ref[1:], 'param')
-    def _vfd_read_idx(self, drive, token, kind):
-        key = kind + ':' + drive + '.' + token
+    def _parse_step_inquote(self, value):
+        v = str(value).strip()
+        if v[:5].upper() == 'STEP:':
+            v = v[5:]
+        m = self._VFD_RE.match(v)
+        if not m: return (None, None, None)
+        name = m.group(1).strip(); ref = m.group(2)
+        if ref.startswith('#'): return (name, ref, 'raw')
+        return (name, ref[1:], 'param')
+    def _vfd_read_idx(self, drive, token, kind, manager='vfd'):
+        # VFD keys/refs stay byte-identical (no manager prefix/field); stepper refs tagged.
+        key = ('' if manager == 'vfd' else manager + '|') + kind + ':' + drive + '.' + token
         if key not in self.vfd_read_index:
             self.vfd_read_index[key] = len(self.vfd_reads)
-            self.vfd_reads.append({'drive': drive, 'token': token, 'kind': kind})
+            ref = {'drive': drive, 'token': token, 'kind': kind}
+            if manager != 'vfd': ref['manager'] = manager
+            self.vfd_reads.append(ref)
         return self.vfd_read_index[key]
-    def _vfd_write_idx(self, drive, token, kind, cmd=None):
-        key = (cmd or kind) + ':' + drive + '.' + token
+    def _vfd_write_idx(self, drive, token, kind, cmd=None, manager='vfd'):
+        key = ('' if manager == 'vfd' else manager + '|') + (cmd or kind) + ':' + drive + '.' + token
         if key not in self.vfd_write_index:
             self.vfd_write_index[key] = len(self.vfd_writes)
-            self.vfd_writes.append({'drive': drive, 'token': token, 'kind': kind, 'cmd': cmd})
+            ref = {'drive': drive, 'token': token, 'kind': kind, 'cmd': cmd}
+            if manager != 'vfd': ref['manager'] = manager
+            self.vfd_writes.append(ref)
         return self.vfd_write_index[key]
 
     def indent(self) -> str:
@@ -432,6 +447,11 @@ class CPPCodeGenerator:
                 if drive is not None:
                     return f"vfd_in[{self._vfd_read_idx(drive, token, kind)}]"
                 return "0.0"
+            if isinstance(node.value, str) and node.value[:5].upper() == 'STEP:':
+                drive, token, kind = self._parse_step_inquote(node.value)
+                if drive is not None:
+                    return f"vfd_in[{self._vfd_read_idx(drive, token, kind, manager='stepper')}]"
+                return "0.0"
             # AI:name / DO:name / Scale:name etc. A quoted string that is NOT a
             # real "TYPE:name" reference (e.g. a print message) resolves to 0.0
             # rather than being mis-parsed as a signal.
@@ -498,6 +518,9 @@ class CPPCodeGenerator:
             if isinstance(ref, str) and ref[:4].upper() == 'VFD:':
                 drive = ref.split(':', 1)[1].strip()
                 return f"vfd_in[{self._vfd_read_idx(drive, str(prop).upper(), 'status')}]"
+            if isinstance(ref, str) and ref[:5].upper() == 'STEP:':
+                drive = ref.split(':', 1)[1].strip()
+                return f"vfd_in[{self._vfd_read_idx(drive, str(prop).upper(), 'status', manager='stepper')}]"
             return "0.0"
 
         elif node_type == 'VFD_ASSIGN':
@@ -509,6 +532,17 @@ class CPPCodeGenerator:
             cmd = token.upper() if (token and token.upper() in _VFD_CMD_TOKENS) else None
             if cmd: kind = 'cmd'
             idx = self._vfd_write_idx(drive, token, kind, cmd)
+            return f"result = vfd_out[{idx}] = {expr};"
+
+        elif node_type == 'STEP_ASSIGN':
+            # "STEP:Name.token" = expr -> queue via vfd_out[] tagged manager='stepper'
+            drive, token, kind = self._parse_step_inquote(node.value)
+            expr = self.generate_node(node.children[0]) if node.children else "0.0"
+            if drive is None:
+                return f"result = ({expr});"
+            cmd = token.upper() if (token and token.upper() in _STEP_CMD_TOKENS) else None
+            if cmd: kind = 'cmd'
+            idx = self._vfd_write_idx(drive, token, kind, cmd, manager='stepper')
             return f"result = vfd_out[{idx}] = {expr};"
         
         # Operators

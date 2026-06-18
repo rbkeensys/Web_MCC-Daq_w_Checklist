@@ -114,8 +114,8 @@ from expr_engine import global_vars as expr_global_vars
 import logging, os, math
 
 # Version tracking - all in one place
-__version__ = "2.8.29"
-__updated__ = "2026-06-16"  # 2.8.35: VFD watch/poll list is now refreshed on expression recompile (previously only at boot + VFD-instance save), so a VFD param or #register read newly added to an expression starts polling immediately instead of silently reading 0 until restart. 2.8.34: VFD status-prop ".TORQUE" (also .TQ/.NM) added -- maps to snapshot output_torque (GK3000 0x5006); use the dot-prop form "VFD:Name".TORQUE like .VOLTAGE/.CURRENT/.POWER (the b0.nn keypad form is NOT a 0xF0xx param and does not translate). 2.8.33: startup VFD comms check + idempotent init -- build(do_setup=False) then vfd_mgr.check_drives() probes each drive (identify/verify Modbus reply) and re-applies documented setup params via read-before-write (no EEPROM hammer); GET /api/vfd/health exposes per-drive status for a UI popup; discover_vfd_params no longer lists command tokens (ENABLE/DIR/...) as watch params. 2.8.32: semantic VFD command write-targets in expressions -- "VFD:Name.ENABLE"=1/0, ".RPM"=rpm, ".HZ"=hz, ".DIR"=0/1 (also DIRECTION/REVERSE/STOP/FAULT_RESET) route via vfd_mgr.request_command() -> worker -> controller.enable/disable/set_rpm/set_frequency/set_direction (same logic as the REST buttons), on-change. Raw #regs/params still go to request_write. Both C++ and Python eval paths share _apply_vfd_write(). No DLL-signature change (reuses vfd_out[]); recompile to emit the new command metadata. 2.8.31: VFD comm-speed change -- POST /api/vfd/{name}/baud calls vfd_mgr.change_baud() (stops worker, finds current baud by scan if needed, writes the baud param at the current speed, reopens the PC port at the target, verifies, reverts on failure) and persists baud into vfd_instances.json. Python fallback path now also drains expr_mgr.last_vfd_writes -> request_write (matches the C++ branch). 2.8.30: expression-driven VFD reads/writes wired (approach B) -- vfd_in[] filled from snapshot per cpp_backend.vfd_read_refs and passed to evaluate(); cpp_results['vfd_writes'] drained to vfd_mgr.request_write() on-change (raw #regs skip read-back verify); set_watch_all(discover_vfd_params(expressions.json)) after start_workers at boot + instance rebuild so param/#addr reads get polled. Requires the 18-arg DLL (delete stale compiled/expressions.dll). 2.8.29: VFD serial moved entirely onto per-drive worker threads -- start_workers() is called after build and after instance rebuild; the acquisition loop and the /api/vfd/status endpoint now read snapshot_all() (in-memory, no serial) instead of status_all(), so RS-485 latency no longer stalls the 50 Hz acq/control loop (fixes the periodic stutter that tracked the dongle TX/RX LEDs). REST command endpoints still call the controller directly -- safe because every transaction is serialized by VFDController._io_lock. stop_workers() on shutdown. 2.8.28: VFD support -- new vfd_driver.VFDManager loads three JSON libraries (vfd_drives.json protocol+serial per drive model, vfd_motors.json nameplates, vfd_instances.json binding drive+motor+port) and builds a controller per included instance. REST: GET/PUT /api/vfd/{drives,motors,instances} (+rebuild on instance save), GET /api/vfd/status, POST /api/vfd/{name}/{enable,disable,rpm,direction,fault_reset}. 2.8.27: checklist host arbitration -- one browser can host its checklist for all others (claim/respond/cancel/release endpoints + WS cl_host messages). Live hosts are asked to relinquish (30s expiry denies); disconnected hosts are replaced instantly and hosting auto-releases when the host browser drops. WS hello now carries a per-connection client_id. 2.8.26: silenced the benign Windows-only ConnectionResetError [WinError 10054] tracebacks that the asyncio Proactor transport prints whenever a browser drops its connection (refresh/close/sleep). Only that specific error in that one cleanup callback is swallowed; all other exceptions surface as before. 2.8.25: optional HTTPS — if CFG_DIR/ssl/cert.pem + key.pem exist (e.g. generated with mkcert), uvicorn serves TLS automatically; removes the browser "Not secure" warning and makes remote origins proper secure contexts. 2.8.24: layout endpoints hardened + instrumented — PUT mkdirs the config dir, writes atomically, and returns {ok:false,error} instead of a bare 500; both GET and PUT print one console line per request so a broken remote layout-sync is diagnosable from the server window. 2.8.23: WS clients now receive a {type:hello} message with hardware status on every (re)connect, so button colorization no longer depends on a single boot-time /api/diag fetch that could fail transiently and stick a client in the un-connected look forever. 2.8.22: check events now relay over the WebSocket to ALL clients (type=check_event) -- checklist on one computer marks charts on every computer. New /api/check_events/uncheck removes the event from the logger accumulator and relays the removal. 2.8.21: launch bundle now includes names + charted lists alongside scales (single _viewer_scales.json). 2.8.20: /api/log_viewer/launch now accepts a "scales" map from the browser ({csvCol:{scale,offset,label}}), writes it to LOGS_DIR/_viewer_scales.json, and passes --scales to the viewer so it can render data with the in-app charts' display scale/offset. 2.8.19: POST /api/log_viewer/launch spawns the standalone log_viewer.py app (huge-file chart viewer). New chk.json merge tool: GET /api/chk_merge/candidates lists sessions with chk.json + their embed status; POST /api/chk_merge/{session} streams the events into the CSV's chk_events column with sanity checks (identical = no-op, different = requires force, event times outside CSV range = requires force, active session = refused). Merge is a streaming copy + atomic os.replace, so memory stays flat on multi-GB files.
+__version__ = "2.9.0"
+__updated__ = "2026-06-18"  # 2.9.0: STEP: stepper-drive support wired (approach B; reuses vfd_in[]/vfd_out[] with a manager='stepper' tag, NO DLL signature change). StepperManager built/polled alongside vfd_mgr; _vfd_in_vals/_apply_vfd_write route by manager; signal_state + tick frame carry a "stepper" snapshot. 2.8.35: VFD watch/poll list is now refreshed on expression recompile (previously only at boot + VFD-instance save), so a VFD param or #register read newly added to an expression starts polling immediately instead of silently reading 0 until restart. 2.8.34: VFD status-prop ".TORQUE" (also .TQ/.NM) added -- maps to snapshot output_torque (GK3000 0x5006); use the dot-prop form "VFD:Name".TORQUE like .VOLTAGE/.CURRENT/.POWER (the b0.nn keypad form is NOT a 0xF0xx param and does not translate). 2.8.33: startup VFD comms check + idempotent init -- build(do_setup=False) then vfd_mgr.check_drives() probes each drive (identify/verify Modbus reply) and re-applies documented setup params via read-before-write (no EEPROM hammer); GET /api/vfd/health exposes per-drive status for a UI popup; discover_vfd_params no longer lists command tokens (ENABLE/DIR/...) as watch params. 2.8.32: semantic VFD command write-targets in expressions -- "VFD:Name.ENABLE"=1/0, ".RPM"=rpm, ".HZ"=hz, ".DIR"=0/1 (also DIRECTION/REVERSE/STOP/FAULT_RESET) route via vfd_mgr.request_command() -> worker -> controller.enable/disable/set_rpm/set_frequency/set_direction (same logic as the REST buttons), on-change. Raw #regs/params still go to request_write. Both C++ and Python eval paths share _apply_vfd_write(). No DLL-signature change (reuses vfd_out[]); recompile to emit the new command metadata. 2.8.31: VFD comm-speed change -- POST /api/vfd/{name}/baud calls vfd_mgr.change_baud() (stops worker, finds current baud by scan if needed, writes the baud param at the current speed, reopens the PC port at the target, verifies, reverts on failure) and persists baud into vfd_instances.json. Python fallback path now also drains expr_mgr.last_vfd_writes -> request_write (matches the C++ branch). 2.8.30: expression-driven VFD reads/writes wired (approach B) -- vfd_in[] filled from snapshot per cpp_backend.vfd_read_refs and passed to evaluate(); cpp_results['vfd_writes'] drained to vfd_mgr.request_write() on-change (raw #regs skip read-back verify); set_watch_all(discover_vfd_params(expressions.json)) after start_workers at boot + instance rebuild so param/#addr reads get polled. Requires the 18-arg DLL (delete stale compiled/expressions.dll). 2.8.29: VFD serial moved entirely onto per-drive worker threads -- start_workers() is called after build and after instance rebuild; the acquisition loop and the /api/vfd/status endpoint now read snapshot_all() (in-memory, no serial) instead of status_all(), so RS-485 latency no longer stalls the 50 Hz acq/control loop (fixes the periodic stutter that tracked the dongle TX/RX LEDs). REST command endpoints still call the controller directly -- safe because every transaction is serialized by VFDController._io_lock. stop_workers() on shutdown. 2.8.28: VFD support -- new vfd_driver.VFDManager loads three JSON libraries (vfd_drives.json protocol+serial per drive model, vfd_motors.json nameplates, vfd_instances.json binding drive+motor+port) and builds a controller per included instance. REST: GET/PUT /api/vfd/{drives,motors,instances} (+rebuild on instance save), GET /api/vfd/status, POST /api/vfd/{name}/{enable,disable,rpm,direction,fault_reset}. 2.8.27: checklist host arbitration -- one browser can host its checklist for all others (claim/respond/cancel/release endpoints + WS cl_host messages). Live hosts are asked to relinquish (30s expiry denies); disconnected hosts are replaced instantly and hosting auto-releases when the host browser drops. WS hello now carries a per-connection client_id. 2.8.26: silenced the benign Windows-only ConnectionResetError [WinError 10054] tracebacks that the asyncio Proactor transport prints whenever a browser drops its connection (refresh/close/sleep). Only that specific error in that one cleanup callback is swallowed; all other exceptions surface as before. 2.8.25: optional HTTPS — if CFG_DIR/ssl/cert.pem + key.pem exist (e.g. generated with mkcert), uvicorn serves TLS automatically; removes the browser "Not secure" warning and makes remote origins proper secure contexts. 2.8.24: layout endpoints hardened + instrumented — PUT mkdirs the config dir, writes atomically, and returns {ok:false,error} instead of a bare 500; both GET and PUT print one console line per request so a broken remote layout-sync is diagnosable from the server window. 2.8.23: WS clients now receive a {type:hello} message with hardware status on every (re)connect, so button colorization no longer depends on a single boot-time /api/diag fetch that could fail transiently and stick a client in the un-connected look forever. 2.8.22: check events now relay over the WebSocket to ALL clients (type=check_event) -- checklist on one computer marks charts on every computer. New /api/check_events/uncheck removes the event from the logger accumulator and relays the removal. 2.8.21: launch bundle now includes names + charted lists alongside scales (single _viewer_scales.json). 2.8.20: /api/log_viewer/launch now accepts a "scales" map from the browser ({csvCol:{scale,offset,label}}), writes it to LOGS_DIR/_viewer_scales.json, and passes --scales to the viewer so it can render data with the in-app charts' display scale/offset. 2.8.19: POST /api/log_viewer/launch spawns the standalone log_viewer.py app (huge-file chart viewer). New chk.json merge tool: GET /api/chk_merge/candidates lists sessions with chk.json + their embed status; POST /api/chk_merge/{session} streams the events into the CSV's chk_events column with sanity checks (identical = no-op, different = requires force, event times outside CSV range = requires force, active session = refused). Merge is a streaming copy + atomic os.replace, so memory stays flat on multi-GB files.
 import csv  # used by the chk-merge helpers below
 SERVER_VERSION = __version__  # Versioned DLL files for hot-reload during critical tests!
 
@@ -689,10 +689,31 @@ if _HAVE_VFD:
     except Exception as _e:
         print(f"[MCC-Hub] VFD manager init failed: {_e}")
 
+# Stepper-drive manager (Modbus PR-mode; e.g. DM556RS feedwater pump). Mirrors
+# vfd_mgr: config-driven, one controller + worker per included instance.
+step_mgr = None
+try:
+    from stepper_driver import StepperManager
+    step_mgr = StepperManager(CFG_DIR)
+    step_mgr.load_files()
+    step_mgr.build(connect=True, do_setup=True)
+    step_mgr.start_workers()
+    print(f"[MCC-Hub] Stepper instances built: {len(step_mgr.controllers)}; "
+          f"workers: {len(getattr(step_mgr, 'workers', {}))}")
+except Exception as _e:
+    print(f"[MCC-Hub] Stepper manager init failed: {_e}")
+
 # VFD status is polled on a slower cadence than the acq loop (serial is slow);
 # the most recent decoded status per instance is cached here and folded into
 # both the tick frame (for the widget) and the expression signal_state.
 _vfd_status_cache = {}
+_step_status_cache = {}   # latest stepper snapshot per instance (for STEP: reads)
+
+# Stepper status props -> live snapshot keys (parallels _VFD_PROP_KEY)
+_STEP_PROP_KEY = {'VEL':'velocity','RPM':'velocity','SPEED':'velocity','POS':'position',
+ 'POSITION':'position','RUNNING':'running','ENABLED':'enabled','COMPLETE':'cmd_complete',
+ 'DONE':'cmd_complete','PATHCOMPLETE':'path_complete','HOMED':'homing_complete',
+ 'ALARM':'alarm','FAULT':'alarm','FAULTCODE':'alarm','WRITEFAULT':'__wf__'}
 
 # --- VFD expression read mapping (approach B): status props -> live snapshot keys ---
 _VFD_PROP_KEY = {'RPM':'rpm','HZ':'output_hz','FREQ':'output_hz','CURRENT':'output_current_a',
@@ -702,10 +723,26 @@ _VFD_PROP_KEY = {'RPM':'rpm','HZ':'output_hz','FREQ':'output_hz','CURRENT':'outp
  'TORQUE':'output_torque','TQ':'output_torque','NM':'output_torque',
  'REVERSE':'__rev__','REV':'__rev__','FAULT':'faulted','FAULTCODE':'fault_code','WRITEFAULT':'__wf__'}
 _last_vfd_write = {}   # (drive, token) -> last value sent (on-change gating)
-def _vfd_in_vals(backend, cache):
-    """Build vfd_in[] (ordered per backend.vfd_read_refs) from the in-memory VFD snapshot."""
+def _vfd_in_vals(backend, cache, step_cache=None):
+    """Build vfd_in[] (ordered per backend.vfd_read_refs) from the in-memory snapshots.
+    Refs tagged manager='stepper' resolve from the stepper snapshot; others are VFD."""
     out = []
     for r in (getattr(backend, 'vfd_read_refs', None) or []):
+        if r.get('manager') == 'stepper':
+            snap = (step_cache or {}).get(r['drive'], {}) or {}
+            if r['kind'] == 'status':
+                key = _STEP_PROP_KEY.get(str(r['token']).upper())
+                if key == '__wf__':  v = 1.0 if snap.get('write_fault') else 0.0
+                elif key is None:    v = 0.0
+                else:
+                    raw = snap.get(key)
+                    v = (1.0 if raw else 0.0) if isinstance(raw, bool) else (float(raw) if raw is not None else 0.0)
+            else:
+                raw = snap.get(r['token'])
+                try: v = float(raw) if raw is not None else 0.0
+                except (TypeError, ValueError): v = 0.0
+            out.append(v)
+            continue
         snap = (cache or {}).get(r['drive'], {}) or {}
         if r['kind'] == 'status':
             key = _VFD_PROP_KEY.get(str(r['token']).upper())
@@ -723,18 +760,20 @@ def _vfd_in_vals(backend, cache):
     return out
 
 def _apply_vfd_write(w):
-    """Route one expression VFD write to the worker, on-change. kind=='cmd' ->
-    request_command (ENABLE/RPM/HZ/DIR...); else request_write (param/#reg)."""
-    if vfd_mgr is None:
+    """Route one expression drive write to the right manager's worker, on-change.
+    manager='stepper' -> step_mgr; else vfd_mgr. kind=='cmd' -> request_command;
+    else request_write (param/#reg)."""
+    mgr = step_mgr if w.get('manager') == 'stepper' else vfd_mgr
+    if mgr is None:
         return
-    k = (w.get('drive'), w.get('token'))
+    k = (w.get('manager', 'vfd'), w.get('drive'), w.get('token'))
     if _last_vfd_write.get(k) == w.get('value'):
         return
     if w.get('kind') == 'cmd':
-        ok = vfd_mgr.request_command(w['drive'], w.get('cmd') or w['token'], w['value'])
+        ok = mgr.request_command(w['drive'], w.get('cmd') or w['token'], w['value'])
     else:
         vfy = False if str(w.get('token','')).startswith('#') else None
-        ok = vfd_mgr.request_write(w['drive'], w['token'], w['value'], verify=vfy)
+        ok = mgr.request_write(w['drive'], w['token'], w['value'], verify=vfy)
     if ok:
         _last_vfd_write[k] = w['value']
 _vfd_poll_every = 10          # poll once per this many acq ticks
@@ -1294,6 +1333,7 @@ def _on_shutdown():
     print("[MCC-Hub] FastAPI shutdown")
     try:
         if vfd_mgr: vfd_mgr.stop_workers()
+        if step_mgr: step_mgr.stop_workers()
     except Exception: pass
     motor_mgr.disconnect_all()
     print("[MCC-Hub] Motors disconnected")
@@ -1334,7 +1374,7 @@ async def acq_loop():
     - Broadcasts to the browser at a lower fixed UI rate (~TARGET_UI_HZ),
       regardless of acq_rate_hz, to avoid overloading the websocket/JS.
     """
-    global session_logger, _need_reconfig_filters, _vfd_poll_ctr, _vfd_status_cache
+    global session_logger, _need_reconfig_filters, _vfd_poll_ctr, _vfd_status_cache, _step_status_cache
 
     # Target UI update rate (for charts/widgets)
     TARGET_UI_HZ = 25.0
@@ -1553,7 +1593,7 @@ async def acq_loop():
                         pid_vals=[tel.get('output', 0.0) for tel in telemetry],
                         button_vars=button_vars,  # CRITICAL: Pass buttonVars!
                         scale_vals=scale_mgr.get_values(),  # Serial scales for "Scale:Foo" refs
-                        vfd_in_vals=_vfd_in_vals(cpp_backend, _vfd_status_cache)  # VFD reads (approach B)
+                        vfd_in_vals=_vfd_in_vals(cpp_backend, _vfd_status_cache, _step_status_cache)  # VFD + STEP reads (approach B)
                     )
                     
                     # Convert to same format as Python evaluator
@@ -1610,6 +1650,7 @@ async def acq_loop():
                         "expr": last_expr_outputs,
                         "scales": scale_mgr.get_values(),  # Read-only serial scale values
                         "vfd": _vfd_status_cache,  # live VFD status for "VFD:Name".PROP reads
+                        "stepper": _step_status_cache,  # live stepper status for "STEP:Name".PROP reads
                         "buttonVars": button_vars,
                         "ai_list": [{"name": ch.name} for ch in get_all_analogs(app_cfg)],
                         "ao_list": [{"name": ch.name} for ch in get_all_analog_outputs(app_cfg)],
@@ -1763,6 +1804,13 @@ async def acq_loop():
                     except Exception as _ve:
                         log.debug("VFD poll failed: %s", _ve)
 
+            # Stepper snapshot (in-memory, no serial -> safe every tick)
+            if step_mgr and getattr(step_mgr, "controllers", None):
+                try:
+                    _step_status_cache = step_mgr.snapshot_all()
+                except Exception:
+                    pass
+
             frame = {
                 "type": "tick",
                 "t": time.time(),
@@ -1777,6 +1825,7 @@ async def acq_loop():
                 "expr": clean_for_json(expr_tel),
                 "scales": clean_for_json(scale_mgr.get_values()),
                 "vfd": clean_for_json(_vfd_status_cache),
+                "stepper": clean_for_json(_step_status_cache),
                 # Global/static variables from expression engine (static.name = ...)
                 "global_vars": clean_for_json(expr_global_vars.list_all()),
                 # buttonVars synchronized from the frontend
