@@ -7633,7 +7633,7 @@ function mountPIDPanel(w, body){
     const ctr=el('div',{className:'compact'});
     const tbl=el('table',{className:'form'}); const tb=el('tbody');
     const row=(label,input)=>{ const tr=el('tr'); tr.append(el('th',{},label), el('td',{},input)); tb.append(tr); return tr; };
-    const L={enabled:false,name:'',kind:'analog',src:'ai',ai_ch:0,out_ch:0,target:0,kp:0,ki:0,kd:0,out_min:0,out_max:1,out_min_source:'fixed',out_min_channel:0,out_max_source:'fixed',out_max_channel:0,i_min:-1,i_max:1,enable_gate:false,enable_kind:'do',enable_index:0,sp_source:'fixed',sp_channel:0};
+    const L={enabled:false,name:'',kind:'analog',src:'ai',ai_ch:0,out_ch:0,target:0,kp:0,ki:0,kd:0,d_filter_hz:null,out_min:0,out_max:1,out_min_source:'fixed',out_min_channel:0,out_max_source:'fixed',out_max_channel:0,i_min:-1,i_max:1,enable_gate:false,enable_kind:'do',enable_index:0,sp_source:'fixed',sp_channel:0};
 
     fetch('/api/pid').then(r=>r.json()).then(async pid=>{
       const idx=w.opts.loopIndex|0; Object.assign(L, pid.loops?.[idx]||{});
@@ -7709,7 +7709,8 @@ function mountPIDPanel(w, body){
       row('kp',     num(L,'kp',0.0001));
       row('ki',     num(L,'ki',0.0001));
       row('kd',     num(L,'kd',0.0001));
-      
+      row('D Filt Hz', num(L,'d_filter_hz',0.1));
+
       outMinValueRow = row('Out Min', num(L,'out_min',0.0001));
       row('Out Min Src', selectEnum(['fixed','math','expr'], L.out_min_source||'fixed', async v => {
         L.out_min_source = v;
@@ -10983,6 +10984,7 @@ async function openPidForm(){
         kp: 1.0,
         ki: 0.0,
         kd: 0.0,
+        d_filter_hz: null,  // derivative low-pass cutoff Hz; null/0 = off
         out_min: -10.0,
         out_max: 10.0,
         out_min_source: 'fixed',
@@ -11024,6 +11026,7 @@ async function openPidForm(){
       el('th', {}, 'Kp'),
       el('th', {}, 'Ki'),
       el('th', {}, 'Kd'),
+      el('th', {}, 'D Filt Hz'),
       el('th', {}, 'Out Min'),
       el('th', {}, 'Out Max'),
       // Removed Err Min/Err Max - only I and output limits needed
@@ -11091,6 +11094,7 @@ async function openPidForm(){
         el('td', {}, num(L, 'kp', 0.0001)),
         el('td', {}, num(L, 'ki', 0.0001)),
         el('td', {}, num(L, 'kd', 0.0001)),
+        el('td', {}, num(L, 'd_filter_hz', 0.1)),
         outMinCell,  // Combined source + value/channel
         outMaxCell,  // Combined source + value/channel
         // Removed err_min/err_max - only I and output limits needed
