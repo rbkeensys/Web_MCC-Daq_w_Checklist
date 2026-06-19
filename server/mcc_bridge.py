@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.0.6"  # Fixed _dac_counts for multi-board
+__version__ = "2.1.0"  # Counter-sourced AI channels + PWM-mode DOs (set_pwm_duty/pwm_step). Fixed _dac_counts for multi-board
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -105,6 +105,8 @@ class MCCBridge:
 
         # Counter-sourced AI channels (pulse flow meters on CTR<n>)
         self._counters = []  # list of dicts: index/board/ctr/K/window/prev_count/prev_t/rate
+        # PWM-mode digital outputs: global DO index -> {period_s, duty}
+        self._pwm = {}
 
         # TC type cache - now indexed by global channel index
         self._tc_type_set_cache = {}  # global_ch -> "K"/"J"/...
@@ -185,6 +187,21 @@ class MCCBridge:
         self._ao_vals = [0.0] * (num_1608 * 2)
         self._do_active_high = [True] * (num_1608 * 8)
         
+        # === PWM digital outputs (mode 'pwm' -> tick-rate software PWM) ===
+        # Global DO index matches get_all_digital_outputs() flatten order (== set_do index).
+        self._pwm = {}
+        gidx = 0
+        if cfg.boards1608:
+            for board_cfg in cfg.boards1608:
+                if not board_cfg.enabled:
+                    continue
+                for d in board_cfg.digitalOutputs:
+                    if getattr(d, "mode", "") == "pwm":
+                        per = float(getattr(d, "pwmPeriodMs", 1000.0) or 1000.0) / 1000.0
+                        self._pwm[gidx] = {"period_s": max(1e-3, per), "duty": 0.0}
+                        print(f"[MCCBridge] DO[{gidx}] '{d.name}' PWM period={per*1000:.0f}ms")
+                    gidx += 1
+
         # === Configure ALL E-TC boards ===
         if cfg.boardsetc:
             for board_cfg in cfg.boardsetc:
@@ -260,6 +277,28 @@ class MCCBridge:
                 c["prev_count"] = count
                 c["prev_t"] = now
             ai_scaled[idx] = c["rate"]
+
+    # ---------------- PWM digital outputs ----------------
+    def is_pwm(self, index) -> bool:
+        return index in self._pwm
+
+    def set_pwm_duty(self, index, duty):
+        """Set a PWM-mode DO's duty (0..1). No-op for non-PWM channels."""
+        p = self._pwm.get(index)
+        if p is None:
+            return
+        try:
+            d = float(duty)
+        except (TypeError, ValueError):
+            d = 0.0
+        p["duty"] = 0.0 if d < 0.0 else (1.0 if d > 1.0 else d)
+
+    def pwm_step(self, now):
+        """Drive PWM-mode DOs from their duty at the tick rate. `now` = monotonic seconds."""
+        for ch, p in self._pwm.items():
+            per = p["period_s"]
+            on = ((now % per) / per) < p["duty"]
+            self.set_do(ch, on, active_high=True)
 
     def close(self):
         # Ensure DOs off if you want a safe state (optional):

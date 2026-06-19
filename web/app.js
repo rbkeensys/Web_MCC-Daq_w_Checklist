@@ -10876,18 +10876,30 @@ async function openConfigForm(providedConfig = null, banner = null){
   }
   const analogs = analogSections.length > 0 ? el('div', {}, analogSections) : el('div', {}, 'No analog channels configured');
 
-  const DO_MODES=['toggle','momentary','buzz'];
+  const DO_MODES=['toggle','momentary','buzz','pwm'];
   const doSections = [];
   if (cfg.boards1608) {
     cfg.boards1608.forEach((board, boardIdx) => {
       (board.digitalOutputs||[]).forEach(d=>{ if(!d.mode){ d.mode = d.momentary ? 'momentary' : 'toggle'; } });
-      const doRows = (board.digitalOutputs||[]).map((d,i)=>[
-        `DO${i}`, inputText(d,'name'),
-        `mode`,        selectEnum(DO_MODES,d.mode||'toggle',v=>{ d.mode=v; d.momentary = (v==='momentary'); }),
-        `normallyOpen`,inputChk(d,'normallyOpen'),
-        `actuationTime (s)`, inputNum(d,'actuationTime',0.1),
-        `include`,     inputChk(d,'include')
-      ]);
+      const doRows = (board.digitalOutputs||[]).map((d,i)=>{
+        // PWM period field only shows when mode === 'pwm'. Duty = write 0..1 to the DO.
+        const pwmInp = el('input',{type:'number',step:10,value:(d.pwmPeriodMs!=null?d.pwmPeriodMs:1000),
+          style:'width:80px;display:'+(d.mode==='pwm'?'inline-block':'none'),
+          title:'PWM period (ms). Set duty by writing 0..1 to this DO in an expression.'});
+        pwmInp.oninput=()=>{ const v=parseFloat(pwmInp.value); d.pwmPeriodMs=Number.isFinite(v)?v:1000; };
+        const modeSel = selectEnum(DO_MODES,d.mode||'toggle',v=>{
+          d.mode=v; d.momentary=(v==='momentary');
+          pwmInp.style.display = (v==='pwm'?'inline-block':'none');
+        });
+        return [
+          `DO${i}`, inputText(d,'name'),
+          `mode`,        modeSel,
+          `normallyOpen`,inputChk(d,'normallyOpen'),
+          `actuationTime (s)`, inputNum(d,'actuationTime',0.1),
+          `PWM ms`,      pwmInp,
+          `include`,     inputChk(d,'include')
+        ];
+      });
       if (doRows.length > 0) {
         doSections.push(fieldset(`Digital Outputs - Board #${board.boardNum}`, tableFormRows(doRows)));
       }

@@ -6,7 +6,7 @@ Version: 1.1.0 (2026-03-16)
 - Zero code changes to expr_engine.py (backwards compatible)
 - Execution_rate_hz for per-expression decimation
 """
-__version__ = "1.2.0"
+__version__ = "1.3.0"  # PWM: route Python-path DO writes by bridge.is_pwm (set_pwm_duty) vs threshold
 __updated__ = "2026-05-06"  # Added Scale: signal-type to syntax checker
 
 import json
@@ -168,7 +168,11 @@ class ExpressionManager:
                     for write in hw_writes:
                         try:
                             if write['type'] == 'do':
-                                bridge.set_do(write['channel'], write['value'], active_high=True)
+                                _ch = write['channel']
+                                if bridge.is_pwm(_ch):
+                                    bridge.set_pwm_duty(_ch, write['value'])
+                                else:
+                                    bridge.set_do(_ch, write['value'] >= 1.0, active_high=True)
                             elif write['type'] == 'ao':
                                 bridge.set_ao(write['channel'], write['value'])
                         except Exception as e:

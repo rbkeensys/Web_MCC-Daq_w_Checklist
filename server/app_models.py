@@ -13,7 +13,7 @@ NEW STRUCTURE:
 This allows multiple E-1608 and E-TC boards, each with their own channels.
 """
 
-__version__ = "2.0.1"  # Fixed missing PID fields
+__version__ = "2.1.0"  # PWM DO mode (DigitalOutCfg.pwmPeriodMs) + counter-sourced AI fields. Fixed missing PID fields
 
 from pydantic import BaseModel
 from typing import List, Optional
@@ -41,7 +41,8 @@ class DigitalOutCfg(BaseModel):
     actuationTime: float = 0.0
     include: bool = True
     logicElement: Optional[int] = None  # Index of LE that gates this DO (None = no gating)
-    mode: str = "toggle"  # 'toggle', 'momentary', 'buzz'
+    mode: str = "toggle"  # 'toggle', 'momentary', 'buzz', 'pwm'
+    pwmPeriodMs: float = 1000.0  # PWM-mode period (ms); duty set by writing 0..1 to the DO
 
 class AnalogOutCfg(BaseModel):
     name: str = "AO"

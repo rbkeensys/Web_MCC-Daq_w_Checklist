@@ -26,8 +26,8 @@ VERSION 2.0 Changes:
 - Added buttonVars support for reading frontend button states
 - buttonVars are read-only in expressions (set by UI buttons)
 """
-__version__ = "2.3.0"
-__updated__ = "2026-06-18"  # 2.3.0: added STEP: stepper-drive reads/status/commands (mirrors VFD:, routed to the stepper manager via manager='stepper' tag). 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
+__version__ = "2.4.0"
+__updated__ = "2026-06-18"  # 2.4.0: DO_ASSIGN records the RAW value (threshold/PWM-duty applied at write time). 2.3.0: added STEP: stepper-drive reads/status/commands (mirrors VFD:, routed to the stepper manager via manager='stepper' tag). 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
 
 import re
 import math
@@ -673,7 +673,7 @@ class Evaluator:
                     self.hardware_writes.append({
                         'type': 'do',
                         'channel': i,
-                        'value': bool(value >= 1.0)  # Convert to boolean
+                        'value': float(value)  # raw; threshold / PWM-duty applied at write time
                     })
                     break
             
