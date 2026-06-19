@@ -15,8 +15,8 @@ Expression interface (see EXPRESSION_REFERENCE.md, "Stepper Drives (STEP)"):
   read   "STEP:Name".VEL/.POS/.RUNNING/.ENABLED/.COMPLETE/.ALARM
   command "STEP:Name.ENABLE/.VELOCITY/.MOVE/.MOVETO/.STOP/.JOG/.RESET" = value
 """
-__version__ = "1.3.0"
-__updated__ = "2026-06-18"  # 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
+__version__ = "1.4.0"
+__updated__ = "2026-06-19"  # 1.4.0: presence probe -- StepperController.probe() does a real Modbus read after connect(); build() now reports a drive that doesn't answer as FAILED ("no reply from drive on COMx") instead of "connected" (opening the serial port succeeds with nothing attached). 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
 
 import struct
 import time
@@ -404,6 +404,23 @@ class StepperController:
         }
         return snap
 
+    def probe(self) -> bool:
+        """Presence check. Opening the serial port succeeds even with nothing
+        attached (serial has no device handshake), so connect()==True does NOT
+        mean a drive is there. Issue one real Modbus read: a normal reply OR a
+        Modbus exception reply both prove the drive answered (it's present); a
+        timeout / CRC error / no-reply means absent. Used by build() so a
+        missing or unpowered drive is reported FAILED instead of 'connected'."""
+        try:
+            self.read_register(self.profile.motion_state_reg)
+            return True
+        except StepperModbusException:
+            # The drive answered with an exception code -> it's on the bus
+            # (the register/map may just be off; DM556RS map is bench-unverified).
+            return True
+        except Exception:
+            return False
+
     # ---- command dispatch (mirrors VFD request_command) ------------------
     def request_command(self, cmd: str, value: float) -> bool:
         c = cmd.strip().upper()
@@ -623,6 +640,13 @@ class StepperManager:
                     stopbits=inst.get("stopbits"), address=inst.get("address"),
                     timeout=float(inst.get("timeout", 0.5)), config=config)
                 ok = ctrl.connect() if connect else True
+                if ok and connect and not ctrl.probe():
+                    # Port opened but no drive answered -> report absent rather
+                    # than silently reporting "connected" (serial open alone is
+                    # not proof a device is present).
+                    ctrl.disconnect()
+                    results.append((name, False, f"no reply from drive on {port}"))
+                    continue
                 if ok and connect and do_setup and inst.get("auto_setup"):
                     try:
                         ctrl.read_status()
