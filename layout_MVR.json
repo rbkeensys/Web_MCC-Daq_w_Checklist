@@ -1,0 +1,768 @@
+{
+  "pages": [
+    {
+      "name": "MVR Control",
+      "widgets": [
+        {
+          "id": "mvr-run",
+          "type": "staticvar",
+          "x": 20,
+          "y": 20,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "RUN (1=on)",
+            "varName": "runSystem",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-blowrpm",
+          "type": "staticvar",
+          "x": 20,
+          "y": 115,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Blower RPM set",
+            "varName": "blowerRpmSet",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-feedrpm",
+          "type": "staticvar",
+          "x": 20,
+          "y": 210,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Feed RPM set",
+            "varName": "feedRpmSet",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-evaptset",
+          "type": "staticvar",
+          "x": 20,
+          "y": 305,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Evap Temp set C",
+            "varName": "evapTempSet",
+            "decimalPlaces": 1
+          }
+        },
+        {
+          "id": "mvr-shset",
+          "type": "staticvar",
+          "x": 20,
+          "y": 400,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Superheat set C",
+            "varName": "superheatSet",
+            "decimalPlaces": 1
+          }
+        },
+        {
+          "id": "mvr-shin",
+          "type": "staticvar",
+          "x": 245,
+          "y": 20,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Superheat In C",
+            "varName": "superheatIn",
+            "decimalPlaces": 2
+          }
+        },
+        {
+          "id": "mvr-dt",
+          "type": "staticvar",
+          "x": 245,
+          "y": 115,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Compress dT C",
+            "varName": "deltaT",
+            "decimalPlaces": 2
+          }
+        },
+        {
+          "id": "mvr-evaptsat",
+          "type": "staticvar",
+          "x": 245,
+          "y": 210,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Evap Tsat C",
+            "varName": "evapTsat",
+            "decimalPlaces": 2
+          }
+        },
+        {
+          "id": "mvr-rpmread",
+          "type": "staticvar",
+          "x": 245,
+          "y": 305,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Blower RPM act",
+            "varName": "vfdRpmRead",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-trip",
+          "type": "staticvar",
+          "x": 245,
+          "y": 400,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "TRIP (1=trip)",
+            "varName": "trip",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-press",
+          "type": "chart",
+          "x": 480,
+          "y": 20,
+          "w": 1335,
+          "h": 325,
+          "opts": {
+            "title": "Pressures (psia)",
+            "series": [
+              {
+                "kind": "ai",
+                "index": 0,
+                "name": "EvapPress",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "ai",
+                "index": 1,
+                "name": "SteamPress",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "ao",
+                "index": 0,
+                "name": "Bypass Pos",
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "manual",
+            "min": 0,
+            "max": 30,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 5,
+            "tFreeze": null
+          },
+          "view": {
+            "span": 60,
+            "paused": false,
+            "tFreeze": 0
+          },
+          "_pauseBtn": {},
+          "_zoomBadgeEl": {},
+          "_clipBtn": {},
+          "_saveBtn": {},
+          "_canvas": {},
+          "_legend": {}
+        },
+        {
+          "id": "mvr-temps",
+          "type": "chart",
+          "x": 480,
+          "y": 355,
+          "w": 1335,
+          "h": 375,
+          "opts": {
+            "title": "Temperatures (C)",
+            "series": [
+              {
+                "kind": "tc",
+                "index": 0,
+                "name": "FeedTemp",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 1,
+                "name": "EvapTemp",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 2,
+                "name": "VaporIn",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 3,
+                "name": "VaporOut",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 4,
+                "name": "CondTemp",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 5,
+                "name": "SteamChest",
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "manual",
+            "min": 0,
+            "max": 110,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 10,
+            "tFreeze": null
+          },
+          "view": {
+            "span": 60,
+            "paused": false,
+            "tFreeze": 0
+          },
+          "_pauseBtn": {},
+          "_zoomBadgeEl": {},
+          "_clipBtn": {},
+          "_saveBtn": {},
+          "_canvas": {},
+          "_legend": {}
+        },
+        {
+          "id": "mvr-shflow",
+          "type": "chart",
+          "x": 480,
+          "y": 750,
+          "w": 1335,
+          "h": 360,
+          "opts": {
+            "title": "Superheat / dT / Flow",
+            "series": [
+              {
+                "kind": "static",
+                "index": "superheatIn",
+                "name": "SH In",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "superheatOut",
+                "name": "SH Out",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "deltaT",
+                "name": "dT",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "ai",
+                "index": 6,
+                "name": "CondFlow L/min",
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "manual",
+            "min": -100,
+            "max": 100,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 10,
+            "tFreeze": null
+          },
+          "view": {
+            "span": 60,
+            "paused": false,
+            "tFreeze": 0
+          },
+          "_pauseBtn": {},
+          "_zoomBadgeEl": {},
+          "_clipBtn": {},
+          "_saveBtn": {},
+          "_canvas": {},
+          "_legend": {}
+        },
+        {
+          "id": "dfd8df21-dfd8-4760-bacd-81e5ea9c26c1",
+          "type": "vfd",
+          "x": 20,
+          "y": 510,
+          "w": 280,
+          "h": 310,
+          "opts": {
+            "title": "VFD",
+            "vfdName": "VFD 1",
+            "showControls": true,
+            "rpmStep": 50
+          }
+        },
+        {
+          "id": "b431fdc3-92cf-4d77-817d-455c65274496",
+          "type": "expr",
+          "x": 1865,
+          "y": 340,
+          "w": 280,
+          "h": 245,
+          "opts": {
+            "title": "SteamTables",
+            "exprIndex": 1,
+            "showSource": true,
+            "showOutput": true
+          }
+        },
+        {
+          "id": "e51d132b-c964-4456-ba74-e470588caf81",
+          "type": "indicator",
+          "x": 325,
+          "y": 760,
+          "w": 60,
+          "h": 40,
+          "opts": {
+            "title": "Makeup H",
+            "shape": "round",
+            "size": 16,
+            "colorA": "#333333",
+            "colorB": "#00ff00",
+            "colorOff": "#3b425e",
+            "showLabel": true,
+            "condA": {
+              "op": "=",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "do",
+                  "index": 0
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            },
+            "condB": {
+              "op": ">",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "do",
+                  "index": 0
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "a5acf654-4ba4-45d6-a511-5a01661c529f",
+          "type": "indicator",
+          "x": 385,
+          "y": 760,
+          "w": 60,
+          "h": 40,
+          "opts": {
+            "title": "Super H",
+            "shape": "round",
+            "size": 16,
+            "colorA": "#333333",
+            "colorB": "#00ff00",
+            "colorOff": "#3b425e",
+            "showLabel": true,
+            "condA": {
+              "op": "=",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "do",
+                  "index": 1
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            },
+            "condB": {
+              "op": ">",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "do",
+                  "index": 1
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "f74f11e0-f194-44fe-912d-e8f06868ba8b",
+          "type": "expr",
+          "x": 1865,
+          "y": 590,
+          "w": 280,
+          "h": 260,
+          "opts": {
+            "title": "SuperheatControl",
+            "exprIndex": 3,
+            "showSource": true,
+            "showOutput": true
+          }
+        },
+        {
+          "id": "874a17b6-24aa-4021-91fb-02beecef2b05",
+          "type": "expr",
+          "x": 1865,
+          "y": 855,
+          "w": 280,
+          "h": 255,
+          "opts": {
+            "title": "Interlocks",
+            "exprIndex": 2,
+            "showSource": true,
+            "showOutput": true
+          }
+        },
+        {
+          "id": "76fd5017-055c-4435-ad6d-7794444b4bc0",
+          "type": "expr",
+          "x": 1865,
+          "y": 135,
+          "w": 280,
+          "h": 200,
+          "opts": {
+            "title": "Setpoints",
+            "exprIndex": 0,
+            "showSource": true,
+            "showOutput": true
+          }
+        },
+        {
+          "id": "cf0d75d4-0a28-4ddb-b60a-07ad5767f4ec",
+          "type": "indicator",
+          "x": 355,
+          "y": 535,
+          "w": 60,
+          "h": 40,
+          "opts": {
+            "title": "Evap Press",
+            "shape": "round",
+            "size": 14,
+            "colorA": "#2faa60",
+            "colorB": "#d84a4a",
+            "colorOff": "#3b425e",
+            "showLabel": true,
+            "condA": {
+              "op": "=",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "static",
+                  "index": "evapPErr"
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            },
+            "condB": {
+              "op": ">",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "static",
+                  "index": "evapPErr"
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "e2c1e388-21f0-460b-8752-9ece24faad38",
+          "type": "indicator",
+          "x": 355,
+          "y": 575,
+          "w": 60,
+          "h": 40,
+          "opts": {
+            "title": "Steam Press",
+            "shape": "round",
+            "size": 14,
+            "colorA": "#2faa60",
+            "colorB": "#d84a4a",
+            "colorOff": "#3b425e",
+            "showLabel": true,
+            "condA": {
+              "op": "=",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "static",
+                  "index": "steamPErr"
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            },
+            "condB": {
+              "op": ">",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "static",
+                  "index": "steamPErr"
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "04b3a590-a5ac-4c11-aa85-94a627b1903a",
+          "type": "indicator",
+          "x": 355,
+          "y": 615,
+          "w": 60,
+          "h": 40,
+          "opts": {
+            "title": "Vap T Out",
+            "shape": "round",
+            "size": 14,
+            "colorA": "#2faa60",
+            "colorB": "#d84a4a",
+            "colorOff": "#3b425e",
+            "showLabel": true,
+            "condA": {
+              "op": "=",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "static",
+                  "index": "vaporOutTErr"
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            },
+            "condB": {
+              "op": ">",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "static",
+                  "index": "vaporOutTErr"
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "747c71df-3a30-41d2-a70a-d995335365aa",
+          "type": "indicator",
+          "x": 355,
+          "y": 655,
+          "w": 60,
+          "h": 40,
+          "opts": {
+            "title": "Super H",
+            "shape": "round",
+            "size": 14,
+            "colorA": "#2faa60",
+            "colorB": "#d84a4a",
+            "colorOff": "#3b425e",
+            "showLabel": true,
+            "condA": {
+              "op": "=",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "static",
+                  "index": "superHErr"
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            },
+            "condB": {
+              "op": ">",
+              "lhs": {
+                "mode": "signal",
+                "sel": {
+                  "kind": "static",
+                  "index": "superHErr"
+                }
+              },
+              "rhs": {
+                "mode": "fixed",
+                "value": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "40008dfd-590a-4435-849b-8040573a9973",
+          "type": "label",
+          "x": 350,
+          "y": 500,
+          "w": 120,
+          "h": 36,
+          "opts": {
+            "text": "ERRORs",
+            "fontFamily": "system-ui",
+            "fontSize": 18,
+            "fontWeight": "normal",
+            "fontStyle": "normal",
+            "fgColor": "#e6e6e6",
+            "bgColor": "transparent",
+            "align": "left"
+          }
+        },
+        {
+          "id": "3a4c1256-83e8-482a-9ec4-d0af5388005f",
+          "type": "staticvar",
+          "x": 215,
+          "y": 875,
+          "w": 220,
+          "h": 90,
+          "opts": {
+            "title": "minSuperheat",
+            "varName": "minSuperheat",
+            "decimalPlaces": 1
+          }
+        },
+        {
+          "id": "41303088-e53f-408f-9971-0687cb95ee08",
+          "type": "label",
+          "x": 355,
+          "y": 720,
+          "w": 120,
+          "h": 36,
+          "opts": {
+            "text": "Relays",
+            "fontFamily": "system-ui",
+            "fontSize": 18,
+            "fontWeight": "normal",
+            "fontStyle": "normal",
+            "fgColor": "#e6e6e6",
+            "bgColor": "transparent",
+            "align": "left",
+            "title": "Relays"
+          }
+        },
+        {
+          "id": "cc3c1b58-0056-4fd4-8adf-79a64160c848",
+          "type": "dobutton",
+          "x": 40,
+          "y": 865,
+          "w": 145,
+          "h": 95,
+          "opts": {
+            "title": "RUN",
+            "outputType": "var",
+            "doIndex": 0,
+            "varName": "runSystem",
+            "activeHigh": true,
+            "mode": "toggle",
+            "buzzHz": 10,
+            "actuationTime": 0,
+            "_timer": null
+          },
+          "debugCount": 8
+        },
+        {
+          "id": "1d0b9852-0ecd-4ad7-b2cf-300608c3e936",
+          "type": "expr",
+          "x": 70,
+          "y": 990,
+          "w": 350,
+          "h": 200,
+          "opts": {
+            "title": "MVR System",
+            "exprIndex": 12,
+            "showSource": true,
+            "showOutput": true
+          }
+        }
+      ]
+    }
+  ],
+  "grid": {
+    "enabled": true,
+    "size": 5,
+    "show": false,
+    "color": "#333333"
+  },
+  "checklist": {
+    "top": "315px",
+    "left": "1055px",
+    "width": "1420px",
+    "height": "150px",
+    "display": "none",
+    "fileName": "checklist_MIX_Testing.txt",
+    "content": " #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\nDate: ____________6-9-2026______________________\nTime: ________________________________________\nPlace: _________Glen Rose_____________\nConditions: ____________________________________\n_______Purpose / Objectives ____Test Fire Mixed LOX/CH4 with Short Engine_________\n___Assuming He Press and Purge, Pyro Ignition ___\n___LOX Conditions line from pump to engine, Nitrogen dilutes mix in mini-dewar\n\nCREW: ___TD__,  PAD1___\n\nITEMS IN ITALLICS  OR  GRAY  TEXT ARE INFORMATIONAL ONLY AND NOT TO BE CALLED OUT\n5   |TD  |Load current CHECKLIST   \"checklist_MIX_Testing.txt\"  if you haven't done so    |O   |0.0    |        |        |1\n10  |TD  |Comm Check,  PAD1                                                               |O   |0.0    |        |        |1\n15  |PAD1|Verify all containment ready, blocks and shields                                |O   |0.0    |        |        |1\n20  |TD  |Verify  'Ignition ARM'   is off                                                 |O   |0.0    |        |        |1\n\n      TEST will have previously started Command and Control App\n25  |PAD1|Has tightness check been completed                                              |O   |0.0    |        |        |1\n30  |PAD1|Verify LOX, Fuel and Nitrogen Vents Closed, Liquid Lines Open, Pressure Builders|O   |0.0    |        |        |1\n35  |PAD1|Verify Helium Bottle Valve Closed                                               |O   |0.0    |        |        |1\n40  |PAD1|Verify Helium Regulator Fully OFF                                               |O   |0.0    |        |        |1\n======================= PRE-TEST CHECKS ==================================================\n45  |TD  |On control app restart log, note name ______________________________            |O   |0.0    |        |        |1\n50  |PAD1|Verify the following (PAGE2 of control panel):                                  |O   |0.0    |        |        |1\n55  |    |       S1 - LOX Fill                                                            |O   |0.0    |        |        |1\n60  |    |       S2 - Fuel Fill                                                           |O   |0.0    |        |        |1\n65  |    |       S3 - MIX Into Engine                                                     |O   |0.0    |        |        |1\n70  |    |       S4 - Run Tank Vent                                                       |O   |0.0    |        |        |1\n75  |    |       S5 - Condition Vent                                                      |O   |0.0    |        |        |1\n80  |    |       S6 - LN2 Dilute                                                          |O   |0.0    |        |        |1\n85  |    |       S7 - MIX Out                                                             |O   |0.0    |        |        |1\n90  |    |       S8 - Helium                                                              |O   |0.0    |        |        |1\n95  |    |       S9 - LOX Condition                                                       |O   |0.0    |        |        |1\n100 |    |       S10 - LN2 Vent                                                           |O   |0.0    |        |        |1\n105 |    |       Pump Motor                                                               |O   |0.0    |        |        |1\n110 |TD  |Zero Pressure Transducers,    LOX Zero ____________,  Fuel Zero _________       |O   |0.0    |        |        |1\n115 |PAD1|Disconnect Igniter, connect indicator                                           |O   |0.0    |        |        |1\n120 |TD  |Turn on    'Ignition ARM'                                                       |O   |0.0    |        |        |1\n125 |PAD1|Verify igniter with indicator      (TD FLASH IGNITER)                           |O   |0.0    |        |        |1\n130 |TD  |Turn off   'Ignition ARM'                                                       |O   |0.0    |        |        |1\n135 |PAD1|Connect Igniter                                                                 |O   |0.0    |        |        |1\n140 |PAD1|Verify camera positions                                                         |O   |0.0    |        |        |1\n145 |PAD1|Open Helium Bottle Valve, report pressure ________________________              |O   |0.0    |        |        |1\n150 |PAD1|Set Helium regulator to : _____55_____psi                                       |O   |0.0    |        |        |1\n155 |PAD1|Turn gaseous Oxygen to pump ON                                                  |O   |0.0    |        |        |1\n160 |PAD1|Retreat to safe position                                                        |O   |0.0    |        |        |1\n=============================== START HAZARDOUS OPS ====================================\n=========================== BEGIN CONDITIONING MIX FILL LINE===============================\n165 |TD  |Turn ON    \"S9 - LOX Condition\"                                                 |O   |0.0    |        |        |1\n170 |TD  |Wait for liquid to show out of   S4 - Engine Vent                               |O   |0.0    |        |        |1\n175 |TD  |Switch on LOX Maintain                                                          |O   |0.0    |        |        |1\n=========================================================================================\n=========================== BEGIN CONDITIONING LN2 =======================================\n180 |TD  |Turn ON   \"S10 - LN2 Condition Vent\"                                            |O   |0.0    |        |        |1\n185 |TD  |Wait for liquid to show out of S10 - Vent                                       |O   |0.0    |        |        |1\n190 |TD  |Switch on LN2 Maintain                                                          |O   |0.0    |        |        |1\n==========================================================================================\n============================= PRELIMINARY FUEL CONDITION =================================\n195 |TD  |Turn on  \"S2 - Fuel Direct\"                                                     |O   |0.0    |        |        |1\n200 |TD  |Wait for liquid to show in mix tank                                             |O   |0.0    |        |        |1\n205 |TD  |Flush Mix tank with LN2, use     \"S6 - Dilute\", short bursts, keep as gas!      |O   |0.0    |        |        |1\n==========================================================================================\n===================================== FILL MIX TANK ========================================\n210 |TD  |Verify desired LOX amount variable is set to   600 grams                        |O   |0.0    |        |        |1\n215 |TD  |Turn ON   \"S1 - Fill LOX \"                                                      |O   |0.0    |        |        |1\n220 |TD  |Once LOX is filled, turn on   \"Load Prop\"                                       |O   |0.0    |        |        |1\n225 |TD  |Turn on Pump and pump out mix tank                                              |O   |0.0    |        |        |1\n230 |TD  |Press    \"Backflush Eng\"   to clear engine and line                             |O   |0.0    |        |        |1\n235 |TD  |Set desired LOX amount to test condition 200 grams,   verify_________g          |O   |0.0    |        |        |1\n240 |TD  |Turn ON   \"S1 - Fill LOX\",   wait for quantity to load                          |O   |0.0    |        |        |1\n245 |TD  |Turn ON   \"Fill Fuel\",  wait for gas to increase weight,   press \"Gas Offset\"   |O   |0.0    |        |        |1\n250 |TD  |Verify load matches desired MR                                                  |O   |0.0    |        |        |1\n255 |TD  |Turn ON   \"Load Prop\"                                                           |O   |0.0    |        |        |1\n260 |TD  |Turn ON  PUMP,    wait for load to finish                                       |O   |0.0    |        |        |1\n265 |TD  |Turn OFF Pump                                                                   |O   |0.0    |        |        |1\n270 |TD  |Turn OFF \"Load Prop\"                                                            |O   |0.0    |        |        |1\n275 |TD  |Press  \"Backflush Line\"                                                         |O   |0.0    |        |        |1\n==========================================================================================\n============================== START TEST SEQUENCE =======================================\n280 |PAD1|Start Recording CAM1 (normal speed)                                             |O   |0.0    |        |        |1\n285 |TD  |Announce   'ARMING THE SYSTEM'                                                  |O   |0.0    |        |        |1\n290 |TD  |Press   'Ignition ARM'                                                          |O   |0.0    |        |        |1\n295 |PAD1|Start High Speed Recording                                                      |O   |0.0    |        |        |1\n================================ FIRING SEQUENCE ========================================\n300 |TD  |Press    RUN TEST   Button                                                      |O   |0.0    |        |        |1\nTest is automated, purges lines, pressurizes run tank and runs test.\nNOTE: the automated test DOES NOT ARM ignition!\n\n===================== APPENDIX - A       EMERGENCY MIX DUMP ===============================\n305 |TD  |TURN OFF ALL BUT LN2 Cond                                                       |O   |0.0    |        |        |1\n310 |TD  |Turn   ON    \"S6 Dilute\"                                                        |O   |0.0    |        |        |1\n315 |TD  |Wait for double the weight                                                      |O   |0.0    |        |        |1\n320 |TD  |Turn  ON    \"S7 Chill Out\"                                                      |O   |0.0    |        |        |1\n325 |TD  |Turn  ON  Pump                                                                  |O   |0.0    |        |        |1\n330 |TD  |When weight is at minimum, turn   OFF   Pump                                    |O   |0.0    |        |        |1\n335 |    |Turn OFF   \"S7 Chill Out\"                                                       |O   |0.0    |        |        |1\n GOTO APPENDIX B  - SCRUB\n \n===================== APPENDIX - B       SCRUB / TEST COMPLETE ===============================\n340 |TD  |Press  'Purge'                                                                  |O   |0.0    |        |        |1\n345 |TD  |Turn on   \"S6 Dilute\"    Wait for 2X weight dilution                            |O   |0.0    |        |        |1\n350 |TD  |Turn OFF   'Ignition ARM'                                                       |O   |0.0    |        |        |1\n355 |    |Turn on   \"S6 Dilute\"   again and double the weight                             |O   |0.0    |        |        |1\n360 |TD  |Announce when safe to approach                                                  |O   |0.0    |        |        |1\n365 |PAD1|All dewars:  Turn off liquid lines, pressure builder and gas use                |O   |0.0    |        |        |1\n370 |TD  |All dewars:   Turn on vents                                                     |O   |0.0    |        |        |1\n=========================================================================================\n=========================== POST TEST TASKS ==============================================\n375 |PAD1|Open LN2 Dewar Vent                                                             |O   |0.0    |        |        |1\n380 |PAD1|Close LN2 Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n385 |PAD1|Open LOX Dewar Vent                                                             |O   |0.0    |        |        |1\n390 |PAD1|Close LOX Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n395 |PAD1|Open LNG Dewar Vent                                                             |O   |0.0    |        |        |1\n400 |PAD1|Close LNG Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n405 |PAD1|Turn of Helium Regulator                                                        |O   |0.0    |        |        |1\n410 |PAD1|Report final Helium pressure __________________                                 |O   |0.0    |        |        |1\n415 |PAD1|Close  Helium  bottle valve                                                     |O   |0.0    |        |        |1\n420 |ALL |TURN OFF RADIOS                                                                 |O   |0.0    |        |        |1\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+  }
+}
