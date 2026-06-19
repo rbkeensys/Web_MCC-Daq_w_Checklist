@@ -2,16 +2,16 @@
   "instances": [
     {
       "name": "Feed",
-      "include": false,
+      "include": true,
       "drive_key": "dm556rs",
       "config_key": "feed_pump",
       "port": "COM4",
-      "baud": 38400,
+      "baud": 9600,
       "parity": "N",
       "stopbits": 1,
       "address": 1,
       "timeout": 0.5,
-      "auto_setup": false,
+      "auto_setup": true,
       "poll_rate_ms": 100
     }
   ]

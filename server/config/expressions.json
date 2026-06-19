@@ -9,19 +9,19 @@
     {
       "name": "SteamTables",
       "enabled": true,
-      "expression": "// Saturation temps (Antoine, high range) + superheat. Tsat(P_psia) -> degC.\nep = \"AI:EvapPress\"\nsp = \"AI:SteamPress\"\nepmm = ep * 51.7149\nspmm = sp * 51.7149\nevapTsat  = 1810.94 / (8.14019 - log(epmm) / 2.302585) - 244.485\nsteamTsat = 1810.94 / (8.14019 - log(spmm) / 2.302585) - 244.485\nstatic.evapTsat     = evapTsat\nstatic.steamTsat    = steamTsat\nstatic.superheatIn  = \"TC:VaporIn\"  - evapTsat\nstatic.superheatOut = \"TC:VaporOut\" - steamTsat\nstatic.deltaT       = steamTsat - evapTsat\n",
+      "expression": "// Saturation temps (Antoine, high range) + superheat. Tsat(P_psia) -> degC.\nep = \"AI:EvapPress\"\nsp = \"AI:SteamPress\"\nVaporIn = \"TC:VaporIn\"\nVaporOut = \"TC:VaporOut\"\nstatic.PressRatio = sp/ep\npressRatio = static.PressRatio\n\nepmm = ep * 51.7149\nif (epmm < 0) then\n    epmm = 0\nendif\n\nspmm = sp * 51.7149\nif (spmm < 0) then\n    spmm = 0\nendif\n\nevapTsat  = 1810.94 / (8.14019 - log(epmm) / 2.302585) - 244.485\nsteamTsat = 1810.94 / (8.14019 - log(spmm) / 2.302585) - 244.485\nstatic.evapTsat     = evapTsat\nstatic.steamTsat    = steamTsat\nstatic.superheatIn  = VaporIn  - evapTsat\nstatic.superheatOut = VaporOut - steamTsat\nstatic.deltaT       = steamTsat - evapTsat\n",
       "execution_rate_hz": null
     },
     {
       "name": "Interlocks",
       "enabled": true,
-      "expression": "// Safety interlocks -> heatOK / trip / alarm / HeaterEnable.\nep = \"AI:EvapPress\"\nsp = \"AI:SteamPress\"\nshIn = static.superheatIn\nvout = \"TC:VaporOut\"\nflood = \"AI:DemisterFlood\" > static.demisterThresh\ntrip = 0\ntrip = trip or (ep > static.maxEvapPress)\ntrip = trip or (sp > static.maxSteamPress)\ntrip = trip or (vout > static.maxVaporOut)\ntrip = trip or flood\ntrip = trip or (static.runSystem and (shIn < static.minSuperheat))\nstatic.trip = trip\nheatOK = static.runSystem and (trip == 0)\nstatic.heatOK = heatOK\n\"DO:HeaterEnable\" = heatOK\n\"DO:Alarm\" = trip\n",
+      "expression": "// Safety interlocks -> heatOK / trip / alarm / HeaterEnable.\nevapPress    = \"AI:EvapPress\"\nsteamPress   = \"AI:SteamPress\"\nsuperHIn     = static.superheatIn\nvaporOutTemp = \"TC:VaporOut\"\nflood = \"AI:DemisterFlood\" > static.demisterThresh\n\n// static errors are used for indicators\nstatic.evapPErr     = (evapPress    > static.maxEvapPress)\nstatic.steamPErr    = (steamPress   > static.maxSteamPress)\nstatic.vaporOutTErr = (vaporOutTemp > static.maxVaporOut)\nstatic.superHErr    = (static.runSystem and (superHIn < static.minSuperheat))\ntrip = 0\ntrip = trip or static.evapPErr\ntrip = trip or static.steamPErr\ntrip = trip or static.vaporOutTErr\ntrip = trip or flood\ntrip = trip or static.superHErr \nstatic.trip = trip\n\nheatOK = static.runSystem and (trip == 0)\nstatic.heatOK = heatOK\n\"DO:HeaterEnable\" = heatOK\n\"DO:Alarm\" = trip\n",
       "execution_rate_hz": null
     },
     {
       "name": "SuperheatControl",
       "enabled": true,
-      "expression": "// Superheat heater PI -> DO:SuperHtr PWM duty 0..1 (gated by heatOK).\nerr = static.superheatSet - static.superheatIn\niPrev = static.superI\ni = iPrev\nduty = 0\nif ( static.heatOK ) then\n    i = iPrev + static.kiSuper * err * static.timeIncSec\n    i = clamp(i, 0, 1)\n    duty = static.kpSuper * err + i\n    if ( duty > 1 ) then\n        duty = 1\n        i = iPrev\n    endif\n    if ( duty < 0 ) then\n        duty = 0\n        i = iPrev\n    endif\nendif\nstatic.superI = i\nstatic.superDuty = duty\n\"DO:SuperHtr\" = duty\n",
+      "expression": "// Superheat heater PI -> DO:SuperHtr PWM duty 0..1 (gated by heatOK).\nsuperheatSet = static.superheatSet\nsuperheatIn  = static.superheatIn\nheatOK       = static.heatOK\nki           = static.kiSuper\n\nerr = static.superheatSet - static.superheatIn\niPrev = static.superI\ni = iPrev\nduty = 0\nif ( static.heatOK ) then\n    i = iPrev + static.kiSuper * err * static.timeIncSec\n    i = clamp(i, 0, 1)\n    duty = static.kpSuper * err + i\n    if ( duty > 1 ) then\n        duty = 1\n        i = iPrev\n    endif\n    if ( duty < 0 ) then\n        duty = 0\n        i = iPrev\n    endif\nendif\nstatic.superI = i\nstatic.superDuty = duty\n\"DO:SuperHtr\" = duty\n",
       "execution_rate_hz": null
     },
     {
@@ -33,7 +33,7 @@
     {
       "name": "BlowerControl",
       "enabled": true,
-      "expression": "// Blower (VFD) production knob + proportional anti-surge bypass on AO (0-10V).\nrun = static.runSystem and (static.trip == 0)\n\"VFD:VFD 1.ENABLE\" = run\nif ( run ) then\n    \"VFD:VFD 1.RPM\" = static.blowerRpmSet\n    \"VFD:VFD 1.DIR\" = 0\nendif\nbypassV = (static.surgeThresh - static.deltaT) * static.surgeGain\nbypassV = clamp(bypassV, 0, 10)\nif ( run == 0 ) then\n    bypassV = 0\nendif\nstatic.bypassV = bypassV\n\"AO:BypassValve\" = bypassV\n",
+      "expression": "// Blower (VFD) production knob + proportional anti-surge bypass on AO (0-10V).\nrun = static.runSystem and (static.trip == 0)\nstatic.vfdRpmRead = \"VFD:VFD 1\".RPM\n\"VFD:VFD 1.ENABLE\" = run\nif ( run ) then\n    \"VFD:VFD 1.RPM\" = static.blowerRpmSet\n    \"VFD:VFD 1.DIR\" = 0\nelse\n    \"VFD:VFD 1.ENABLE\" = 0\n    \"VFD:VFD 1.RPM\" = 0\nendif\nbypassV = (static.surgeThresh - static.deltaT) * static.surgeGain\nbypassV = clamp(bypassV, 0, 10)\nif ( run == 0 ) then\n    bypassV = 0\nendif\nstatic.bypassV = bypassV\n\"AO:BypassValve\" = bypassV\n",
       "execution_rate_hz": null
     },
     {
@@ -57,19 +57,25 @@
     {
       "name": "monitorMotor",
       "enabled": true,
-      "expression": "// Read the VFD for monitoring/charts.\nstatic.vfdOutVolt = \"VFD:VFD 1\".VOLTAGE\nstatic.vfdOutAmps = \"VFD:VFD 1\".CURRENT\nstatic.vfdOutPwr  = \"VFD:VFD 1\".POWER\nstatic.vfdRpmRead = \"VFD:VFD 1\".RPM\n",
+      "expression": "// Read the VFD for motor performance values\n\nrpm = \"VFD:VFD 1\".RPM\nvoltage = \"VFD:VFD 1\".VOLTAGE\ncurrent = \"VFD:VFD 1\".CURRENT\npowerkw = \"VFD:VFD 1\".POWER\ntorque  = \"VFD:VFD 1\".TORQUE\naccel   = \"VFD:VFD 1.P0.12\"\naccelRaw = \"VFD:VFD 1#0xF012\"\nsink    = \"VFD:VFD 1.P07.06\"\nenable  = \"VFD:VFD 1\".ENABLE\n\nstatic.vfdEnable  = enable\nstatic.vfdOutVolt = voltage\nstatic.vfdOutAmps = current\nstatic.vfdOutPwr  = powerkw\nstatic.vfdTorque  = torque\nstatic.accel      = accel\nstatic.accelraw   = accelRaw\nstatic.sink       = sink",
       "execution_rate_hz": null
     },
     {
       "name": "ProductionControl",
-      "enabled": false,
+      "enabled": true,
       "expression": "// PLACEHOLDER (disabled): blower follows distillate production.\nerr = static.productionSet - \"AI:CondFlow\"\nadj = static.blowerRpmSet\nif ( static.autoBlow ) then\n    adj = static.blowerRpmSet + 50 * err * static.timeIncSec\n    adj = clamp(adj, 0, 4025)\n    static.blowerRpmSet = adj\nendif\n",
       "execution_rate_hz": null
     },
     {
       "name": "FeedFollow",
-      "enabled": false,
+      "enabled": true,
       "expression": "// PLACEHOLDER (disabled): feed follows production (mass balance).\nif ( static.autoFeed ) then\n    static.feedRpmSet = static.productionSet * static.feedPerLpm\nendif\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "MVR System",
+      "enabled": true,
+      "expression": "// MVR System\n\nstate = static.mvrState\n\n\n//run can toggle ON/OFF!\n\nstatic.runSystem = buttonVars.runSystem\nrunSystem = static.runSystem\n\n\nIDLE = 0\nSTEP1 = 1\nSTEP2 = 2\nSTEP3 = 3\nDONE  = 4\n\nSWITCH state\n   CASE IDLE\n      state = STEP1\n   CASE STEP1\n      state = STEP2\n   CASE STEP2\n      state = STEP3\n   CASE STEP3\n      state = DONE\n   CASE DONE\n      state = IDLE\nENDSWITCH\n\nstatic.mvrState = state\n\n\n\n",
       "execution_rate_hz": null
     }
   ]

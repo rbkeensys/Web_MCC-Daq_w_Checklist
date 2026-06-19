@@ -9,9 +9,9 @@
       "analogs": [
         {
           "name": "EvapPress",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 2.0,
+          "slope": 8.625,
+          "offset": 14.173971557617188,
+          "cutoffHz": 0.1,
           "units": "psia",
           "include": true,
           "counter_num": null,
@@ -20,9 +20,9 @@
         },
         {
           "name": "SteamPress",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 2.0,
+          "slope": 8.625,
+          "offset": 17.74154930114746,
+          "cutoffHz": 0.1,
           "units": "psia",
           "include": true,
           "counter_num": null,
@@ -87,7 +87,7 @@
         {
           "name": "AI7",
           "slope": 1.0,
-          "offset": 0.0,
+          "offset": 0.5096731746897978,
           "cutoffHz": 1.0,
           "units": "",
           "include": false,
@@ -190,11 +190,11 @@
           "enable_index": 6
         },
         {
-          "name": "AO1",
+          "name": "BlowerRPM",
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
-          "include": false,
+          "include": true,
           "enable_gate": false,
           "enable_kind": "do",
           "enable_index": 6
