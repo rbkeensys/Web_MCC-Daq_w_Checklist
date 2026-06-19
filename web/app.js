@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.51";  // 2026-06-16: VFD instance editor gains a "Poll ms" column (per-instance poll_rate_ms; blank/unset shows 250 = 4/sec default, 0 = continuous) -- sets how fast the worker reads the drive over Modbus; saved to vfd_instances.json and applied on rebuild. Prev 2.1.50: chart "Keep×" spinner (1-100, default 4) sets how much history to retain in multiples of the span -- live keeps keep*span of scrollback, paused keeps ~keep*span split around the freeze (so memory is user-bounded; 100 ~= 100 spans). Filter[Hz] box narrowed to make room. Prev 2.1.49: paused charts stay filled -- the live-buffer trim now also honors the Pause-button flag (w.opts.paused), not only the zoom/pan freeze (w.view.paused); a button-paused chart previously kept doing buf.shift() each tick and wiped its left edge as new samples arrived. Span-change trim is skipped while paused too. Pairs with vfd_driver.py worker carry-forward (holds the last-good VFD reading instead of emitting 0 on a missed Modbus read, so .RPM etc. no longer drop to 0 during AO-slider command bursts). Prev 2.1.48: startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
+const UI_VERSION = "2.1.54";  // 2026-06-19: expression help cheatsheet now lists the SWITCH/CASE/DEFAULT/ENDSWITCH block (pairs with expr_engine.py 2.5.0). Note: the live expr-debug branch colorizer doesn't yet tint SWITCH case bodies (cosmetic only; SWITCH works in both backends). Prev 2.1.53: MOD Drv Save is now SCOPED to the active domain -- VFD tabs save only VFD libs+instances, Stepper tabs save only stepper config+instances (button relabels "Save VFD"/"Save Steppers"). Previously one Save PUT both vfd/instances AND stepper/instances every time, so saving steppers rebuilt + re-commanded the running VFD and surfaced VFD connect results (the "VFD isn't there" flakiness came from that needless rebuild probe). Pair with server.py 2.11.2 (stepper PUT result normalization). Prev 2.1.52: FIX stepper-unit Port column showed "[object Object]" -- the editor appended the portSelectControl() return object (psc) into the cell instead of psc.wrap (the VFD editor already did .wrap correctly). Now el('td',{},psc.wrap). Prev 2.1.51: VFD instance editor gains a "Poll ms" column (per-instance poll_rate_ms; blank/unset shows 250 = 4/sec default, 0 = continuous) -- sets how fast the worker reads the drive over Modbus; saved to vfd_instances.json and applied on rebuild. Prev 2.1.50: chart "Keep×" spinner (1-100, default 4) sets how much history to retain in multiples of the span -- live keeps keep*span of scrollback, paused keeps ~keep*span split around the freeze (so memory is user-bounded; 100 ~= 100 spans). Filter[Hz] box narrowed to make room. Prev 2.1.49: paused charts stay filled -- the live-buffer trim now also honors the Pause-button flag (w.opts.paused), not only the zoom/pan freeze (w.view.paused); a button-paused chart previously kept doing buf.shift() each tick and wiped its left edge as new samples arrived. Span-change trim is skipped while paused too. Pairs with vfd_driver.py worker carry-forward (holds the last-good VFD reading instead of emitting 0 on a missed Modbus read, so .RPM etc. no longer drop to 0 during AO-slider command bursts). Prev 2.1.48: startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -11394,6 +11394,7 @@ async function openVfdEditor(){
     renderTabs();
     panes.innerHTML = '';
     panes.append(tabs[activeTab][1]());
+    updateSaveLabel();  // hoisted; reflects VFD vs Stepper domain on the Save button
   }
 
   const portOptions = (sel) => {
@@ -11619,7 +11620,7 @@ async function openVfdEditor(){
       const del = el('button',{className:'btn',onclick:()=>{const i=stepInstances.indexOf(inst);if(i>=0){stepInstances.splice(i,1);draw();}}},'✕');
       tb.append(el('tr',{},[
         el('td',{},txt(inst,'name')), el('td',{},chk(inst,'include')),
-        el('td',{},driveSel), el('td',{},cfgSel), el('td',{},psc),
+        el('td',{},driveSel), el('td',{},cfgSel), el('td',{},psc.wrap),
         el('td',{},baudSel), el('td',{},parSel), el('td',{},stopSel),
         el('td',{},num(inst,'address',1)), el('td',{},num(inst,'timeout',0.1)),
         el('td',{},pollInp), el('td',{},chk(inst,'auto_setup')), el('td',{},del),
@@ -11637,23 +11638,37 @@ async function openVfdEditor(){
     return wrap;
   }
 
-  // ---- save: writes VFD libraries + stepper libraries; instances last (trigger rebuild) ----
+  // ---- save: SCOPED to the active domain. The VFD tabs (VFD Units / VFD
+  // Drives / Motors) write only the VFD libraries + instances; the stepper
+  // tabs (Stepper Units / Steppers) write only the stepper config + instances.
+  // This keeps the two drive types independent: saving steppers no longer
+  // rebuilds (and re-commands) the running VFD, and vice-versa. Each instance
+  // PUT rebuilds ONLY its own controllers. ----
+  const fmtResult = x => `${x.name}: ${x.ok?'connected':'FAILED'+(x.error?' ('+x.error+')':'')}`;
+  const isStepperTab = () => activeTab >= 3;  // tabs: 0 VFD Units,1 VFD Drives,2 Motors,3 Stepper Units,4 Steppers
+
+  async function doSaveVfd(){
+    await fetch('/api/vfd/drives',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({drives})});
+    await fetch('/api/vfd/motors',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({motors})});
+    const r = await (await fetch('/api/vfd/instances',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({instances})})).json();
+    if (!r.ok){ alert('VFD save failed: ' + (r.error||'unknown')); return; }
+    const lines = (r.results||[]).map(fmtResult);
+    alert('Saved VFD.' + (lines.length ? '\n\n'+lines.join('\n') : ''));
+  }
+  async function doSaveStepper(){
+    await fetch('/api/stepper/configs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({configs:stepConfigs})});
+    const sr = await (await fetch('/api/stepper/instances',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({instances:stepInstances})})).json();
+    if (!sr.ok){ alert('Stepper save failed: ' + (sr.error||'unknown')); return; }
+    const lines = (sr.results||[]).map(fmtResult);
+    alert('Saved steppers.' + (lines.length ? '\n\n'+lines.join('\n') : ''));
+  }
+
   const save = el('button', {className:'btn', onclick: async()=>{
-    try{
-      await fetch('/api/vfd/drives',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({drives})});
-      await fetch('/api/vfd/motors',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({motors})});
-      await fetch('/api/stepper/configs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({configs:stepConfigs})});
-      const r = await (await fetch('/api/vfd/instances',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({instances})})).json();
-      const sr = await (await fetch('/api/stepper/instances',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({instances:stepInstances})})).json();
-      if (r.ok && sr.ok){
-        const fmt = x=>`${x.name}: ${x.ok?'connected':'FAILED'+(x.error?' ('+x.error+')':'')}`;
-        const lines = (r.results||[]).map(fmt).concat((sr.results||[]).map(fmt));
-        alert('Saved.' + (lines.length ? '\n\n'+lines.join('\n') : ''));
-      } else {
-        alert('Save failed: ' + ((!r.ok&&r.error)||(!sr.ok&&sr.error)||'unknown'));
-      }
-    }catch(e){ alert('Save failed: '+e.message); }
+    try{ if (isStepperTab()) await doSaveStepper(); else await doSaveVfd(); }
+    catch(e){ alert('Save failed: '+e.message); }
   }}, 'Save');
+  // Label reflects which domain the current tab will save.
+  function updateSaveLabel(){ if (save) save.textContent = isStepperTab() ? 'Save Steppers' : 'Save VFD'; }
 
   draw();
   root.append(tabBar, panes, el('div',{style:'margin-top:10px'}, save));
@@ -13732,7 +13747,16 @@ Comparison: == != < <= > >=
 Boolean: AND OR NOT
 
 IF condition THEN value
-IF condition THEN value ELSE other</pre>
+IF condition THEN value ELSE other
+
+SWITCH subject       // branches on subject ==
+  CASE v1            //   (no fall-through)
+    stmt
+  CASE v2
+    stmt
+  DEFAULT
+    stmt
+ENDSWITCH</pre>
 
         <h3 style="color:#9ece6a;margin-top:15px;">Variables</h3>
         <pre style="background:#1a1d2e;padding:10px;border-radius:4px;font-size:12px;">
