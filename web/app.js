@@ -10847,18 +10847,28 @@ async function openConfigForm(providedConfig = null, banner = null){
   const analogSections = [];
   if (cfg.boards1608) {
     cfg.boards1608.forEach((board, boardIdx) => {
-      const analogRows = (board.analogs||[]).map((a,i)=>[
-        `AI${i}`, inputText(a,'name'),
-        `slope`,      inputNum(a,'slope',0.000001),
-        `offset`,     inputNum(a,'offset',0.000001),
-        `cutoffHz`,   inputNum(a,'cutoffHz',0.1),
-        `units`,      inputText(a,'units'),
-        `include`,    inputChk(a,'include'),
-        // Counter source: '—' = normal AI pin; '0' = driven by hardware counter CTR0 as a rate
-        `CTR`,        selectEnum(['—','0'], a.counter_num==null?'—':String(a.counter_num), v=>{ a.counter_num = (v==='—'?null:parseInt(v,10)); }),
-        `pulses/unit`,inputNum(a,'pulses_per_unit',1),
-        `ctr win(s)`, inputNum(a,'counter_window_s',0.1)
-      ]);
+      const analogRows = (board.analogs||[]).map((a,i)=>{
+        // Counter config collapses to ONE cell: a '—'/'0' selector, and the
+        // K (pulses/unit) + window inputs only appear when a counter is chosen.
+        const mut = 'color:var(--muted);font-size:11px';
+        const cExtra = el('span', {style:'display:'+(a.counter_num==null?'none':'inline-flex')+';gap:4px;align-items:center;margin-left:6px'});
+        cExtra.append(el('span',{style:mut},'K'), inputNum(a,'pulses_per_unit',1),
+                      el('span',{style:mut},'win'), inputNum(a,'counter_window_s',0.1));
+        const cSel = selectEnum(['—','0'], a.counter_num==null?'—':String(a.counter_num), v=>{
+          a.counter_num = (v==='—'?null:parseInt(v,10));
+          cExtra.style.display = (a.counter_num==null?'none':'inline-flex');
+        });
+        const cCell = el('div',{style:'display:flex;align-items:center'},[cSel, cExtra]);
+        return [
+          `AI${i}`, inputText(a,'name'),
+          `slope`,    inputNum(a,'slope',0.000001),
+          `offset`,   inputNum(a,'offset',0.000001),
+          `cutoffHz`, inputNum(a,'cutoffHz',0.1),
+          `units`,    inputText(a,'units'),
+          `include`,  inputChk(a,'include'),
+          `CTR`,      cCell,
+        ];
+      });
       if (analogRows.length > 0) {
         analogSections.push(fieldset(`Analogs - Board #${board.boardNum} (Y = m·X + b)`, tableFormRows(analogRows)));
       }

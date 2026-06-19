@@ -238,7 +238,9 @@ class MCCBridge:
             if idx >= len(ai_scaled):
                 continue
             count = None
-            if HAVE_MCCULW:
+            # Only touch the counter if its E-1608 actually opened -- a configured
+            # counter on an absent board would otherwise stall/raise every tick.
+            if HAVE_MCCULW and c["board"] in self._boards_1608:
                 try:
                     count = ul.c_in_32(c["board"], c["ctr"])
                 except Exception:
