@@ -2493,6 +2493,306 @@
           "debugCount": 8
         }
       ]
+    },
+    {
+      "name": "MVR Control",
+      "widgets": [
+        {
+          "id": "mvr-run",
+          "type": "staticvar",
+          "x": 20,
+          "y": 20,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "RUN (1=on)",
+            "varName": "runSystem",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-blowrpm",
+          "type": "staticvar",
+          "x": 20,
+          "y": 115,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Blower RPM set",
+            "varName": "blowerRpmSet",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-feedrpm",
+          "type": "staticvar",
+          "x": 20,
+          "y": 210,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Feed RPM set",
+            "varName": "feedRpmSet",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-evaptset",
+          "type": "staticvar",
+          "x": 20,
+          "y": 305,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Evap Temp set C",
+            "varName": "evapTempSet",
+            "decimalPlaces": 1
+          }
+        },
+        {
+          "id": "mvr-shset",
+          "type": "staticvar",
+          "x": 20,
+          "y": 400,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Superheat set C",
+            "varName": "superheatSet",
+            "decimalPlaces": 1
+          }
+        },
+        {
+          "id": "mvr-shin",
+          "type": "staticvar",
+          "x": 245,
+          "y": 20,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Superheat In C",
+            "varName": "superheatIn",
+            "decimalPlaces": 2
+          }
+        },
+        {
+          "id": "mvr-dt",
+          "type": "staticvar",
+          "x": 245,
+          "y": 115,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Compress dT C",
+            "varName": "deltaT",
+            "decimalPlaces": 2
+          }
+        },
+        {
+          "id": "mvr-evaptsat",
+          "type": "staticvar",
+          "x": 245,
+          "y": 210,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Evap Tsat C",
+            "varName": "evapTsat",
+            "decimalPlaces": 2
+          }
+        },
+        {
+          "id": "mvr-rpmread",
+          "type": "staticvar",
+          "x": 245,
+          "y": 305,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Blower RPM act",
+            "varName": "vfdRpmRead",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-trip",
+          "type": "staticvar",
+          "x": 245,
+          "y": 400,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "TRIP (1=trip)",
+            "varName": "trip",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-press",
+          "type": "chart",
+          "x": 480,
+          "y": 20,
+          "w": 1150,
+          "h": 320,
+          "opts": {
+            "title": "Pressures (psia)",
+            "series": [
+              {
+                "kind": "ai",
+                "index": 0,
+                "name": "EvapPress",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "ai",
+                "index": 1,
+                "name": "SteamPress",
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "auto",
+            "min": 0,
+            "max": 10,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 5,
+            "tFreeze": null
+          },
+          "view": {
+            "span": 60,
+            "paused": false,
+            "tFreeze": 0
+          }
+        },
+        {
+          "id": "mvr-temps",
+          "type": "chart",
+          "x": 480,
+          "y": 355,
+          "w": 1150,
+          "h": 360,
+          "opts": {
+            "title": "Temperatures (C)",
+            "series": [
+              {
+                "kind": "tc",
+                "index": 0,
+                "name": "FeedTemp",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 1,
+                "name": "EvapTemp",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 2,
+                "name": "VaporIn",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 3,
+                "name": "VaporOut",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 4,
+                "name": "CondTemp",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "tc",
+                "index": 5,
+                "name": "SteamChest",
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "auto",
+            "min": 0,
+            "max": 10,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 6,
+            "tFreeze": null
+          },
+          "view": {
+            "span": 60,
+            "paused": false,
+            "tFreeze": 0
+          }
+        },
+        {
+          "id": "mvr-shflow",
+          "type": "chart",
+          "x": 480,
+          "y": 730,
+          "w": 1150,
+          "h": 300,
+          "opts": {
+            "title": "Superheat / dT / Flow",
+            "series": [
+              {
+                "kind": "static",
+                "index": "superheatIn",
+                "name": "SH In",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "superheatOut",
+                "name": "SH Out",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "deltaT",
+                "name": "dT",
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "ai",
+                "index": 6,
+                "name": "CondFlow L/min",
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "auto",
+            "min": 0,
+            "max": 10,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 5,
+            "tFreeze": null
+          },
+          "view": {
+            "span": 60,
+            "paused": false,
+            "tFreeze": 0
+          }
+        }
+      ]
     }
   ],
   "grid": {

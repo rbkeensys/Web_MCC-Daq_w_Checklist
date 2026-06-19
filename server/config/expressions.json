@@ -3,7 +3,7 @@
     {
       "name": "Setpoints",
       "enabled": true,
-      "expression": "// MVR setpoints + tuning (edit via staticvar widgets). Temps degC, press psia.\nstatic.runSystem    = 0       // master run enable (0/1)\nstatic.timeIncSec   = 0.00625 // loop dt seconds (160 Hz nominal) -- for in-expr integrators\nstatic.evapPressSet = 14.7    // psia evaporator pressure (monitor)\nstatic.evapTempSet  = 100.0   // degC evaporator boiling temp target (makeup heater)\nstatic.superheatSet = 3.0     // degC blower-inlet superheat target\nstatic.blowerRpmSet = 1500    // rpm blower (production knob)\nstatic.feedRpmSet   = 60      // rpm feedwater pump\nstatic.kpSuper  = 0.5\nstatic.kiSuper  = 0.05\nstatic.kpMakeup = 0.5\nstatic.kiMakeup = 0.05\nstatic.condLevelThresh = 2.5  // V CondLevel switch threshold\nstatic.demisterThresh  = 2.5  // V DemisterWater/Flood threshold\nstatic.maxEvapPress    = 25.0 // psia high-pressure trip\nstatic.maxSteamPress   = 35.0 // psia high-pressure trip\nstatic.minSuperheat    = 0.5  // degC low-superheat (wet vapor) trip\nstatic.maxVaporOut     = 140.0// degC blower-discharge over-temp trip\n",
+      "expression": "// MVR setpoints + tuning (edit via staticvar widgets). Temps degC, press psia.\nstatic.runSystem    = 0       // master run enable (0/1)\nstatic.timeIncSec   = 0.00625 // loop dt seconds (160 Hz nominal) -- for in-expr integrators\nstatic.evapPressSet = 14.7    // psia evaporator pressure (monitor)\nstatic.evapTempSet  = 100.0   // degC evaporator boiling temp target (makeup heater)\nstatic.superheatSet = 3.0     // degC blower-inlet superheat target\nstatic.blowerRpmSet = 1500    // rpm blower (production knob)\nstatic.feedRpmSet   = 60      // rpm feedwater pump\nstatic.kpSuper  = 0.5\nstatic.kiSuper  = 0.05\nstatic.kpMakeup = 0.5\nstatic.kiMakeup = 0.05\nstatic.condLevelThresh = 2.5  // V CondLevel switch threshold\nstatic.demisterThresh  = 2.5  // V DemisterWater/Flood threshold\nstatic.maxEvapPress    = 25.0 // psia high-pressure trip\nstatic.maxSteamPress   = 35.0 // psia high-pressure trip\nstatic.minSuperheat    = 0.5  // degC low-superheat (wet vapor) trip\nstatic.maxVaporOut     = 140.0// degC blower-discharge over-temp trip\n// --- future auto-mode placeholders (used by disabled ProductionControl/FeedFollow) ---\nstatic.productionSet = 0.3    // L/min target distillate\nstatic.feedPerLpm    = 100    // rpm per L/min (feed-follow gain)\nstatic.autoBlow      = 0      // 1 = blower follows production\nstatic.autoFeed      = 0      // 1 = feed follows production\n",
       "execution_rate_hz": null
     },
     {
@@ -58,6 +58,18 @@
       "name": "monitorMotor",
       "enabled": true,
       "expression": "// Read the VFD for monitoring/charts.\nstatic.vfdOutVolt = \"VFD:VFD 1\".VOLTAGE\nstatic.vfdOutAmps = \"VFD:VFD 1\".CURRENT\nstatic.vfdOutPwr  = \"VFD:VFD 1\".POWER\nstatic.vfdRpmRead = \"VFD:VFD 1\".RPM\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "ProductionControl",
+      "enabled": false,
+      "expression": "// PLACEHOLDER (disabled): blower follows distillate production.\n// Enable + set autoBlow=1 to slew blowerRpmSet toward productionSet using CondFlow.\nerr = static.productionSet - \"AI:CondFlow\"\nadj = static.blowerRpmSet\nif ( static.autoBlow ) then\n    adj = static.blowerRpmSet + 50 * err * static.timeIncSec\n    adj = clamp(adj, 0, 4025)\n    static.blowerRpmSet = adj\nendif\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "FeedFollow",
+      "enabled": false,
+      "expression": "// PLACEHOLDER (disabled): feed follows production (mass balance).\n// Enable + set autoFeed=1 to drive feedRpmSet from the production target.\nif ( static.autoFeed ) then\n    static.feedRpmSet = static.productionSet * static.feedPerLpm\nendif\n",
       "execution_rate_hz": null
     }
   ]
