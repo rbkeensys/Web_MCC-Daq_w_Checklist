@@ -3,25 +3,61 @@
     {
       "name": "Setpoints",
       "enabled": true,
-      "expression": "// MVR boiler setpoints (engineering units) -- edit from the UI staticvar widgets\nstatic.evapPressSet  = 14.7   // psia  evaporator / boiling pressure target\nstatic.superheatSet  = 5.0    // degF  target superheat at blower inlet (VaporIn - Tsat(EvapPress))\nstatic.sumpLevelSet  = 50.0   // %     evaporator sump level target\nstatic.condLevelSet  = 50.0   // %     condensate tank level target\nstatic.feedTempSet   = 95.0   // degF  makeup-heater feed preheat target\n",
+      "expression": "// MVR setpoints + tuning (edit via staticvar widgets). Temps degC, press psia.\nstatic.runSystem    = 0       // master run enable (0/1)\nstatic.timeIncSec   = 0.00625 // loop dt seconds (160 Hz nominal) -- for in-expr integrators\nstatic.evapPressSet = 14.7    // psia evaporator pressure (monitor)\nstatic.evapTempSet  = 100.0   // degC evaporator boiling temp target (makeup heater)\nstatic.superheatSet = 3.0     // degC blower-inlet superheat target\nstatic.blowerRpmSet = 1500    // rpm blower (production knob)\nstatic.feedRpmSet   = 60      // rpm feedwater pump\nstatic.kpSuper  = 0.5\nstatic.kiSuper  = 0.05\nstatic.kpMakeup = 0.5\nstatic.kiMakeup = 0.05\nstatic.condLevelThresh = 2.5  // V CondLevel switch threshold\nstatic.demisterThresh  = 2.5  // V DemisterWater/Flood threshold\nstatic.maxEvapPress    = 25.0 // psia high-pressure trip\nstatic.maxSteamPress   = 35.0 // psia high-pressure trip\nstatic.minSuperheat    = 0.5  // degC low-superheat (wet vapor) trip\nstatic.maxVaporOut     = 140.0// degC blower-discharge over-temp trip\n",
       "execution_rate_hz": null
     },
     {
-      "name": "VFDTest",
+      "name": "SteamTables",
       "enabled": true,
-      "expression": "// Test my VFD\n\nstate       = static.vfdstate\nstart       = buttonVars.startVFD\nstop        = buttonVars.stopVFD\nrpm_cmd     = static.rpmSet\nprevRpmCmd  = static.prevRpmSet\nprevRpmRead = static.prevRpmRead\ncurrent_rpm = prevRpmRead\n\nIDLE       = 0\nSTARTPARMS = 1\nSTOPPARMS  = 2\nif ( state == 0 ) then\n    current_rpm = \"VFD:VFD 1\".RPM\n    if ( prevRpmRead != current_rpm ) then\n        print(\"RPM(VFD) %d\", current_rpm)\n    endif\n    if ( start or (rpm_cmd != prevRpmCmd) ) then \n        state = STARTPARMS\n    endif\n    if ( stop ) then\n        state = STOPPARMS\n    endif\nelse if ( state == STARTPARMS ) then\n    \"VFD:VFD 1.ENABLE\" = 1            // 1 = enable (start), 0 = disable (stop)\n    \"VFD:VFD 1.RPM\"    = rpm_cmd      // set speed in RPM (converted to Hz via the motor)\n    \"VFD:VFD 1.DIR\"    = 0            // 0 = forward, 1 = reverse  (aliases DIRECTION / REVERSE)\n    if ( start == 0 ) then\n       state = IDLE\n    endif\nelse if ( state == STOPPARMS ) then\n    print(\"writing stop parms\")\n    \"VFD:VFD 1.ENABLE\" = 0            // 1 = enable (start), 0 = disable (stop)\n    \"VFD:VFD 1.RPM\"    = 0         // set speed in RPM (converted to Hz via the motor)\n    \"VFD:VFD 1.DIR\"    = 0            // 0 = forward, 1 = reverse  (aliases DIRECTION / REVERSE)\n    if ( stop == 0 ) then\n       state = IDLE\n       print(\"Going back to IDLE\")\n    endif\nelse\n    state = IDLE\nendif\n\nstatic.vfdstate    = state\nstatic.prevRpmSet  = rpm_cmd\nstatic.prevRpmRead = current_rpm\n\n\n\n\n\n",
+      "expression": "// Saturation temps (Antoine, high range) + superheat. Tsat(P_psia) -> degC.\nep = \"AI:EvapPress\"\nsp = \"AI:SteamPress\"\nepmm = ep * 51.7149\nspmm = sp * 51.7149\nevapTsat  = 1810.94 / (8.14019 - log(epmm) / 2.302585) - 244.485\nsteamTsat = 1810.94 / (8.14019 - log(spmm) / 2.302585) - 244.485\nstatic.evapTsat     = evapTsat\nstatic.steamTsat    = steamTsat\nstatic.superheatIn  = \"TC:VaporIn\"  - evapTsat\nstatic.superheatOut = \"TC:VaporOut\" - steamTsat\nstatic.deltaT       = steamTsat - evapTsat\n",
       "execution_rate_hz": null
     },
     {
-      "name": "VFDRpmFromAO",
+      "name": "Interlocks",
       "enabled": true,
-      "expression": "// Convert 0-10V AO to VFD rpm\n\nmanual = static.manualRPM\n\nif ( manual == 0 ) then\n    volt = \"AO:0\"\n    rpm = volt * 402.5\nelse if ( manual > 0 and manual < 4025 ) then\n    rpm = manual\nelse\n    rpm = 0\nendif\n\nstatic.rpmSet = rpm\n",
+      "expression": "// Safety interlocks -> heatOK / trip / alarm / HeaterEnable.\nep = \"AI:EvapPress\"\nsp = \"AI:SteamPress\"\nshIn = static.superheatIn\nvout = \"TC:VaporOut\"\nflood = \"AI:DemisterFlood\" > static.demisterThresh\ntrip = 0\ntrip = trip or (ep > static.maxEvapPress)\ntrip = trip or (sp > static.maxSteamPress)\ntrip = trip or (vout > static.maxVaporOut)\ntrip = trip or flood\ntrip = trip or (static.runSystem and (shIn < static.minSuperheat))\nstatic.trip = trip\nheatOK = static.runSystem and (trip == 0)\nstatic.heatOK = heatOK\n\"DO:HeaterEnable\" = heatOK\n\"DO:Alarm\" = trip\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "SuperheatControl",
+      "enabled": true,
+      "expression": "// Superheat heater PI -> AO:SuperHtr (gated by heatOK), clamp+anti-windup.\nerr = static.superheatSet - static.superheatIn\niPrev = static.superI\ni = iPrev\nout = 0\nif ( static.heatOK ) then\n    i = iPrev + static.kiSuper * err * static.timeIncSec\n    i = clamp(i, 0, 10)\n    out = static.kpSuper * err + i\n    if ( out > 10 ) then\n        out = 10\n        i = iPrev\n    endif\n    if ( out < 0 ) then\n        out = 0\n        i = iPrev\n    endif\nelse\n    i = 0\nendif\nstatic.superI = i\n\"AO:SuperHtr\" = out\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "MakeupControl",
+      "enabled": true,
+      "expression": "// Makeup/boiling heater PI -> AO:MakeupHtr (gated by heatOK).\nerr = static.evapTempSet - \"TC:EvapTemp\"\niPrev = static.makeupI\ni = iPrev\nout = 0\nif ( static.heatOK ) then\n    i = iPrev + static.kiMakeup * err * static.timeIncSec\n    i = clamp(i, 0, 10)\n    out = static.kpMakeup * err + i\n    if ( out > 10 ) then\n        out = 10\n        i = iPrev\n    endif\n    if ( out < 0 ) then\n        out = 0\n        i = iPrev\n    endif\nelse\n    i = 0\nendif\nstatic.makeupI = i\n\"AO:MakeupHtr\" = out\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "BlowerControl",
+      "enabled": true,
+      "expression": "// Blower (VFD) -> production knob; gated by runSystem & not trip. Anti-surge bypass.\nrun = static.runSystem and (static.trip == 0)\n\"VFD:VFD 1.ENABLE\" = run\nif ( run ) then\n    \"VFD:VFD 1.RPM\" = static.blowerRpmSet\n    \"VFD:VFD 1.DIR\" = 0\nendif\nsurge = run and (static.deltaT < 1.0)\n\"DO:BypassValve\" = surge\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "FeedwaterControl",
+      "enabled": true,
+      "expression": "// Feedwater peristaltic (stepper) dosing rate; gated by runSystem & not trip.\nrun = static.runSystem and (static.trip == 0)\n\"STEP:Feed.ENABLE\" = run\nif ( run ) then\n    \"STEP:Feed.VELOCITY\" = static.feedRpmSet\nelse\n    \"STEP:Feed.STOP\" = 1\nendif\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "CondensatePump",
+      "enabled": true,
+      "expression": "// Condensate pump on/off with hysteresis on the CondLevel switch.\nlvl = \"AI:CondLevel\"\non = static.condPumpOn\nhi = static.condLevelThresh\nlo = static.condLevelThresh - 0.5\nif ( lvl > hi ) then\n    on = 1\nendif\nif ( lvl < lo ) then\n    on = 0\nendif\nstatic.condPumpOn = on\n\"DO:CondPump\" = on\n",
+      "execution_rate_hz": null
+    },
+    {
+      "name": "DemisterDrain",
+      "enabled": true,
+      "expression": "// Demister: drain whenever liquid water is present.\n\"DO:DemisterDrain\" = \"AI:DemisterWater\" > static.demisterThresh\n",
       "execution_rate_hz": null
     },
     {
       "name": "monitorMotor",
       "enabled": true,
-      "expression": "// Read the VFD for motor performance values\n\n\nrpm = \"VFD:VFD 1\".RPM\nvoltage = \"VFD:VFD 1\".VOLTAGE\ncurrent = \"VFD:VFD 1\".CURRENT\npowerkw = \"VFD:VFD 1\".POWER\ntorque  = \"VFD:VFD 1\".TORQUE\naccel   = \"VFD:VFD 1.P0.12\"\naccelRaw = \"VFD:VFD 1#0xF012\"\nsink    = \"VFD:VFD 1.P07.06\"\n\nstatic.vfdOutVolt = voltage\nstatic.vfdOutAmps = current\nstatic.vfdOutPwr  = powerkw\nstatic.vfdTorque  = torque\nstatic.accel      = accel\nstatic.accelraw   = accelRaw\nstatic.sink       = sink",
+      "expression": "// Read the VFD for monitoring/charts.\nstatic.vfdOutVolt = \"VFD:VFD 1\".VOLTAGE\nstatic.vfdOutAmps = \"VFD:VFD 1\".CURRENT\nstatic.vfdOutPwr  = \"VFD:VFD 1\".POWER\nstatic.vfdRpmRead = \"VFD:VFD 1\".RPM\n",
       "execution_rate_hz": null
     }
   ]
