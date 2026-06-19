@@ -26,11 +26,12 @@ VERSION 2.0 Changes:
 - Added buttonVars support for reading frontend button states
 - buttonVars are read-only in expressions (set by UI buttons)
 """
-__version__ = "2.4.0"
-__updated__ = "2026-06-18"  # 2.4.0: DO_ASSIGN records the RAW value (threshold/PWM-duty applied at write time). 2.3.0: added STEP: stepper-drive reads/status/commands (mirrors VFD:, routed to the stepper manager via manager='stepper' tag). 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
+__version__ = "2.5.0"
+__updated__ = "2026-06-19"  # 2.5.0: SWITCH/CASE/DEFAULT/ENDSWITCH keyword block added (parse_switch). Pure parser-level desugar into the existing IF/ELSE-IF/ELSE AST -- no new eval or codegen, so the Python evaluator AND the C++ transpiler (which reuse this Lexer/Parser) both get it identically. No fall-through (CASE is independent; no break). SWITCH/CASE/DEFAULT/ENDSWITCH are now reserved words. 2.4.0: DO_ASSIGN records the RAW value (threshold/PWM-duty applied at write time). 2.3.0: added STEP: stepper-drive reads/status/commands (mirrors VFD:, routed to the stepper manager via manager='stepper' tag). 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
 
 import re
 import math
+import copy
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
@@ -380,7 +381,11 @@ class Parser:
             # IF statement
             if name.upper() == 'IF':
                 return self.parse_if()
-            
+
+            # SWITCH statement (desugars to an IF / ELSE-IF / ELSE chain)
+            if name.upper() == 'SWITCH':
+                return self.parse_switch()
+
             # Function call
             if self.current() and self.current().type == 'LPAREN':
                 return self.parse_function_call(name)
@@ -513,7 +518,98 @@ class Parser:
         
         # Don't consume ENDIF here - let parse_if() handle it for the outermost IF
         return self.make_node('IF', None, [condition, then_expr, else_expr])
-    
+
+    def parse_switch(self) -> ASTNode:
+        """
+        Parse a SWITCH block and DESUGAR it into the existing IF / ELSE-IF /
+        ELSE AST. Nothing downstream needs to know SWITCH exists: the Python
+        evaluator and the C++ transpiler both already handle IF/COMPARE/BLOCK,
+        so this single parser change lights up BOTH backends identically.
+
+            SWITCH <subject>
+              CASE <value>
+                <statements...>
+              CASE <value>
+                <statements...>
+              DEFAULT
+                <statements...>
+            ENDSWITCH
+
+        becomes, conceptually:
+
+            IF (<subject>) == (<value>) THEN <stmts>
+            ELSE IF (<subject>) == (<value>) THEN <stmts>
+            ELSE <default-stmts>
+            ENDIF
+
+        Notes / contract:
+        - Keyword block style (matches IF/THEN/ELSE/ENDIF). The terminators
+          SWITCH / CASE / DEFAULT / ENDSWITCH are reserved words.
+        - Each CASE is independent: there is NO fall-through, so no `break` is
+          needed or accepted.
+        - The <subject> is re-read for every CASE comparison (this IS the
+          if/else-if expansion), so keep it a plain read -- do not put a
+          side-effecting assignment in the SWITCH subject.
+        - DEFAULT is optional; with no DEFAULT (and no match) the SWITCH
+          evaluates to 0, exactly like an IF with no ELSE.
+        - A CASE value is any expression, compared with == (so numbers,
+          static vars, or computed values all work, e.g. CASE static.IDLE).
+        """
+        STOP = ('CASE', 'DEFAULT', 'ENDSWITCH')
+
+        # Subject: the value being switched on.
+        subject = self.parse_or()
+
+        def _collect_body():
+            """Collect statements until a CASE/DEFAULT/ENDSWITCH (or EOF)."""
+            stmts = []
+            while self.current():
+                tok = self.current()
+                if tok.type == 'IDENT' and tok.value.upper() in STOP:
+                    break
+                stmts.append(self.parse_statement())
+            if len(stmts) == 0:
+                return self.make_node('NUMBER', 0.0)   # empty body -> no-op
+            if len(stmts) == 1:
+                return stmts[0]
+            return self.make_node('BLOCK', None, stmts)
+
+        # CASE clauses -> [(value_node, body_node), ...]
+        cases = []
+        while True:
+            tok = self.current()
+            if not (tok and tok.type == 'IDENT' and tok.value.upper() == 'CASE'):
+                break
+            self.advance()                 # consume CASE
+            value = self.parse_or()        # the case value expression
+            body = _collect_body()
+            cases.append((value, body))
+
+        # Optional DEFAULT clause.
+        default_node = self.make_node('NUMBER', 0.0)
+        tok = self.current()
+        if tok and tok.type == 'IDENT' and tok.value.upper() == 'DEFAULT':
+            self.advance()                 # consume DEFAULT
+            default_node = _collect_body()
+
+        # Require ENDSWITCH (block style, like ENDIF).
+        tok = self.current()
+        if not (tok and tok.type == 'IDENT' and tok.value.upper() == 'ENDSWITCH'):
+            raise SyntaxError(
+                "Expected ENDSWITCH to close SWITCH statement, got "
+                f"{tok.value if tok else 'EOF'}")
+        self.advance()                     # consume ENDSWITCH
+
+        # Build the nested IF chain bottom-up. The subject is deep-copied into
+        # each comparison so no node is aliased across the tree (keeps it
+        # structurally identical to a hand-written IF/ELSE-IF chain).
+        chain = default_node
+        for value, body in reversed(cases):
+            cond = self.make_node('COMPARE', '==',
+                                  [copy.deepcopy(subject), value])
+            chain = self.make_node('IF', None, [cond, body, chain])
+        return chain
+
     def parse_function_call(self, name: str) -> ASTNode:
         """Parse function call: func(arg1, arg2, ...)"""
         self.expect('LPAREN')

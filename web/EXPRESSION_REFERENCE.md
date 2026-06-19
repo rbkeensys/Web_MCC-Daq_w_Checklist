@@ -1,8 +1,8 @@
 # Expression Language Reference Guide
 
-**Version 1.4** | MCC DAQ System | Expression Engine Documentation  
-**Updated:** June 2026 - PWM-mode digital outputs (write a 0..1 duty); Stepper Drives (`STEP:`); counter-sourced AI channels (pulse flow meters on CTR0)  
-**Previous:** v1.2 (Jan 2026) - ENDIF requirement, nested IF examples, Math/Expr as PID inputs, enable gates
+**Version 1.5** | MCC DAQ System | Expression Engine Documentation  
+**Updated:** June 2026 - `SWITCH/CASE/DEFAULT/ENDSWITCH` keyword block (desugars to an IF/ELSE-IF chain; no fall-through)  
+**Previous:** v1.4 (June 2026) - PWM-mode digital outputs (write a 0..1 duty); Stepper Drives (`STEP:`); counter-sourced AI channels (pulse flow meters on CTR0); v1.2 (Jan 2026) - ENDIF requirement, nested IF examples, Math/Expr as PID inputs, enable gates
 
 ---
 
@@ -798,6 +798,73 @@ ENDIF
 3. **Only the last value matters** - In a multi-statement block, the last expression's value is returned
 
 4. **Indent for readability** - Makes nested logic much easier to understand
+
+### SWITCH / CASE Statements
+
+A `SWITCH` block is a clean way to branch on the value of one expression — it is exactly an `IF / ELSE IF / ELSE` chain under the hood (the parser rewrites it to one), so it runs identically in both the compiled and interpreted engines.
+
+**Basic Syntax:**
+```javascript
+SWITCH subject
+  CASE value1
+    statement
+    statement
+  CASE value2
+    statement
+  DEFAULT
+    statement
+ENDSWITCH
+```
+
+- `subject` is compared with `==` to each `CASE` value.
+- Each `CASE` is **independent — there is NO fall-through**, so no `break` is needed (or accepted). The first matching CASE runs, then the SWITCH ends.
+- `DEFAULT` is **optional** and runs when no CASE matches. With no DEFAULT and no match, the SWITCH does nothing (evaluates to 0), just like an `IF` with no `ELSE`.
+- A `CASE` value can be any expression (a number, a `static.` var, or a computed value), e.g. `CASE static.IDLE`.
+- `SWITCH`, `CASE`, `DEFAULT`, and `ENDSWITCH` are reserved words and the block must close with `ENDSWITCH` (like `ENDIF`).
+
+**Example — a state machine:**
+```javascript
+// static.state holds the batch step; IDLE/FILL/HEAT are static.* constants
+SWITCH static.state
+  CASE static.IDLE
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 0
+  CASE static.FILL
+    "DO:FeedPump" = 1
+    "DO:Heater"   = 0
+  CASE static.HEAT
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 1
+    "AO:Setpoint" = 5.0
+  DEFAULT
+    // unknown state -> safe stop + alarm
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 0
+    "DO:Alarm"    = 1
+ENDSWITCH
+```
+
+**Equivalent IF chain** (what it compiles to):
+```javascript
+IF static.state == static.IDLE THEN
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 0
+ELSE IF static.state == static.FILL THEN
+    "DO:FeedPump" = 1
+    "DO:Heater"   = 0
+ELSE IF static.state == static.HEAT THEN
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 1
+    "AO:Setpoint" = 5.0
+ELSE
+ENDIF
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 0
+    "DO:Alarm"    = 1
+ENDIF
+```
+
+> ⚠️ The `subject` is re-read for every CASE comparison (because it expands to an IF chain), so keep it a plain read — don't put a side-effecting assignment in the SWITCH subject.
 
 ---
 
