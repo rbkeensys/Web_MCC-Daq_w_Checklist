@@ -8,333 +8,196 @@
       "enabled": true,
       "analogs": [
         {
-          "name": "AI0",
-          "slope": 25.0,
-          "offset": -0.683135986328125,
-          "cutoffHz": 0.2,
-          "units": "psi",
-          "include": true
+          "name": "EvapPress",
+          "slope": 8.625,
+          "offset": 14.173971557617188,
+          "cutoffHz": 0.1,
+          "units": "psia",
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1.0,
+          "counter_window_s": 1.0
         },
         {
-          "name": "AI1",
-          "slope": 37.5,
-          "offset": 17.055130004882812,
-          "cutoffHz": 0.2,
-          "units": "psi",
-          "include": true
+          "name": "SteamPress",
+          "slope": 8.625,
+          "offset": 17.74154930114746,
+          "cutoffHz": 0.1,
+          "units": "psia",
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1.0,
+          "counter_window_s": 1.0
         },
         {
-          "name": "AI2",
+          "name": "DemisterWater",
           "slope": 1.0,
           "offset": 0.0,
-          "cutoffHz": 1.0,
-          "units": "psi",
-          "include": true
+          "cutoffHz": 5.0,
+          "units": "V",
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1.0,
+          "counter_window_s": 1.0
         },
         {
-          "name": "AI3",
+          "name": "DemisterFlood",
           "slope": 1.0,
           "offset": 0.0,
-          "cutoffHz": 1.0,
-          "units": "psi",
-          "include": true
+          "cutoffHz": 5.0,
+          "units": "V",
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1.0,
+          "counter_window_s": 1.0
         },
         {
-          "name": "Ch P",
-          "slope": 50.17183999499474,
-          "offset": -27.436806323434716,
+          "name": "CondLevel",
+          "slope": 1.0,
+          "offset": 0.0,
+          "cutoffHz": 5.0,
+          "units": "V",
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1.0,
+          "counter_window_s": 1.0
+        },
+        {
+          "name": "FeedPress",
+          "slope": 1.0,
+          "offset": 0.0,
+          "cutoffHz": 2.0,
+          "units": "psia",
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1.0,
+          "counter_window_s": 1.0
+        },
+        {
+          "name": "CondFlow",
+          "slope": 1.0,
+          "offset": 0.0,
           "cutoffHz": 0.0,
-          "units": "psi",
-          "include": true
-        },
-        {
-          "name": "AI5",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
-          "units": "",
-          "include": false
-        },
-        {
-          "name": "AI6",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
-          "units": "",
-          "include": false
+          "units": "L/min",
+          "include": true,
+          "counter_num": 0,
+          "pulses_per_unit": 22000.0,
+          "counter_window_s": 1.0
         },
         {
           "name": "AI7",
           "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
+          "offset": 0.5096731746897978,
+          "cutoffHz": 1.0,
           "units": "",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1.0,
+          "counter_window_s": 1.0
         }
       ],
       "digitalOutputs": [
         {
-          "name": "S5_MIXNearVent",
+          "name": "MakeupHtr",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "pwm",
+          "pwmPeriodMs": 1000.0
         },
         {
-          "name": "S1_LOXOUT",
+          "name": "SuperHtr",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "pwm",
+          "pwmPeriodMs": 1000.0
         },
         {
-          "name": "S6_LN2In",
+          "name": "CondPump",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000.0
         },
         {
-          "name": "S2_FuelOUT",
+          "name": "DemisterDrain",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000.0
         },
         {
-          "name": "S7_NearMIXOut",
+          "name": "BlowdownValve",
           "normallyOpen": false,
-          "momentary": true,
+          "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "momentary"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000.0
         },
         {
-          "name": "S9_LOXChill",
+          "name": "VentValve",
           "normallyOpen": false,
-          "momentary": true,
+          "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "momentary"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000.0
         },
         {
-          "name": "S8_PURGE",
+          "name": "HeaterEnable",
           "normallyOpen": false,
-          "momentary": true,
+          "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "momentary"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000.0
         },
         {
-          "name": "Igniter",
+          "name": "Alarm",
           "normallyOpen": false,
-          "momentary": true,
+          "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "momentary"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000.0
         }
       ],
       "analogOutputs": [
         {
-          "name": "AO0",
-          "minV": 0.0,
-          "maxV": 10.0,
-          "startupV": 0.0,
-          "include": true,
-          "enable_gate": false,
-          "enable_kind": "le",
-          "enable_index": 0
-        },
-        {
-          "name": "AO1",
+          "name": "BypassValve",
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
           "include": true,
           "enable_gate": false,
           "enable_kind": "do",
-          "enable_index": 0
-        }
-      ]
-    },
-    {
-      "boardNum": 2,
-      "sampleRateHz": 160.0,
-      "blockSize": 128,
-      "aiMode": "SE",
-      "enabled": true,
-      "analogs": [
-        {
-          "name": "Scale",
-          "slope": 123.39041416348212,
-          "offset": -251.79958882492227,
-          "cutoffHz": 1.0,
-          "units": "grams",
-          "include": true
+          "enable_index": 6
         },
         {
-          "name": "AI1",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.1,
-          "units": "psi",
-          "include": false
-        },
-        {
-          "name": "AI2",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.1,
-          "units": "psi",
-          "include": false
-        },
-        {
-          "name": "AI3",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.1,
-          "units": "psi",
-          "include": false
-        },
-        {
-          "name": "AI4",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
-          "units": "",
-          "include": false
-        },
-        {
-          "name": "AI5",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
-          "units": "",
-          "include": false
-        },
-        {
-          "name": "AI6",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
-          "units": "",
-          "include": false
-        },
-        {
-          "name": "AI7",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
-          "units": "",
-          "include": false
-        }
-      ],
-      "digitalOutputs": [
-        {
-          "name": "Spark",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle"
-        },
-        {
-          "name": "S4_RunTankVent",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle"
-        },
-        {
-          "name": "S3_PropMixLoad",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle"
-        },
-        {
-          "name": "S10_LN2CondVent",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle"
-        },
-        {
-          "name": "DO24",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle"
-        },
-        {
-          "name": "DO25",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle"
-        },
-        {
-          "name": "DO26",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle"
-        },
-        {
-          "name": "DO27",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle"
-        }
-      ],
-      "analogOutputs": [
-        {
-          "name": "AO2",
-          "minV": 0.0,
-          "maxV": 10.0,
-          "startupV": 0.0,
-          "include": true,
-          "enable_gate": false,
-          "enable_kind": "le",
-          "enable_index": 0
-        },
-        {
-          "name": "AO3",
+          "name": "BlowerRPM",
           "minV": 0.0,
           "maxV": 10.0,
           "startupV": 0.0,
           "include": true,
           "enable_gate": false,
           "enable_kind": "do",
-          "enable_index": 0
+          "enable_index": 6
         }
       ]
     }
@@ -344,71 +207,71 @@
       "boardNum": 1,
       "sampleRateHz": 10.0,
       "blockSize": 1,
-      "enabled": false,
+      "enabled": true,
       "thermocouples": [
         {
           "include": true,
           "ch": 0,
-          "name": "TC0",
+          "name": "FeedTemp",
           "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.1
+          "cutoffHz": 0.2
         },
         {
           "include": true,
           "ch": 1,
-          "name": "TC1",
+          "name": "EvapTemp",
           "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.1
+          "cutoffHz": 0.2
         },
         {
           "include": true,
           "ch": 2,
-          "name": "TC2",
+          "name": "VaporIn",
           "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.1
+          "cutoffHz": 0.2
         },
         {
           "include": true,
           "ch": 3,
-          "name": "TC3",
+          "name": "VaporOut",
           "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.1
+          "cutoffHz": 0.2
         },
         {
-          "include": false,
+          "include": true,
           "ch": 4,
-          "name": "TC4",
+          "name": "CondTemp",
           "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.1
+          "cutoffHz": 0.2
         },
         {
-          "include": false,
+          "include": true,
           "ch": 5,
-          "name": "TC5",
-          "type": "T",
+          "name": "SteamChest",
+          "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.1
+          "cutoffHz": 0.2
         },
         {
           "include": false,
           "ch": 6,
           "name": "TC6",
-          "type": "T",
+          "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.1
+          "cutoffHz": 0.2
         },
         {
-          "include": true,
+          "include": false,
           "ch": 7,
           "name": "TC7",
-          "type": "T",
+          "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.1
+          "cutoffHz": 0.2
         }
       ]
     }

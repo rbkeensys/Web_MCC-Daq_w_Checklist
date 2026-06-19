@@ -1,0 +1,15 @@
+{
+  "configs": [
+    {
+      "key": "feed_pump",
+      "name": "Feedwater Peristaltic",
+      "steps_per_rev": 10000,
+      "full_step_deg": 1.8,
+      "peak_current_a": 2,
+      "reverse": false,
+      "max_rpm": 600,
+      "accel": 200,
+      "decel": 200
+    }
+  ]
+}

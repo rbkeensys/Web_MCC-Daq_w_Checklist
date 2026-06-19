@@ -1,7 +1,8 @@
 # Expression Language Reference Guide
 
-**Version 1.2** | MCC DAQ System | Expression Engine Documentation  
-**Updated:** January 2026 - Added ENDIF requirement, nested IF examples, Math/Expr as PID inputs, enable gates
+**Version 1.5** | MCC DAQ System | Expression Engine Documentation  
+**Updated:** June 2026 - `SWITCH/CASE/DEFAULT/ENDSWITCH` keyword block (desugars to an IF/ELSE-IF chain; no fall-through)  
+**Previous:** v1.4 (June 2026) - PWM-mode digital outputs (write a 0..1 duty); Stepper Drives (`STEP:`); counter-sourced AI channels (pulse flow meters on CTR0); v1.2 (Jan 2026) - ENDIF requirement, nested IF examples, Math/Expr as PID inputs, enable gates
 
 ---
 
@@ -39,6 +40,7 @@ ENDIF
 9. [VFD Motor Drives](#vfd-motor-drives) — read status, set RPM/Hz, enable, direction
     - [Read status](#reading-vfd-status) (`.RPM .HZ .CURRENT` …) · [read params/registers](#reading-vfd-parameters-and-registers)
     - [Commands](#commanding-a-vfd) (`.ENABLE .RPM .HZ .DIR`) · [write params/registers](#writing-vfd-parameters-and-registers)
+9b. [Stepper Drives (STEP)](#stepper-drives-step) — velocity & position moves, enable, jog (`.VELOCITY .MOVE .ENABLE`)
 10. [Built-in Functions](#built-in-functions) — [math](#mathematical-functions) · [trig](#trigonometric-functions) · [exponential](#exponential-functions)
 11. [Advanced Integration](#advanced-integration) — PID inputs · enable gates · chaining
 12. [Complete Examples](#complete-examples) — 6 worked examples
@@ -126,6 +128,7 @@ highPressure = "AI:Pressure" > 100
 - AI values are already scaled according to channel configuration (slope and offset)
 - AI values include low-pass filtering if configured
 - Names are case-sensitive and must match exactly
+- An AI channel can be **counter-sourced**: if configured with a counter (CTR0) in the channel editor, its value is a pulse-meter **rate in engineering units per minute** — e.g. `"AI:CondFlow"` reads L/min from a flow meter wired to the E-1608 `CTR` pin, not a voltage. Read it like any other AI.
 
 ---
 
@@ -796,6 +799,73 @@ ENDIF
 
 4. **Indent for readability** - Makes nested logic much easier to understand
 
+### SWITCH / CASE Statements
+
+A `SWITCH` block is a clean way to branch on the value of one expression — it is exactly an `IF / ELSE IF / ELSE` chain under the hood (the parser rewrites it to one), so it runs identically in both the compiled and interpreted engines.
+
+**Basic Syntax:**
+```javascript
+SWITCH subject
+  CASE value1
+    statement
+    statement
+  CASE value2
+    statement
+  DEFAULT
+    statement
+ENDSWITCH
+```
+
+- `subject` is compared with `==` to each `CASE` value.
+- Each `CASE` is **independent — there is NO fall-through**, so no `break` is needed (or accepted). The first matching CASE runs, then the SWITCH ends.
+- `DEFAULT` is **optional** and runs when no CASE matches. With no DEFAULT and no match, the SWITCH does nothing (evaluates to 0), just like an `IF` with no `ELSE`.
+- A `CASE` value can be any expression (a number, a `static.` var, or a computed value), e.g. `CASE static.IDLE`.
+- `SWITCH`, `CASE`, `DEFAULT`, and `ENDSWITCH` are reserved words and the block must close with `ENDSWITCH` (like `ENDIF`).
+
+**Example — a state machine:**
+```javascript
+// static.state holds the batch step; IDLE/FILL/HEAT are static.* constants
+SWITCH static.state
+  CASE static.IDLE
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 0
+  CASE static.FILL
+    "DO:FeedPump" = 1
+    "DO:Heater"   = 0
+  CASE static.HEAT
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 1
+    "AO:Setpoint" = 5.0
+  DEFAULT
+    // unknown state -> safe stop + alarm
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 0
+    "DO:Alarm"    = 1
+ENDSWITCH
+```
+
+**Equivalent IF chain** (what it compiles to):
+```javascript
+IF static.state == static.IDLE THEN
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 0
+ELSE IF static.state == static.FILL THEN
+    "DO:FeedPump" = 1
+    "DO:Heater"   = 0
+ELSE IF static.state == static.HEAT THEN
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 1
+    "AO:Setpoint" = 5.0
+ELSE
+ENDIF
+    "DO:FeedPump" = 0
+    "DO:Heater"   = 0
+    "DO:Alarm"    = 1
+ENDIF
+```
+
+> ⚠️ The `subject` is re-read for every CASE comparison (because it expands to an IF chain), so keep it a plain read — don't put a side-effecting assignment in the SWITCH subject.
+
 ---
 
 ## Variables
@@ -945,6 +1015,13 @@ Expressions can directly control hardware outputs using assignment syntax.
 **Value Interpretation:**
 - `>= 1.0` → ON (true)
 - `< 1.0` → OFF (false)
+
+**PWM mode:** if a DO is set to **`pwm`** mode in the channel editor (with a period in ms), writing to it is treated as a **duty cycle 0.0–1.0** instead of on/off — the server generates a tick-rate square wave at that duty. Period is configured in the editor; duty is whatever you write:
+```javascript
+// Heater at 35% power (the DO must be in 'pwm' mode)
+"DO:MakeupHtr" = 0.35
+"DO:SuperHtr"  = CLAMP("PID:Superheat".OUT / 10, 0, 1)   // scale a 0-10 output to a 0-1 duty
+```
 
 **Examples:**
 
@@ -1160,6 +1237,81 @@ register** by putting the token *inside* the quotes (mirrors the read form):
 > `.DIR`) — they do the scaling and encoding for you; raw writes are for advanced or
 > one-off cases. Writes are edge-sent (only on change), and raw `#` register writes
 > skip read-back verification (a command/run register can't be read back).
+
+---
+
+## Stepper Drives (STEP)
+
+Modbus stepper drives configured in the **MOD Drv** editor are addressed by their
+instance **name**, exactly like VFDs, but with the `STEP:` prefix. Each instance binds a
+stepper drive model (e.g. **DM556RS**) + a stepper config + a COM port. As with VFDs, all
+serial traffic runs on a background worker thread, so reads return the latest polled value
+and commands are queued — expressions never block the control loop.
+
+Two motion modes: **Profile Velocity** (run continuously at an rpm — e.g. a feed/dosing
+pump's rate) and **Profile Position** (move an exact number of steps — a precise dose).
+
+### Reading stepper status
+
+**Syntax:** `"STEP:InstanceName".PROPERTY` (dot OUTSIDE the quotes)
+
+| Property        | Meaning                               | Units |
+|-----------------|---------------------------------------|-------|
+| `VEL` / `RPM`   | Actual velocity                       | rpm   |
+| `POS`           | Actual position                       | steps |
+| `RUNNING`       | 1 if moving, 0 if stopped             | bool  |
+| `ENABLED`       | 1 if the drive is enabled             | bool  |
+| `COMPLETE`      | 1 when the last move/path finished    | bool  |
+| `ALARM`/`FAULT` | Alarm code (0 = none)                 | code  |
+| `WRITEFAULT`    | 1 if the last write to this drive failed | bool |
+
+```
+# Latch a fault if the feed pump alarms
+IF "STEP:Feed".ALARM != 0 THEN
+    static.feedFault = 1
+ENDIF
+```
+
+### Commanding a stepper
+
+**Syntax:** `"STEP:InstanceName.COMMAND" = value` (token INSIDE the quotes)
+
+| Command                | Value                     | Action                                  |
+|------------------------|---------------------------|-----------------------------------------|
+| `ENABLE`               | 1 = enable, 0 = disable   | Energize / de-energize the drive        |
+| `VELOCITY`/`VEL`/`RPM` | rpm (sign = direction)    | Profile Velocity: run continuously      |
+| `MOVE`                 | steps (relative, signed)  | Profile Position: move N steps from here|
+| `MOVETO`               | steps (absolute)          | Profile Position: move to absolute pos  |
+| `STOP`                 | (any)                     | Quick stop                              |
+| `JOG`                  | +1 / -1 / 0               | Jog CW / CCW / stop                     |
+| `ALARM_RESET`/`RESET`  | 1                         | Clear a drive alarm                     |
+
+Aliases: `RUN` = `ENABLE`; `DISABLE` = `STOP`. Commands are **edge-sent** (issued only when
+the value changes), like VFD and DO/AO writes.
+
+```
+# Feedwater pump: continuous dosing rate from the level / mass-balance loop
+"STEP:Feed.ENABLE"   = static.runFeed         # 1 = enable
+"STEP:Feed.VELOCITY" = "PID:SumpLevel".OUT    # rpm = controller output
+
+# Or a precise primed dose of 5000 steps
+"STEP:Feed.MOVE" = 5000
+```
+
+### Reading / writing stepper parameters and registers
+
+Like VFDs, read or write any drive **parameter** (`Pr` code) or **raw Modbus register** by
+putting the token inside the quotes:
+
+```
+peakCur = "STEP:Feed.Pr5.00"     # peak-current parameter
+vel0    = "STEP:Feed#0x6203"     # raw PR0 velocity register
+"STEP:Feed#0x6203" = 600         # raw write (advanced; prefer the commands above)
+```
+
+> For normal control use the command targets (`.VELOCITY`, `.MOVE`, `.ENABLE`) — they handle
+> the PR-path setup and trigger encoding for you. Raw `#`-register writes skip read-back
+> verification. The full DM556RS register map is in `DM556RS_MODBUS.md`.
 
 ---
 
@@ -2055,6 +2207,25 @@ result
 // Write a parameter / raw register (raw drive units)
 "VFD:Name.P0.06"  = 4500
 "VFD:Name#0x5000" = 5000
+```
+
+### Stepper Drives (STEP)
+```javascript
+// Read status (dot OUTSIDE quotes)
+"STEP:Name".VEL      // actual rpm   (also .POS .RUNNING .ENABLED
+"STEP:Name".ALARM    //   .COMPLETE .WRITEFAULT)
+
+// Commands (LEFT of =) — PR-path setup/trigger handled for you
+"STEP:Name.ENABLE"   = 1       // 1 = enable, 0 = disable
+"STEP:Name.VELOCITY" = 600     // continuous run, rpm (sign = direction)
+"STEP:Name.MOVE"     = 5000    // relative move, steps (.MOVETO = absolute)
+"STEP:Name.STOP"     = 1       // quick stop      (.JOG = +1/-1/0)
+"STEP:Name.RESET"    = 1       // clear alarm
+// edge-sent (only when the value changes)
+
+// Parameter / raw register (prefer commands above)
+"STEP:Name.Pr5.00"  = 32       // peak current param
+"STEP:Name#0x6203"  = 600      // raw PR0 velocity register
 ```
 
 ### Operators

@@ -13,7 +13,7 @@ NEW STRUCTURE:
 This allows multiple E-1608 and E-TC boards, each with their own channels.
 """
 
-__version__ = "2.0.1"  # Fixed missing PID fields
+__version__ = "2.1.0"  # PWM DO mode (DigitalOutCfg.pwmPeriodMs) + counter-sourced AI fields. Fixed missing PID fields
 
 from pydantic import BaseModel
 from typing import List, Optional
@@ -27,6 +27,12 @@ class AnalogCfg(BaseModel):
     cutoffHz: float = 0.0
     units: str = ""
     include: bool = True
+    # Counter-sourced channel: if counter_num is set, this AI's value is the
+    # E-1608 hardware counter CTR<n> read as a rate (engineering units / minute),
+    # not its physical AI pin. Used for pulse flow meters.
+    counter_num: Optional[int] = None
+    pulses_per_unit: float = 1.0       # K-factor, pulses per engineering unit (e.g. 22000 pulses/L)
+    counter_window_s: float = 1.0      # rate averaging window, seconds
 
 class DigitalOutCfg(BaseModel):
     name: str = "DO"
@@ -35,7 +41,8 @@ class DigitalOutCfg(BaseModel):
     actuationTime: float = 0.0
     include: bool = True
     logicElement: Optional[int] = None  # Index of LE that gates this DO (None = no gating)
-    mode: str = "toggle"  # 'toggle', 'momentary', 'buzz'
+    mode: str = "toggle"  # 'toggle', 'momentary', 'buzz', 'pwm'
+    pwmPeriodMs: float = 1000.0  # PWM-mode period (ms); duty set by writing 0..1 to the DO
 
 class AnalogOutCfg(BaseModel):
     name: str = "AO"

@@ -1,13 +1,3 @@
 {
-  "scales": [
-    {
-      "name": "Scale0",
-      "host": "192.168.0.99",
-      "port": "COM2",
-      "baud": 9600,
-      "units": "g",
-      "enabled": true,
-      "offset": 0.0
-    }
-  ]
+  "scales": []
 }

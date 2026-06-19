@@ -26,11 +26,12 @@ VERSION 2.0 Changes:
 - Added buttonVars support for reading frontend button states
 - buttonVars are read-only in expressions (set by UI buttons)
 """
-__version__ = "2.2.0"
-__updated__ = "2026-06-15"  # 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
+__version__ = "2.5.0"
+__updated__ = "2026-06-19"  # 2.5.0: SWITCH/CASE/DEFAULT/ENDSWITCH keyword block added (parse_switch). Pure parser-level desugar into the existing IF/ELSE-IF/ELSE AST -- no new eval or codegen, so the Python evaluator AND the C++ transpiler (which reuse this Lexer/Parser) both get it identically. No fall-through (CASE is independent; no break). SWITCH/CASE/DEFAULT/ENDSWITCH are now reserved words. 2.4.0: DO_ASSIGN records the RAW value (threshold/PWM-duty applied at write time). 2.3.0: added STEP: stepper-drive reads/status/commands (mirrors VFD:, routed to the stepper manager via manager='stepper' tag). 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
 
 import re
 import math
+import copy
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
@@ -261,6 +262,9 @@ class Parser:
                     elif signal_type == 'VFD':
                         # "VFD:Name.token" = expr  (queued to VFD worker)
                         return self.make_node('VFD_ASSIGN', signal_name, [expr])
+                    elif signal_type == 'STEP':
+                        # "STEP:Name.token" = expr  (queued to stepper worker)
+                        return self.make_node('STEP_ASSIGN', signal_name, [expr])
         
         # Not an assignment, just an expression
         return self.parse_or()
@@ -377,7 +381,11 @@ class Parser:
             # IF statement
             if name.upper() == 'IF':
                 return self.parse_if()
-            
+
+            # SWITCH statement (desugars to an IF / ELSE-IF / ELSE chain)
+            if name.upper() == 'SWITCH':
+                return self.parse_switch()
+
             # Function call
             if self.current() and self.current().type == 'LPAREN':
                 return self.parse_function_call(name)
@@ -510,7 +518,98 @@ class Parser:
         
         # Don't consume ENDIF here - let parse_if() handle it for the outermost IF
         return self.make_node('IF', None, [condition, then_expr, else_expr])
-    
+
+    def parse_switch(self) -> ASTNode:
+        """
+        Parse a SWITCH block and DESUGAR it into the existing IF / ELSE-IF /
+        ELSE AST. Nothing downstream needs to know SWITCH exists: the Python
+        evaluator and the C++ transpiler both already handle IF/COMPARE/BLOCK,
+        so this single parser change lights up BOTH backends identically.
+
+            SWITCH <subject>
+              CASE <value>
+                <statements...>
+              CASE <value>
+                <statements...>
+              DEFAULT
+                <statements...>
+            ENDSWITCH
+
+        becomes, conceptually:
+
+            IF (<subject>) == (<value>) THEN <stmts>
+            ELSE IF (<subject>) == (<value>) THEN <stmts>
+            ELSE <default-stmts>
+            ENDIF
+
+        Notes / contract:
+        - Keyword block style (matches IF/THEN/ELSE/ENDIF). The terminators
+          SWITCH / CASE / DEFAULT / ENDSWITCH are reserved words.
+        - Each CASE is independent: there is NO fall-through, so no `break` is
+          needed or accepted.
+        - The <subject> is re-read for every CASE comparison (this IS the
+          if/else-if expansion), so keep it a plain read -- do not put a
+          side-effecting assignment in the SWITCH subject.
+        - DEFAULT is optional; with no DEFAULT (and no match) the SWITCH
+          evaluates to 0, exactly like an IF with no ELSE.
+        - A CASE value is any expression, compared with == (so numbers,
+          static vars, or computed values all work, e.g. CASE static.IDLE).
+        """
+        STOP = ('CASE', 'DEFAULT', 'ENDSWITCH')
+
+        # Subject: the value being switched on.
+        subject = self.parse_or()
+
+        def _collect_body():
+            """Collect statements until a CASE/DEFAULT/ENDSWITCH (or EOF)."""
+            stmts = []
+            while self.current():
+                tok = self.current()
+                if tok.type == 'IDENT' and tok.value.upper() in STOP:
+                    break
+                stmts.append(self.parse_statement())
+            if len(stmts) == 0:
+                return self.make_node('NUMBER', 0.0)   # empty body -> no-op
+            if len(stmts) == 1:
+                return stmts[0]
+            return self.make_node('BLOCK', None, stmts)
+
+        # CASE clauses -> [(value_node, body_node), ...]
+        cases = []
+        while True:
+            tok = self.current()
+            if not (tok and tok.type == 'IDENT' and tok.value.upper() == 'CASE'):
+                break
+            self.advance()                 # consume CASE
+            value = self.parse_or()        # the case value expression
+            body = _collect_body()
+            cases.append((value, body))
+
+        # Optional DEFAULT clause.
+        default_node = self.make_node('NUMBER', 0.0)
+        tok = self.current()
+        if tok and tok.type == 'IDENT' and tok.value.upper() == 'DEFAULT':
+            self.advance()                 # consume DEFAULT
+            default_node = _collect_body()
+
+        # Require ENDSWITCH (block style, like ENDIF).
+        tok = self.current()
+        if not (tok and tok.type == 'IDENT' and tok.value.upper() == 'ENDSWITCH'):
+            raise SyntaxError(
+                "Expected ENDSWITCH to close SWITCH statement, got "
+                f"{tok.value if tok else 'EOF'}")
+        self.advance()                     # consume ENDSWITCH
+
+        # Build the nested IF chain bottom-up. The subject is deep-copied into
+        # each comparison so no node is aliased across the tree (keeps it
+        # structurally identical to a hand-written IF/ELSE-IF chain).
+        chain = default_node
+        for value, body in reversed(cases):
+            cond = self.make_node('COMPARE', '==',
+                                  [copy.deepcopy(subject), value])
+            chain = self.make_node('IF', None, [cond, body, chain])
+        return chain
+
     def parse_function_call(self, name: str) -> ASTNode:
         """Parse function call: func(arg1, arg2, ...)"""
         self.expect('LPAREN')
@@ -670,7 +769,7 @@ class Evaluator:
                     self.hardware_writes.append({
                         'type': 'do',
                         'channel': i,
-                        'value': bool(value >= 1.0)  # Convert to boolean
+                        'value': float(value)  # raw; threshold / PWM-duty applied at write time
                     })
                     break
             
@@ -705,11 +804,24 @@ class Evaluator:
                 self.vfd_writes.append({'drive': name, 'token': token, 'value': float(value),
                                         'kind': kind, 'cmd': cmd})
             return value
-        
+
+        elif node.type == 'STEP_ASSIGN':
+            # "STEP:Name.token" = value -> queue a stepper worker write (manager-tagged)
+            value = self.eval_node(node.children[0])
+            name, token = self._split_step_ref(node.value)
+            if name:
+                cmd = token.upper() if (token and token.upper() in self._STEP_CMD_TOKENS) else None
+                kind = 'cmd' if cmd else ('raw' if str(token).startswith('#') else 'param')
+                self.vfd_writes.append({'drive': name, 'token': token, 'value': float(value),
+                                        'kind': kind, 'cmd': cmd, 'manager': 'stepper'})
+            return value
+
         elif node.type == 'SIGNAL':
-            # Signal reference: "AI:Tank"  (VFD reads routed to the live snapshot)
+            # Signal reference: "AI:Tank"  (VFD/STEP reads routed to the live snapshot)
             if isinstance(node.value, str) and node.value[:4].upper() == 'VFD:':
                 return self._resolve_vfd_read(node.value)
+            if isinstance(node.value, str) and node.value[:5].upper() == 'STEP:':
+                return self._resolve_step_read(node.value)
             return self.resolve_signal(node.value)
         
         elif node.type == 'SIGNAL_PROP':
@@ -823,7 +935,7 @@ class Evaluator:
         
         return 0.0
     
-    _KNOWN_SIG_TYPES = ('AI', 'AO', 'DO', 'TC', 'PID', 'MATH', 'LE', 'EXPR', 'SCALE', 'VFD')
+    _KNOWN_SIG_TYPES = ('AI', 'AO', 'DO', 'TC', 'PID', 'MATH', 'LE', 'EXPR', 'SCALE', 'VFD', 'STEP')
 
     def _is_real_signal_ref(self, sigval: str) -> bool:
         """True if a quoted string is a real TYPE:name reference; False if it is
@@ -861,6 +973,39 @@ class Evaluator:
         snap = self._vfd_snap(name); key = self._VFD_PROP_KEY.get(str(prop).upper())
         if key == '__rev__': return 1.0 if snap.get('direction') == 'reverse' else 0.0
         if key == '__wf__':  return 1.0 if snap.get('write_fault') else 0.0
+        if key is None: return 0.0
+        v = snap.get(key)
+        if isinstance(v, bool): return 1.0 if v else 0.0
+        try: return float(v) if v is not None else 0.0
+        except (TypeError, ValueError): return 0.0
+
+    # ---- Stepper (STEP:) read+write (Python path; serial via worker) ----
+    _STEP_REF_RE = __import__('re').compile(
+        r'^(?:STEP:)?([A-Za-z0-9_\- ]+?)(\.[A-Za-z0-9_.]+|#0[xX][0-9A-Fa-f]+|#[0-9]+)$')
+    _STEP_PROP_KEY = {'VEL':'velocity','RPM':'velocity','SPEED':'velocity',
+        'POS':'position','POSITION':'position','RUNNING':'running','ENABLED':'enabled',
+        'COMPLETE':'cmd_complete','DONE':'cmd_complete','PATHCOMPLETE':'path_complete',
+        'HOMED':'homing_complete','ALARM':'alarm','FAULT':'alarm','FAULTCODE':'alarm',
+        'WRITEFAULT':'__wf__'}
+    _STEP_CMD_TOKENS = {"ENABLE","DISABLE","RUN","STOP","VELOCITY","VEL","RPM",
+                        "MOVE","MOVETO","JOG","ALARM_RESET","RESET"}
+    @classmethod
+    def _split_step_ref(cls, value):
+        m = cls._STEP_REF_RE.match(str(value).strip())
+        if not m: return (None, None)
+        name = m.group(1).strip(); ref = m.group(2)
+        return (name, ref if ref.startswith('#') else ref[1:])
+    def _step_snap(self, name):
+        return (self.signal_state.get('stepper', {}) or {}).get(name, {}) or {}
+    def _resolve_step_read(self, value):
+        name, token = self._split_step_ref(value)
+        if not name: return 0.0
+        v = self._step_snap(name).get(token)
+        try: return float(v) if v is not None else 0.0
+        except (TypeError, ValueError): return 0.0
+    def _resolve_step_status(self, name, prop):
+        snap = self._step_snap(name); key = self._STEP_PROP_KEY.get(str(prop).upper())
+        if key == '__wf__': return 1.0 if snap.get('write_fault') else 0.0
         if key is None: return 0.0
         v = snap.get(key)
         if isinstance(v, bool): return 1.0 if v else 0.0
@@ -998,6 +1143,8 @@ class Evaluator:
         """Resolve signal property like 'PID:Motor'.OUT (OPTIMIZED)"""
         if isinstance(signal_ref, str) and signal_ref[:4].upper() == 'VFD:':
             return self._resolve_vfd_status(signal_ref.split(':', 1)[1], prop)
+        if isinstance(signal_ref, str) and signal_ref[:5].upper() == 'STEP:':
+            return self._resolve_step_status(signal_ref.split(':', 1)[1], prop)
         # Try cache first for fast lookup
         cache_key = signal_ref.upper() if ':' in signal_ref else None
         if cache_key and cache_key in self._signal_cache:

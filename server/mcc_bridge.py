@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.0.6"  # Fixed _dac_counts for multi-board
+__version__ = "2.1.0"  # Counter-sourced AI channels + PWM-mode DOs (set_pwm_duty/pwm_step). Fixed _dac_counts for multi-board
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -103,6 +103,11 @@ class MCCBridge:
         self._do_active_high = []
         self._buzz_tasks = {}
 
+        # Counter-sourced AI channels (pulse flow meters on CTR<n>)
+        self._counters = []  # list of dicts: index/board/ctr/K/window/prev_count/prev_t/rate
+        # PWM-mode digital outputs: global DO index -> {period_s, duty}
+        self._pwm = {}
+
         # TC type cache - now indexed by global channel index
         self._tc_type_set_cache = {}  # global_ch -> "K"/"J"/...
         # AUTO-DETECTION
@@ -149,12 +154,54 @@ class MCCBridge:
         
         num_1608 = len(self._boards_1608)
         print(f"[MCCBridge] Configured {num_1608} E-1608 board(s)")
+
+        # === Counter-sourced analog channels (e.g. pulse flow meter on CTR0) ===
+        # An AI channel with counter_num set is driven by CTR<n> as a rate, not its
+        # physical pin. Index matches get_all_analogs() flatten order (enabled boards).
+        self._counters = []
+        gidx = 0
+        if cfg.boards1608:
+            for board_cfg in cfg.boards1608:
+                if not board_cfg.enabled:
+                    continue
+                for ch in board_cfg.analogs:
+                    cnum = getattr(ch, "counter_num", None)
+                    if cnum is not None:
+                        self._counters.append({
+                            "index": gidx, "board": board_cfg.boardNum, "ctr": int(cnum),
+                            "K": float(getattr(ch, "pulses_per_unit", 1.0) or 1.0),
+                            "window": float(getattr(ch, "counter_window_s", 1.0) or 1.0),
+                            "prev_count": None, "prev_t": None, "rate": 0.0,
+                        })
+                        if HAVE_MCCULW:
+                            try:
+                                ul.c_clear(board_cfg.boardNum, int(cnum))
+                                print(f"[MCCBridge] AI[{gidx}] '{ch.name}' <- CTR{cnum} "
+                                      f"(board {board_cfg.boardNum}) cleared; K={getattr(ch,'pulses_per_unit',1.0)}/unit")
+                            except Exception as e:
+                                print(f"[MCCBridge] CTR{cnum} clear warn: {e}")
+                    gidx += 1
         
         # Initialize DO/AO mirrors for all boards
         self._do_bits = [0] * (num_1608 * 8)
         self._ao_vals = [0.0] * (num_1608 * 2)
         self._do_active_high = [True] * (num_1608 * 8)
         
+        # === PWM digital outputs (mode 'pwm' -> tick-rate software PWM) ===
+        # Global DO index matches get_all_digital_outputs() flatten order (== set_do index).
+        self._pwm = {}
+        gidx = 0
+        if cfg.boards1608:
+            for board_cfg in cfg.boards1608:
+                if not board_cfg.enabled:
+                    continue
+                for d in board_cfg.digitalOutputs:
+                    if getattr(d, "mode", "") == "pwm":
+                        per = float(getattr(d, "pwmPeriodMs", 1000.0) or 1000.0) / 1000.0
+                        self._pwm[gidx] = {"period_s": max(1e-3, per), "duty": 0.0}
+                        print(f"[MCCBridge] DO[{gidx}] '{d.name}' PWM period={per*1000:.0f}ms")
+                    gidx += 1
+
         # === Configure ALL E-TC boards ===
         if cfg.boardsetc:
             for board_cfg in cfg.boardsetc:
@@ -198,6 +245,60 @@ class MCCBridge:
         
         total_etc = len(self._boards_etc_uldaq) + len(self._boards_etc_mcc)
         print(f"[MCCBridge] Configured {total_etc} E-TC board(s)")
+
+    def apply_counter_rates(self, ai_scaled, now):
+        """Overwrite counter-sourced AI channels with a computed rate (engineering
+        units per minute) read from the E-1608 hardware counter. `now` is a
+        monotonic timestamp (time.perf_counter()). No-op if no counters configured."""
+        for c in (self._counters or []):
+            idx = c["index"]
+            if idx >= len(ai_scaled):
+                continue
+            count = None
+            # Only touch the counter if its E-1608 actually opened -- a configured
+            # counter on an absent board would otherwise stall/raise every tick.
+            if HAVE_MCCULW and c["board"] in self._boards_1608:
+                try:
+                    count = ul.c_in_32(c["board"], c["ctr"])
+                except Exception:
+                    count = None
+            if count is None:
+                ai_scaled[idx] = c["rate"]      # hold last good rate on read failure
+                continue
+            if c["prev_count"] is None:          # prime on first read
+                c["prev_count"] = count
+                c["prev_t"] = now
+                ai_scaled[idx] = 0.0
+                continue
+            dt = now - c["prev_t"]
+            if dt >= c["window"] and dt > 0:
+                dcount = (count - c["prev_count"]) & 0xFFFFFFFF   # 32-bit rollover-safe
+                c["rate"] = (dcount / dt) * 60.0 / c["K"]         # units per minute
+                c["prev_count"] = count
+                c["prev_t"] = now
+            ai_scaled[idx] = c["rate"]
+
+    # ---------------- PWM digital outputs ----------------
+    def is_pwm(self, index) -> bool:
+        return index in self._pwm
+
+    def set_pwm_duty(self, index, duty):
+        """Set a PWM-mode DO's duty (0..1). No-op for non-PWM channels."""
+        p = self._pwm.get(index)
+        if p is None:
+            return
+        try:
+            d = float(duty)
+        except (TypeError, ValueError):
+            d = 0.0
+        p["duty"] = 0.0 if d < 0.0 else (1.0 if d > 1.0 else d)
+
+    def pwm_step(self, now):
+        """Drive PWM-mode DOs from their duty at the tick rate. `now` = monotonic seconds."""
+        for ch, p in self._pwm.items():
+            per = p["period_s"]
+            on = ((now % per) / per) < p["duty"]
+            self.set_do(ch, on, active_high=True)
 
     def close(self):
         # Ensure DOs off if you want a safe state (optional):
