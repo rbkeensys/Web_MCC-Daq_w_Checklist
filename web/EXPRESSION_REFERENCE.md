@@ -1,7 +1,7 @@
 # Expression Language Reference Guide
 
-**Version 1.3** | MCC DAQ System | Expression Engine Documentation  
-**Updated:** June 2026 - Added Stepper Drives (`STEP:`) and counter-sourced AI channels (pulse flow meters on CTR0)  
+**Version 1.4** | MCC DAQ System | Expression Engine Documentation  
+**Updated:** June 2026 - PWM-mode digital outputs (write a 0..1 duty); Stepper Drives (`STEP:`); counter-sourced AI channels (pulse flow meters on CTR0)  
 **Previous:** v1.2 (Jan 2026) - ENDIF requirement, nested IF examples, Math/Expr as PID inputs, enable gates
 
 ---
@@ -948,6 +948,13 @@ Expressions can directly control hardware outputs using assignment syntax.
 **Value Interpretation:**
 - `>= 1.0` → ON (true)
 - `< 1.0` → OFF (false)
+
+**PWM mode:** if a DO is set to **`pwm`** mode in the channel editor (with a period in ms), writing to it is treated as a **duty cycle 0.0–1.0** instead of on/off — the server generates a tick-rate square wave at that duty. Period is configured in the editor; duty is whatever you write:
+```javascript
+// Heater at 35% power (the DO must be in 'pwm' mode)
+"DO:MakeupHtr" = 0.35
+"DO:SuperHtr"  = CLAMP("PID:Superheat".OUT / 10, 0, 1)   // scale a 0-10 output to a 0-1 duty
+```
 
 **Examples:**
 
