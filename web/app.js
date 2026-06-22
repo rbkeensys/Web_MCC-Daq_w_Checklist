@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.54";  // 2026-06-19: expression help cheatsheet now lists the SWITCH/CASE/DEFAULT/ENDSWITCH block (pairs with expr_engine.py 2.5.0). Note: the live expr-debug branch colorizer doesn't yet tint SWITCH case bodies (cosmetic only; SWITCH works in both backends). Prev 2.1.53: MOD Drv Save is now SCOPED to the active domain -- VFD tabs save only VFD libs+instances, Stepper tabs save only stepper config+instances (button relabels "Save VFD"/"Save Steppers"). Previously one Save PUT both vfd/instances AND stepper/instances every time, so saving steppers rebuilt + re-commanded the running VFD and surfaced VFD connect results (the "VFD isn't there" flakiness came from that needless rebuild probe). Pair with server.py 2.11.2 (stepper PUT result normalization). Prev 2.1.52: FIX stepper-unit Port column showed "[object Object]" -- the editor appended the portSelectControl() return object (psc) into the cell instead of psc.wrap (the VFD editor already did .wrap correctly). Now el('td',{},psc.wrap). Prev 2.1.51: VFD instance editor gains a "Poll ms" column (per-instance poll_rate_ms; blank/unset shows 250 = 4/sec default, 0 = continuous) -- sets how fast the worker reads the drive over Modbus; saved to vfd_instances.json and applied on rebuild. Prev 2.1.50: chart "Keep×" spinner (1-100, default 4) sets how much history to retain in multiples of the span -- live keeps keep*span of scrollback, paused keeps ~keep*span split around the freeze (so memory is user-bounded; 100 ~= 100 spans). Filter[Hz] box narrowed to make room. Prev 2.1.49: paused charts stay filled -- the live-buffer trim now also honors the Pause-button flag (w.opts.paused), not only the zoom/pan freeze (w.view.paused); a button-paused chart previously kept doing buf.shift() each tick and wiped its left edge as new samples arrived. Span-change trim is skipped while paused too. Pairs with vfd_driver.py worker carry-forward (holds the last-good VFD reading instead of emitting 0 on a missed Modbus read, so .RPM etc. no longer drop to 0 during AO-slider command bursts). Prev 2.1.48: startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
+const UI_VERSION = "2.1.55";  // 2026-06-20: NEW unified "MOD Drv" widget (type 'drive') -- pick VFD or stepper in settings then the instance; live status + manual controls (VFD: RPM/Fwd/Rev/Stop/Reset; stepper: velocity/Enable/Fwd/Rev/Stop/Disable/Reset) via /api/{vfd,stepper}/{name}/*. Palette "VFD" button -> "MOD Drv" (old 'vfd' widgets still render). Stepper Units editor gains per-instance Modbus reliability fields (Retries/Gap ms/Reply ms). Pairs with server.py 2.11.3 + stepper_driver 1.6.1. Prev 2.1.54: expression help cheatsheet now lists the SWITCH/CASE/DEFAULT/ENDSWITCH block (pairs with expr_engine.py 2.5.0). Note: the live expr-debug branch colorizer doesn't yet tint SWITCH case bodies (cosmetic only; SWITCH works in both backends). Prev 2.1.53: MOD Drv Save is now SCOPED to the active domain -- VFD tabs save only VFD libs+instances, Stepper tabs save only stepper config+instances (button relabels "Save VFD"/"Save Steppers"). Previously one Save PUT both vfd/instances AND stepper/instances every time, so saving steppers rebuilt + re-commanded the running VFD and surfaced VFD connect results (the "VFD isn't there" flakiness came from that needless rebuild probe). Pair with server.py 2.11.2 (stepper PUT result normalization). Prev 2.1.52: FIX stepper-unit Port column showed "[object Object]" -- the editor appended the portSelectControl() return object (psc) into the cell instead of psc.wrap (the VFD editor already did .wrap correctly). Now el('td',{},psc.wrap). Prev 2.1.51: VFD instance editor gains a "Poll ms" column (per-instance poll_rate_ms; blank/unset shows 250 = 4/sec default, 0 = continuous) -- sets how fast the worker reads the drive over Modbus; saved to vfd_instances.json and applied on rebuild. Prev 2.1.50: chart "Keep×" spinner (1-100, default 4) sets how much history to retain in multiples of the span -- live keeps keep*span of scrollback, paused keeps ~keep*span split around the freeze (so memory is user-bounded; 100 ~= 100 spans). Filter[Hz] box narrowed to make room. Prev 2.1.49: paused charts stay filled -- the live-buffer trim now also honors the Pause-button flag (w.opts.paused), not only the zoom/pan freeze (w.view.paused); a button-paused chart previously kept doing buf.shift() each tick and wiped its left edge as new samples arrived. Span-change trim is skipped while paused too. Pairs with vfd_driver.py worker carry-forward (holds the last-good VFD reading instead of emitting 0 on a missed Modbus read, so .RPM etc. no longer drop to 0 during AO-slider command bursts). Prev 2.1.48: startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -2139,6 +2139,7 @@ function feedTick(msg){
   if (msg.expr) state.expr = msg.expr;
   if (msg.scales) state.scales = msg.scales;
   if (msg.vfd) state.vfd = msg.vfd;
+  if (msg.stepper) state.stepper = msg.stepper;
   if (msg.button_vars) state.buttonVars = {...(state.buttonVars||{}), ...msg.button_vars};
   if (msg.t != null) state.lastT = msg.t;  // for checklist _currentT() in live mode
   if (msg.static_vars && Object.keys(msg.static_vars).length > 0) {
@@ -3740,6 +3741,7 @@ function defaultsFor(type){
     case 'aoslider': return { title:'AO', aoIndex:0, min:0, max:10, step:0.0025, live:true };
     case 'motor':    return { title:'Motor', motorIndex:0, showControls:true };
     case 'vfd':      return { title:'VFD', vfdName:'', showControls:true, rpmStep:50 };
+    case 'drive':    return { title:'Drive', driveType:'vfd', driveName:'', showControls:true, rpmStep:50, velStep:50 };
     case 'mathop':   return { title:'Math', mathIndex:0, showInputs:true };
     case 'expr':     return { title:'Expression', exprIndex:0, showSource:true, showOutput:true };
     case 'staticvar': return { title:'Static Var', varName:'', decimalPlaces:3 };
@@ -4860,6 +4862,50 @@ function openWidgetSettings(w) {
     })();
   }
 
+  if (w.type === 'drive') {
+    // Unified VFD/stepper widget: pick the type, then the instance (pulled
+    // from the matching endpoint). Changing the type rebuilds the form.
+    const dform = el('div', {});
+    root.append(dform);
+    const buildDriveSettings = async () => {
+      dform.innerHTML = '';
+      const isStep = (w.opts.driveType === 'stepper');
+      const typeSel = el('select', {});
+      [['vfd','VFD'],['stepper','Stepper']].forEach(([v,t])=>typeSel.append(el('option',{value:v},t)));
+      typeSel.value = w.opts.driveType || 'vfd';
+      typeSel.onchange = () => { w.opts.driveType = typeSel.value; w.opts.driveName=''; buildDriveSettings(); renderPage(); };
+
+      let instances = [];
+      try {
+        const ep = isStep ? '/api/stepper/instances' : '/api/vfd/instances';
+        instances = (await (await fetch(ep)).json()).instances || [];
+      } catch(e) { /* free-text fallback */ }
+
+      let instCtl;
+      if (instances.length){
+        instCtl = el('select', {});
+        instances.forEach(inst=>{ const inc=inst.include?'✓':'✗'; instCtl.append(el('option',{value:inst.name}, `${inst.name} (${inc})`)); });
+        if (!w.opts.driveName && instances[0]) w.opts.driveName = instances[0].name;
+        instCtl.value = w.opts.driveName || (instances[0]&&instances[0].name) || '';
+        instCtl.onchange = () => { w.opts.driveName = instCtl.value; renderPage(); };
+      } else {
+        instCtl = el('input',{type:'text',value:w.opts.driveName||''});
+        instCtl.oninput = () => { w.opts.driveName = instCtl.value; };
+      }
+
+      dform.append(tableForm([
+        ['Drive type', typeSel],
+        [isStep?'Stepper instance':'VFD instance', instCtl],
+        ['Show controls', inputChk(w.opts,'showControls')],
+        [isStep?'Velocity step':'RPM step', inputNum(w.opts, isStep?'velStep':'rpmStep', 10)],
+      ]));
+      if (!instances.length)
+        dform.append(el('p',{style:'font-size:12px;color:#e6a23c'},
+          `No ${isStep?'stepper':'VFD'} instances yet — add one in the MOD Drv editor.`));
+    };
+    buildDriveSettings();
+  }
+
   if (w.type === 'le') {
     // Async load LEs for dropdown
     (async () => {
@@ -5708,6 +5754,7 @@ function renderWidget(w){
     case 'aoslider': mountAOSlider(w,body); break;
     case 'motor':    mountMotorController(w,body); break;
     case 'vfd':      mountVFDWidget(w,body); break;
+    case 'drive':    mountDriveWidget(w,body); break;
     case 'le':       mountLEWidget(w,body); break;
     case 'mathop':   mountMathOpWidget(w,body); break;
     case 'expr':     mountExprWidget(w,body); break;
@@ -8117,6 +8164,115 @@ function updateVFDWidgets(){
   } catch(e){}
 }
 
+/* --------------------------- Unified drive widget -----------------------
+ * One widget that drives EITHER a VFD or a stepper, chosen in settings
+ * (driveType) -- mirrors the MOD Drv editor's "pick a type" idea. Status comes
+ * from the tick frame: state.vfd[name] for VFDs, state.stepper[name] for
+ * steppers; commands POST to /api/vfd/{name}/* or /api/stepper/{name}/*. The
+ * instance (drive/motor/port) is configured in the MOD Drv editor. */
+function mountDriveWidget(w, body){
+  const isStep = (w.opts.driveType === 'stepper');
+  const name = w.opts.driveName || '';
+  const wrap = el('div', {style:'display:flex;flex-direction:column;gap:6px;font-size:12px'});
+
+  const grid = el('div', {style:'display:grid;grid-template-columns:auto auto;gap:2px 10px'});
+  const cells = {};
+  const addRow = (label, key) => {
+    grid.append(el('div',{style:'color:var(--muted)'}, label));
+    const v = el('div',{style:'font-variant-numeric:tabular-nums'}, '—');
+    cells[key] = v; grid.append(v);
+  };
+  if (isStep){
+    addRow('Velocity (rpm)','velocity'); addRow('Position','position');
+    addRow('State','_state'); addRow('Alarm','alarm'); addRow('Comms','_comms');
+  } else {
+    addRow('RPM','rpm'); addRow('Output Hz','output_hz');
+    addRow('Current (A)','output_current_a'); addRow('Voltage (V)','output_voltage_v');
+    addRow('Bus (V)','bus_voltage_v'); addRow('Power (W)','output_power_w');
+    addRow('Direction','direction'); addRow('State','_state'); addRow('Fault','fault_text');
+  }
+  wrap.append(grid);
+
+  const base = isStep ? 'stepper' : 'vfd';
+  const post = (path, bodyObj) => fetch(`/api/${base}/${encodeURIComponent(name)}/${path}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(bodyObj||{})
+    }).then(r=>r.json()).then(j=>{ if(!j.ok) alert(`${path} failed: ${j.error||'?'}`); })
+      .catch(e=>alert(`${path} failed: ${e.message}`));
+
+  let velInput = null;
+  if (w.opts.showControls && !IS_POPOUT && name){
+    const ctr = el('div', {style:'display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:4px'});
+    if (isStep){
+      velInput = el('input',{type:'number',step:String(w.opts.velStep||50),value:'200',style:'width:72px',title:'Velocity (rpm)'});
+      const mag = () => Math.abs(parseFloat(velInput.value)||0);
+      ctr.append(velInput,
+        el('button',{className:'btn',title:'Enable drive',onclick:()=>post('enable')},'⏻ Enable'),
+        el('button',{className:'btn',title:'Run forward at velocity',onclick:()=>post('velocity',{rpm:mag()})},'▶ Fwd'),
+        el('button',{className:'btn',title:'Run reverse at velocity',onclick:()=>post('velocity',{rpm:-mag()})},'◀ Rev'),
+        el('button',{className:'btn',title:'Quick-stop',style:'background:#7a2233',onclick:()=>post('stop')},'■ Stop'),
+        el('button',{className:'btn',title:'Disable drive',onclick:()=>post('disable')},'⭘ Disable'),
+        el('button',{className:'btn',title:'Alarm reset',onclick:()=>post('alarm_reset')},'⟲ Reset'));
+    } else {
+      velInput = el('input',{type:'number',step:String(w.opts.rpmStep||50),value:'0',style:'width:72px',title:'Target RPM'});
+      ctr.append(velInput,
+        el('button',{className:'btn',onclick:()=>post('rpm',{rpm:parseFloat(velInput.value)||0})},'Set RPM'),
+        el('button',{className:'btn',title:'Run forward',onclick:()=>post('enable',{reverse:false})},'▶ Fwd'),
+        el('button',{className:'btn',title:'Run reverse',onclick:()=>post('enable',{reverse:true})},'◀ Rev'),
+        el('button',{className:'btn',title:'Stop',style:'background:#7a2233',onclick:()=>post('disable')},'■ Stop'),
+        el('button',{className:'btn',title:'Fault reset',onclick:()=>post('fault_reset')},'⟲ Reset'));
+    }
+    wrap.append(ctr);
+  }
+  if (!name){
+    wrap.append(el('div',{style:'color:#e6a23c;margin-top:4px'},
+      '⚠ No drive selected — open Settings and choose type + instance.'));
+  }
+  body.append(wrap);
+
+  w._updateDrive = () => {
+    const st = ((isStep ? state.stepper : state.vfd) || {})[name];
+    const fmt = (v,dp) => (v===null||v===undefined) ? '—'
+      : (typeof v==='number' && dp!=null ? v.toFixed(dp) : v);
+    if (!st){ for (const k in cells) cells[k].textContent='—'; return; }
+    if (isStep){
+      cells.velocity.textContent = fmt(st.velocity,0);
+      cells.position.textContent = fmt(st.position,0);
+      const running = !!st.running, enabled = !!st.enabled;
+      cells._state.textContent = running ? 'RUNNING' : (enabled ? 'enabled' : 'stopped');
+      cells._state.style.color = running ? '#9ece6a' : (enabled ? '#e0af68' : 'var(--muted)');
+      cells.alarm.textContent = st.fault ? ('FAULT '+fmt(st.alarm,0)) : fmt(st.alarm,0);
+      cells.alarm.style.color = (st.fault || st.alarm) ? '#f7768e' : 'var(--muted)';
+      cells._comms.textContent = (st.ok===false) ? ('no reply'+(st.error?': '+st.error:'')) : 'ok';
+      cells._comms.style.color = (st.ok===false) ? '#f7768e' : 'var(--muted)';
+    } else {
+      const f = (v)=>fmt(v);
+      cells.rpm.textContent = f(st.rpm); cells.output_hz.textContent = f(st.output_hz);
+      cells.output_current_a.textContent = f(st.output_current_a);
+      cells.output_voltage_v.textContent = f(st.output_voltage_v);
+      cells.bus_voltage_v.textContent = f(st.bus_voltage_v);
+      cells.output_power_w.textContent = f(st.output_power_w);
+      cells.direction.textContent = f(st.direction);
+      cells._state.textContent = st.enabled ? 'RUNNING' : 'stopped';
+      cells._state.style.color = st.enabled ? '#9ece6a' : 'var(--muted)';
+      cells.fault_text.textContent = f(st.fault_text);
+      cells.fault_text.style.color = st.faulted ? '#f7768e' : 'var(--muted)';
+    }
+  };
+  w._updateDrive();
+}
+
+/* Called from onTick so every unified drive widget refreshes from the frame. */
+function updateDriveWidgets(){
+  try {
+    document.querySelectorAll('.widget').forEach(node=>{
+      const id = (node.id||'').slice(2);
+      const pg = state.pages[activePageIndex];
+      const w = pg && (pg.widgets||[]).find(x=>x.id===id);
+      if (w && w.type==='drive' && typeof w._updateDrive==='function') w._updateDrive();
+    });
+  } catch(e){}
+}
+
 function mountLEWidget(w, body){
   body.style.padding = '4px';
   body.style.fontSize = '10px';
@@ -10078,6 +10234,7 @@ function onTick(){
     updateChartBuffers();
     updateDOButtons();
     updateVFDWidgets();
+    updateDriveWidgets();
   }
 }
 
@@ -11603,7 +11760,7 @@ async function openVfdEditor(){
     if (!stepDrives.length)
       wrap.append(el('p', {style:'color:#e6a23c'}, '⚠ No stepper drive models available.'));
     const table = el('table', {className:'form'});
-    table.append(el('thead', {}, el('tr', {}, ['Name','Include','Drive','Stepper','Port','Baud','Parity','Stop','Addr','Timeout','Poll ms','Auto-setup',''].map(h=>el('th',{},h)))));
+    table.append(el('thead', {}, el('tr', {}, ['Name','Include','Drive','Stepper','Port','Baud','Parity','Stop','Addr','Timeout','Poll ms','Auto-setup','Retries','Gap ms','Reply ms',''].map(h=>el('th',{},h)))));
     const tb = el('tbody');
     stepInstances.forEach(inst=>{
       const driveSel = selectEnum(stepDrives.map(d=>d.key), inst.drive_key || (stepDrives[0]&&stepDrives[0].key) || '', v=>inst.drive_key=v);
@@ -11617,13 +11774,24 @@ async function openVfdEditor(){
       const pollInp = el('input',{type:'number',min:0,step:10,value:(inst.poll_rate_ms!=null?inst.poll_rate_ms:100),style:'width:62px',
         title:'Stepper read poll period (ms). 0 = continuous.'});
       pollInp.oninput=()=>{const v=parseInt(pollInp.value,10); inst.poll_rate_ms=Number.isFinite(v)?Math.max(0,v):100;};
+      // --- Modbus RTU reliability (per instance; blank uses driver defaults) ---
+      const retriesInp = el('input',{type:'number',min:0,step:1,value:(inst.io_retries!=null?inst.io_retries:2),style:'width:50px',
+        title:'Resends on a lost/garbled reply (timeout/CRC). 0 = off. Default 2. A Modbus error reply is never resent.'});
+      retriesInp.oninput=()=>{const v=parseInt(retriesInp.value,10); inst.io_retries=Number.isFinite(v)?Math.max(0,v):2;};
+      const gapInp = el('input',{type:'number',min:0,step:0.5,value:(inst.io_gap_ms!=null?inst.io_gap_ms:3),style:'width:54px',
+        title:'Minimum silence between frames (ms) — RTU 3.5-char (~3 ms @ 9600). Stops bus overrun. 0 = none.'});
+      gapInp.oninput=()=>{const v=parseFloat(gapInp.value); inst.io_gap_ms=Number.isFinite(v)?Math.max(0,v):3;};
+      const replyInp = el('input',{type:'number',min:5,step:5,value:(inst.io_reply_ms!=null?inst.io_reply_ms:120),style:'width:58px',
+        title:'How long to wait for a reply before resending (ms). A reply is ~ms, so a miss is caught fast. Default 120.'});
+      replyInp.oninput=()=>{const v=parseFloat(replyInp.value); inst.io_reply_ms=Number.isFinite(v)?Math.max(5,v):120;};
       const del = el('button',{className:'btn',onclick:()=>{const i=stepInstances.indexOf(inst);if(i>=0){stepInstances.splice(i,1);draw();}}},'✕');
       tb.append(el('tr',{},[
         el('td',{},txt(inst,'name')), el('td',{},chk(inst,'include')),
         el('td',{},driveSel), el('td',{},cfgSel), el('td',{},psc.wrap),
         el('td',{},baudSel), el('td',{},parSel), el('td',{},stopSel),
         el('td',{},num(inst,'address',1)), el('td',{},num(inst,'timeout',0.1)),
-        el('td',{},pollInp), el('td',{},chk(inst,'auto_setup')), el('td',{},del),
+        el('td',{},pollInp), el('td',{},chk(inst,'auto_setup')),
+        el('td',{},retriesInp), el('td',{},gapInp), el('td',{},replyInp), el('td',{},del),
       ]));
     });
     table.append(tb);
@@ -11632,7 +11800,8 @@ async function openVfdEditor(){
       const d0 = stepDrives[0] || {key:'dm556rs'};
       stepInstances.push({name:`Stepper${stepInstances.length+1}`,include:false,drive_key:d0.key,
         config_key:(stepConfigs[0]&&stepConfigs[0].key)||'',port:(ports[0]&&ports[0].port)||'COM1',
-        baud:38400,parity:'N',stopbits:1,address:1,timeout:0.5,auto_setup:true,poll_rate_ms:100});
+        baud:38400,parity:'N',stopbits:1,address:1,timeout:0.5,auto_setup:true,poll_rate_ms:100,
+        io_retries:2,io_gap_ms:3,io_reply_ms:120});
       draw();
     }},'+ Add stepper unit')));
     return wrap;
