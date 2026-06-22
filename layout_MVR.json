@@ -925,6 +925,19 @@
             "yGridLines": 5,
             "tFreeze": null
           }
+        },
+        {
+          "id": "mvr-sim-drivehw",
+          "type": "staticvar",
+          "x": 245,
+          "y": 685,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Sim drive HW (0=dry,1=HIL)",
+            "varName": "simDriveHW",
+            "decimalPlaces": 0
+          }
         }
       ]
     }
