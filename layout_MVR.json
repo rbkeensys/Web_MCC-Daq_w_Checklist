@@ -136,8 +136,8 @@
         {
           "id": "mvr-press",
           "type": "chart",
-          "x": 480,
-          "y": 20,
+          "x": 525,
+          "y": 25,
           "w": 1335,
           "h": 325,
           "opts": {
@@ -190,8 +190,8 @@
         {
           "id": "mvr-temps",
           "type": "chart",
-          "x": 480,
-          "y": 355,
+          "x": 525,
+          "y": 360,
           "w": 1335,
           "h": 375,
           "opts": {
@@ -265,7 +265,7 @@
         {
           "id": "mvr-shflow",
           "type": "chart",
-          "x": 480,
+          "x": 525,
           "y": 750,
           "w": 1335,
           "h": 360,
@@ -326,8 +326,8 @@
         {
           "id": "dfd8df21-dfd8-4760-bacd-81e5ea9c26c1",
           "type": "vfd",
-          "x": 20,
-          "y": 510,
+          "x": 15,
+          "y": 665,
           "w": 280,
           "h": 310,
           "opts": {
@@ -354,8 +354,8 @@
         {
           "id": "e51d132b-c964-4456-ba74-e470588caf81",
           "type": "indicator",
-          "x": 325,
-          "y": 760,
+          "x": 350,
+          "y": 770,
           "w": 60,
           "h": 40,
           "opts": {
@@ -394,13 +394,14 @@
                 "value": 0
               }
             }
-          }
+          },
+          "groupId": "gmqpkyqqpa5q0"
         },
         {
           "id": "a5acf654-4ba4-45d6-a511-5a01661c529f",
           "type": "indicator",
-          "x": 385,
-          "y": 760,
+          "x": 410,
+          "y": 770,
           "w": 60,
           "h": 40,
           "opts": {
@@ -439,7 +440,8 @@
                 "value": 0
               }
             }
-          }
+          },
+          "groupId": "gmqpkyqqpa5q0"
         },
         {
           "id": "f74f11e0-f194-44fe-912d-e8f06868ba8b",
@@ -486,8 +488,8 @@
         {
           "id": "cf0d75d4-0a28-4ddb-b60a-07ad5767f4ec",
           "type": "indicator",
-          "x": 355,
-          "y": 535,
+          "x": 375,
+          "y": 550,
           "w": 60,
           "h": 40,
           "opts": {
@@ -526,13 +528,14 @@
                 "value": 0
               }
             }
-          }
+          },
+          "groupId": "gmqpkyg5ozj66"
         },
         {
           "id": "e2c1e388-21f0-460b-8752-9ece24faad38",
           "type": "indicator",
-          "x": 355,
-          "y": 575,
+          "x": 375,
+          "y": 590,
           "w": 60,
           "h": 40,
           "opts": {
@@ -571,13 +574,14 @@
                 "value": 0
               }
             }
-          }
+          },
+          "groupId": "gmqpkyg5ozj66"
         },
         {
           "id": "04b3a590-a5ac-4c11-aa85-94a627b1903a",
           "type": "indicator",
-          "x": 355,
-          "y": 615,
+          "x": 375,
+          "y": 630,
           "w": 60,
           "h": 40,
           "opts": {
@@ -616,13 +620,14 @@
                 "value": 0
               }
             }
-          }
+          },
+          "groupId": "gmqpkyg5ozj66"
         },
         {
           "id": "747c71df-3a30-41d2-a70a-d995335365aa",
           "type": "indicator",
-          "x": 355,
-          "y": 655,
+          "x": 375,
+          "y": 670,
           "w": 60,
           "h": 40,
           "opts": {
@@ -661,13 +666,14 @@
                 "value": 0
               }
             }
-          }
+          },
+          "groupId": "gmqpkyg5ozj66"
         },
         {
           "id": "40008dfd-590a-4435-849b-8040573a9973",
           "type": "label",
-          "x": 350,
-          "y": 500,
+          "x": 370,
+          "y": 515,
           "w": 120,
           "h": 36,
           "opts": {
@@ -679,13 +685,14 @@
             "fgColor": "#e6e6e6",
             "bgColor": "transparent",
             "align": "left"
-          }
+          },
+          "groupId": "gmqpkyg5ozj66"
         },
         {
           "id": "3a4c1256-83e8-482a-9ec4-d0af5388005f",
           "type": "staticvar",
-          "x": 215,
-          "y": 875,
+          "x": 20,
+          "y": 495,
           "w": 220,
           "h": 90,
           "opts": {
@@ -697,8 +704,8 @@
         {
           "id": "41303088-e53f-408f-9971-0687cb95ee08",
           "type": "label",
-          "x": 355,
-          "y": 720,
+          "x": 380,
+          "y": 730,
           "w": 120,
           "h": 36,
           "opts": {
@@ -711,13 +718,14 @@
             "bgColor": "transparent",
             "align": "left",
             "title": "Relays"
-          }
+          },
+          "groupId": "gmqpkyqqpa5q0"
         },
         {
           "id": "cc3c1b58-0056-4fd4-8adf-79a64160c848",
           "type": "dobutton",
-          "x": 40,
-          "y": 865,
+          "x": 350,
+          "y": 835,
           "w": 145,
           "h": 95,
           "opts": {
@@ -736,15 +744,186 @@
         {
           "id": "1d0b9852-0ecd-4ad7-b2cf-300608c3e936",
           "type": "expr",
-          "x": 70,
-          "y": 990,
-          "w": 350,
+          "x": 310,
+          "y": 1060,
+          "w": 280,
           "h": 200,
           "opts": {
             "title": "MVR System",
             "exprIndex": 12,
             "showSource": true,
             "showOutput": true
+          }
+        },
+        {
+          "id": "92b21f01-15d5-4493-89ee-0d7b08535548",
+          "type": "drive",
+          "x": 15,
+          "y": 985,
+          "w": 280,
+          "h": 270,
+          "opts": {
+            "title": "Drive",
+            "driveType": "stepper",
+            "driveName": "Feed",
+            "showControls": true,
+            "rpmStep": 50,
+            "velStep": 50
+          }
+        },
+        {
+          "id": "mvr-sim-enable",
+          "type": "staticvar",
+          "x": 245,
+          "y": 495,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "SIMULATE (1=sim,0=real)",
+            "varName": "simEnable",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-sim-speed",
+          "type": "staticvar",
+          "x": 245,
+          "y": 590,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Sim speed (x real)",
+            "varName": "simSpeed",
+            "decimalPlaces": 0
+          }
+        },
+        {
+          "id": "mvr-sim-prod",
+          "type": "staticvar",
+          "x": 20,
+          "y": 590,
+          "w": 215,
+          "h": 85,
+          "opts": {
+            "title": "Sim Production L/min",
+            "varName": "simProd",
+            "decimalPlaces": 2
+          }
+        },
+        {
+          "id": "mvr-sim-temps",
+          "type": "chart",
+          "x": 525,
+          "y": 1120,
+          "w": 655,
+          "h": 330,
+          "opts": {
+            "title": "MVR Sim - Temps (C)",
+            "series": [
+              {
+                "kind": "static",
+                "index": "simEvapTemp",
+                "name": "Evap",
+                "varName": null,
+                "color": null,
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "simVaporIn",
+                "name": "Vapor In",
+                "varName": null,
+                "color": null,
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "simVaporOut",
+                "name": "Vapor Out",
+                "varName": null,
+                "color": null,
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "simSteamChest",
+                "name": "Steam Chest",
+                "varName": null,
+                "color": null,
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "simCondTemp",
+                "name": "Cond",
+                "varName": null,
+                "color": null,
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "manual",
+            "min": 0,
+            "max": 130,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 5,
+            "tFreeze": null
+          }
+        },
+        {
+          "id": "mvr-sim-press",
+          "type": "chart",
+          "x": 1190,
+          "y": 1120,
+          "w": 670,
+          "h": 330,
+          "opts": {
+            "title": "MVR Sim - Pressure (psia) / Level",
+            "series": [
+              {
+                "kind": "static",
+                "index": "simEvapPress",
+                "name": "Evap P",
+                "varName": null,
+                "color": null,
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "simSteamPress",
+                "name": "Steam P",
+                "varName": null,
+                "color": null,
+                "displayScale": 1,
+                "displayOffset": 0
+              },
+              {
+                "kind": "static",
+                "index": "simCondLevel",
+                "name": "Cond Lvl",
+                "varName": null,
+                "color": null,
+                "displayScale": 1,
+                "displayOffset": 0
+              }
+            ],
+            "span": 60,
+            "paused": false,
+            "scale": "manual",
+            "min": 0,
+            "max": 30,
+            "filterHz": 0,
+            "cursorMode": "follow",
+            "yGridLines": 5,
+            "tFreeze": null
           }
         }
       ]
@@ -763,6 +942,6 @@
     "height": "150px",
     "display": "none",
     "fileName": "checklist_MIX_Testing.txt",
-    "content": " #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\nDate: ____________6-9-2026______________________\nTime: ________________________________________\nPlace: _________Glen Rose_____________\nConditions: ____________________________________\n_______Purpose / Objectives ____Test Fire Mixed LOX/CH4 with Short Engine_________\n___Assuming He Press and Purge, Pyro Ignition ___\n___LOX Conditions line from pump to engine, Nitrogen dilutes mix in mini-dewar\n\nCREW: ___TD__,  PAD1___\n\nITEMS IN ITALLICS  OR  GRAY  TEXT ARE INFORMATIONAL ONLY AND NOT TO BE CALLED OUT\n5   |TD  |Load current CHECKLIST   \"checklist_MIX_Testing.txt\"  if you haven't done so    |O   |0.0    |        |        |1\n10  |TD  |Comm Check,  PAD1                                                               |O   |0.0    |        |        |1\n15  |PAD1|Verify all containment ready, blocks and shields                                |O   |0.0    |        |        |1\n20  |TD  |Verify  'Ignition ARM'   is off                                                 |O   |0.0    |        |        |1\n\n      TEST will have previously started Command and Control App\n25  |PAD1|Has tightness check been completed                                              |O   |0.0    |        |        |1\n30  |PAD1|Verify LOX, Fuel and Nitrogen Vents Closed, Liquid Lines Open, Pressure Builders|O   |0.0    |        |        |1\n35  |PAD1|Verify Helium Bottle Valve Closed                                               |O   |0.0    |        |        |1\n40  |PAD1|Verify Helium Regulator Fully OFF                                               |O   |0.0    |        |        |1\n======================= PRE-TEST CHECKS ==================================================\n45  |TD  |On control app restart log, note name ______________________________            |O   |0.0    |        |        |1\n50  |PAD1|Verify the following (PAGE2 of control panel):                                  |O   |0.0    |        |        |1\n55  |    |       S1 - LOX Fill                                                            |O   |0.0    |        |        |1\n60  |    |       S2 - Fuel Fill                                                           |O   |0.0    |        |        |1\n65  |    |       S3 - MIX Into Engine                                                     |O   |0.0    |        |        |1\n70  |    |       S4 - Run Tank Vent                                                       |O   |0.0    |        |        |1\n75  |    |       S5 - Condition Vent                                                      |O   |0.0    |        |        |1\n80  |    |       S6 - LN2 Dilute                                                          |O   |0.0    |        |        |1\n85  |    |       S7 - MIX Out                                                             |O   |0.0    |        |        |1\n90  |    |       S8 - Helium                                                              |O   |0.0    |        |        |1\n95  |    |       S9 - LOX Condition                                                       |O   |0.0    |        |        |1\n100 |    |       S10 - LN2 Vent                                                           |O   |0.0    |        |        |1\n105 |    |       Pump Motor                                                               |O   |0.0    |        |        |1\n110 |TD  |Zero Pressure Transducers,    LOX Zero ____________,  Fuel Zero _________       |O   |0.0    |        |        |1\n115 |PAD1|Disconnect Igniter, connect indicator                                           |O   |0.0    |        |        |1\n120 |TD  |Turn on    'Ignition ARM'                                                       |O   |0.0    |        |        |1\n125 |PAD1|Verify igniter with indicator      (TD FLASH IGNITER)                           |O   |0.0    |        |        |1\n130 |TD  |Turn off   'Ignition ARM'                                                       |O   |0.0    |        |        |1\n135 |PAD1|Connect Igniter                                                                 |O   |0.0    |        |        |1\n140 |PAD1|Verify camera positions                                                         |O   |0.0    |        |        |1\n145 |PAD1|Open Helium Bottle Valve, report pressure ________________________              |O   |0.0    |        |        |1\n150 |PAD1|Set Helium regulator to : _____55_____psi                                       |O   |0.0    |        |        |1\n155 |PAD1|Turn gaseous Oxygen to pump ON                                                  |O   |0.0    |        |        |1\n160 |PAD1|Retreat to safe position                                                        |O   |0.0    |        |        |1\n=============================== START HAZARDOUS OPS ====================================\n=========================== BEGIN CONDITIONING MIX FILL LINE===============================\n165 |TD  |Turn ON    \"S9 - LOX Condition\"                                                 |O   |0.0    |        |        |1\n170 |TD  |Wait for liquid to show out of   S4 - Engine Vent                               |O   |0.0    |        |        |1\n175 |TD  |Switch on LOX Maintain                                                          |O   |0.0    |        |        |1\n=========================================================================================\n=========================== BEGIN CONDITIONING LN2 =======================================\n180 |TD  |Turn ON   \"S10 - LN2 Condition Vent\"                                            |O   |0.0    |        |        |1\n185 |TD  |Wait for liquid to show out of S10 - Vent                                       |O   |0.0    |        |        |1\n190 |TD  |Switch on LN2 Maintain                                                          |O   |0.0    |        |        |1\n==========================================================================================\n============================= PRELIMINARY FUEL CONDITION =================================\n195 |TD  |Turn on  \"S2 - Fuel Direct\"                                                     |O   |0.0    |        |        |1\n200 |TD  |Wait for liquid to show in mix tank                                             |O   |0.0    |        |        |1\n205 |TD  |Flush Mix tank with LN2, use     \"S6 - Dilute\", short bursts, keep as gas!      |O   |0.0    |        |        |1\n==========================================================================================\n===================================== FILL MIX TANK ========================================\n210 |TD  |Verify desired LOX amount variable is set to   600 grams                        |O   |0.0    |        |        |1\n215 |TD  |Turn ON   \"S1 - Fill LOX \"                                                      |O   |0.0    |        |        |1\n220 |TD  |Once LOX is filled, turn on   \"Load Prop\"                                       |O   |0.0    |        |        |1\n225 |TD  |Turn on Pump and pump out mix tank                                              |O   |0.0    |        |        |1\n230 |TD  |Press    \"Backflush Eng\"   to clear engine and line                             |O   |0.0    |        |        |1\n235 |TD  |Set desired LOX amount to test condition 200 grams,   verify_________g          |O   |0.0    |        |        |1\n240 |TD  |Turn ON   \"S1 - Fill LOX\",   wait for quantity to load                          |O   |0.0    |        |        |1\n245 |TD  |Turn ON   \"Fill Fuel\",  wait for gas to increase weight,   press \"Gas Offset\"   |O   |0.0    |        |        |1\n250 |TD  |Verify load matches desired MR                                                  |O   |0.0    |        |        |1\n255 |TD  |Turn ON   \"Load Prop\"                                                           |O   |0.0    |        |        |1\n260 |TD  |Turn ON  PUMP,    wait for load to finish                                       |O   |0.0    |        |        |1\n265 |TD  |Turn OFF Pump                                                                   |O   |0.0    |        |        |1\n270 |TD  |Turn OFF \"Load Prop\"                                                            |O   |0.0    |        |        |1\n275 |TD  |Press  \"Backflush Line\"                                                         |O   |0.0    |        |        |1\n==========================================================================================\n============================== START TEST SEQUENCE =======================================\n280 |PAD1|Start Recording CAM1 (normal speed)                                             |O   |0.0    |        |        |1\n285 |TD  |Announce   'ARMING THE SYSTEM'                                                  |O   |0.0    |        |        |1\n290 |TD  |Press   'Ignition ARM'                                                          |O   |0.0    |        |        |1\n295 |PAD1|Start High Speed Recording                                                      |O   |0.0    |        |        |1\n================================ FIRING SEQUENCE ========================================\n300 |TD  |Press    RUN TEST   Button                                                      |O   |0.0    |        |        |1\nTest is automated, purges lines, pressurizes run tank and runs test.\nNOTE: the automated test DOES NOT ARM ignition!\n\n===================== APPENDIX - A       EMERGENCY MIX DUMP ===============================\n305 |TD  |TURN OFF ALL BUT LN2 Cond                                                       |O   |0.0    |        |        |1\n310 |TD  |Turn   ON    \"S6 Dilute\"                                                        |O   |0.0    |        |        |1\n315 |TD  |Wait for double the weight                                                      |O   |0.0    |        |        |1\n320 |TD  |Turn  ON    \"S7 Chill Out\"                                                      |O   |0.0    |        |        |1\n325 |TD  |Turn  ON  Pump                                                                  |O   |0.0    |        |        |1\n330 |TD  |When weight is at minimum, turn   OFF   Pump                                    |O   |0.0    |        |        |1\n335 |    |Turn OFF   \"S7 Chill Out\"                                                       |O   |0.0    |        |        |1\n GOTO APPENDIX B  - SCRUB\n \n===================== APPENDIX - B       SCRUB / TEST COMPLETE ===============================\n340 |TD  |Press  'Purge'                                                                  |O   |0.0    |        |        |1\n345 |TD  |Turn on   \"S6 Dilute\"    Wait for 2X weight dilution                            |O   |0.0    |        |        |1\n350 |TD  |Turn OFF   'Ignition ARM'                                                       |O   |0.0    |        |        |1\n355 |    |Turn on   \"S6 Dilute\"   again and double the weight                             |O   |0.0    |        |        |1\n360 |TD  |Announce when safe to approach                                                  |O   |0.0    |        |        |1\n365 |PAD1|All dewars:  Turn off liquid lines, pressure builder and gas use                |O   |0.0    |        |        |1\n370 |TD  |All dewars:   Turn on vents                                                     |O   |0.0    |        |        |1\n=========================================================================================\n=========================== POST TEST TASKS ==============================================\n375 |PAD1|Open LN2 Dewar Vent                                                             |O   |0.0    |        |        |1\n380 |PAD1|Close LN2 Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n385 |PAD1|Open LOX Dewar Vent                                                             |O   |0.0    |        |        |1\n390 |PAD1|Close LOX Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n395 |PAD1|Open LNG Dewar Vent                                                             |O   |0.0    |        |        |1\n400 |PAD1|Close LNG Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n405 |PAD1|Turn of Helium Regulator                                                        |O   |0.0    |        |        |1\n410 |PAD1|Report final Helium pressure __________________                                 |O   |0.0    |        |        |1\n415 |PAD1|Close  Helium  bottle valve                                                     |O   |0.0    |        |        |1\n420 |ALL |TURN OFF RADIOS                                                                 |O   |0.0    |        |        |1\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+    "content": " #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\n #  |DEST|ITEM                                                                            |CHK |  DUR  | TIME-IN | TIME-OUT|T\nDate: ____________6-9-2026______________________\nTime: ________________________________________\nPlace: _________Glen Rose_____________\nConditions: ____________________________________\n_______Purpose / Objectives ____Test Fire Mixed LOX/CH4 with Short Engine_________\n___Assuming He Press and Purge, Pyro Ignition ___\n___LOX Conditions line from pump to engine, Nitrogen dilutes mix in mini-dewar\n\nCREW: ___TD__,  PAD1___\n\nITEMS IN ITALLICS  OR  GRAY  TEXT ARE INFORMATIONAL ONLY AND NOT TO BE CALLED OUT\n5   |TD  |Load current CHECKLIST   \"checklist_MIX_Testing.txt\"  if you haven't done so    |O   |0.0    |        |        |1\n10  |TD  |Comm Check,  PAD1                                                               |O   |0.0    |        |        |1\n15  |PAD1|Verify all containment ready, blocks and shields                                |O   |0.0    |        |        |1\n20  |TD  |Verify  'Ignition ARM'   is off                                                 |O   |0.0    |        |        |1\n\n      TEST will have previously started Command and Control App\n25  |PAD1|Has tightness check been completed                                              |O   |0.0    |        |        |1\n30  |PAD1|Verify LOX, Fuel and Nitrogen Vents Closed, Liquid Lines Open, Pressure Builders|O   |0.0    |        |        |1\n35  |PAD1|Verify Helium Bottle Valve Closed                                               |O   |0.0    |        |        |1\n40  |PAD1|Verify Helium Regulator Fully OFF                                               |O   |0.0    |        |        |1\n======================= PRE-TEST CHECKS ==================================================\n45  |TD  |On control app restart log, note name ______________________________            |O   |0.0    |        |        |1\n50  |PAD1|Verify the following (PAGE2 of control panel):                                  |O   |0.0    |        |        |1\n55  |    |       S1 - LOX Fill                                                            |O   |0.0    |        |        |1\n60  |    |       S2 - Fuel Fill                                                           |O   |0.0    |        |        |1\n65  |    |       S3 - MIX Into Engine                                                     |O   |0.0    |        |        |1\n70  |    |       S4 - Run Tank Vent                                                       |O   |0.0    |        |        |1\n75  |    |       S5 - Condition Vent                                                      |O   |0.0    |        |        |1\n80  |    |       S6 - LN2 Dilute                                                          |O   |0.0    |        |        |1\n85  |    |       S7 - MIX Out                                                             |O   |0.0    |        |        |1\n90  |    |       S8 - Helium                                                              |O   |0.0    |        |        |1\n95  |    |       S9 - LOX Condition                                                       |O   |0.0    |        |        |1\n100 |    |       S10 - LN2 Vent                                                           |O   |0.0    |        |        |1\n105 |    |       Pump Motor                                                               |O   |0.0    |        |        |1\n110 |TD  |Zero Pressure Transducers,    LOX Zero ____________,  Fuel Zero _________       |O   |0.0    |        |        |1\n115 |PAD1|Disconnect Igniter, connect indicator                                           |O   |0.0    |        |        |1\n120 |TD  |Turn on    'Ignition ARM'                                                       |O   |0.0    |        |        |1\n125 |PAD1|Verify igniter with indicator      (TD FLASH IGNITER)                           |O   |0.0    |        |        |1\n130 |TD  |Turn off   'Ignition ARM'                                                       |O   |0.0    |        |        |1\n135 |PAD1|Connect Igniter                                                                 |O   |0.0    |        |        |1\n140 |PAD1|Verify camera positions                                                         |O   |0.0    |        |        |1\n145 |PAD1|Open Helium Bottle Valve, report pressure ________________________              |O   |0.0    |        |        |1\n150 |PAD1|Set Helium regulator to : _____55_____psi                                       |O   |0.0    |        |        |1\n155 |PAD1|Turn gaseous Oxygen to pump ON                                                  |O   |0.0    |        |        |1\n160 |PAD1|Retreat to safe position                                                        |O   |0.0    |        |        |1\n=============================== START HAZARDOUS OPS ====================================\n=========================== BEGIN CONDITIONING MIX FILL LINE===============================\n165 |TD  |Turn ON    \"S9 - LOX Condition\"                                                 |O   |0.0    |        |        |1\n170 |TD  |Wait for liquid to show out of   S4 - Engine Vent                               |O   |0.0    |        |        |1\n175 |TD  |Switch on LOX Maintain                                                          |O   |0.0    |        |        |1\n=========================================================================================\n=========================== BEGIN CONDITIONING LN2 =======================================\n180 |TD  |Turn ON   \"S10 - LN2 Condition Vent\"                                            |O   |0.0    |        |        |1\n185 |TD  |Wait for liquid to show out of S10 - Vent                                       |O   |0.0    |        |        |1\n190 |TD  |Switch on LN2 Maintain                                                          |O   |0.0    |        |        |1\n==========================================================================================\n============================= PRELIMINARY FUEL CONDITION =================================\n195 |TD  |Turn on  \"S2 - Fuel Direct\"                                                     |O   |0.0    |        |        |1\n200 |TD  |Wait for liquid to show in mix tank                                             |O   |0.0    |        |        |1\n205 |TD  |Flush Mix tank with LN2, use     \"S6 - Dilute\", short bursts, keep as gas!      |O   |0.0    |        |        |1\n==========================================================================================\n===================================== FILL MIX TANK ========================================\n210 |TD  |Verify desired LOX amount variable is set to   600 grams                        |O   |0.0    |        |        |1\n215 |TD  |Turn ON   \"S1 - Fill LOX \"                                                      |O   |0.0    |        |        |1\n220 |TD  |Once LOX is filled, turn on   \"Load Prop\"                                       |O   |0.0    |        |        |1\n225 |TD  |Turn on Pump and pump out mix tank                                              |O   |0.0    |        |        |1\n230 |TD  |Press    \"Backflush Eng\"   to clear engine and line                             |O   |0.0    |        |        |1\n235 |TD  |Set desired LOX amount to test condition 200 grams,   verify_________g          |O   |0.0    |        |        |1\n240 |TD  |Turn ON   \"S1 - Fill LOX\",   wait for quantity to load                          |O   |0.0    |        |        |1\n245 |TD  |Turn ON   \"Fill Fuel\",  wait for gas to increase weight,   press \"Gas Offset\"   |O   |0.0    |        |        |1\n250 |TD  |Verify load matches desired MR                                                  |O   |0.0    |        |        |1\n255 |TD  |Turn ON   \"Load Prop\"                                                           |O   |0.0    |        |        |1\n260 |TD  |Turn ON  PUMP,    wait for load to finish                                       |O   |0.0    |        |        |1\n265 |TD  |Turn OFF Pump                                                                   |O   |0.0    |        |        |1\n270 |TD  |Turn OFF \"Load Prop\"                                                            |O   |0.0    |        |        |1\n275 |TD  |Press  \"Backflush Line\"                                                         |O   |0.0    |        |        |1\n==========================================================================================\n============================== START TEST SEQUENCE =======================================\n280 |PAD1|Start Recording CAM1 (normal speed)                                             |O   |0.0    |        |        |1\n285 |TD  |Announce   'ARMING THE SYSTEM'                                                  |O   |0.0    |        |        |1\n290 |TD  |Press   'Ignition ARM'                                                          |O   |0.0    |        |        |1\n295 |PAD1|Start High Speed Recording                                                      |O   |0.0    |        |        |1\n================================ FIRING SEQUENCE ========================================\n300 |TD  |Press    RUN TEST   Button                                                      |O   |0.0    |        |        |1\nTest is automated, purges lines, pressurizes run tank and runs test.\nNOTE: the automated test DOES NOT ARM ignition!\n\n===================== APPENDIX - A       EMERGENCY MIX DUMP ===============================\n305 |TD  |TURN OFF ALL BUT LN2 Cond                                                       |O   |0.0    |        |        |1\n310 |TD  |Turn   ON    \"S6 Dilute\"                                                        |O   |0.0    |        |        |1\n315 |TD  |Wait for double the weight                                                      |O   |0.0    |        |        |1\n320 |TD  |Turn  ON    \"S7 Chill Out\"                                                      |O   |0.0    |        |        |1\n325 |TD  |Turn  ON  Pump                                                                  |O   |0.0    |        |        |1\n330 |TD  |When weight is at minimum, turn   OFF   Pump                                    |O   |0.0    |        |        |1\n335 |    |Turn OFF   \"S7 Chill Out\"                                                       |O   |0.0    |        |        |1\n GOTO APPENDIX B  - SCRUB\n \n===================== APPENDIX - B       SCRUB / TEST COMPLETE ===============================\n340 |TD  |Press  'Purge'                                                                  |O   |0.0    |        |        |1\n345 |TD  |Turn on   \"S6 Dilute\"    Wait for 2X weight dilution                            |O   |0.0    |        |        |1\n350 |TD  |Turn OFF   'Ignition ARM'                                                       |O   |0.0    |        |        |1\n355 |    |Turn on   \"S6 Dilute\"   again and double the weight                             |O   |0.0    |        |        |1\n360 |TD  |Announce when safe to approach                                                  |O   |0.0    |        |        |1\n365 |PAD1|All dewars:  Turn off liquid lines, pressure builder and gas use                |O   |0.0    |        |        |1\n370 |TD  |All dewars:   Turn on vents                                                     |O   |0.0    |        |        |1\n=========================================================================================\n=========================== POST TEST TASKS ==============================================\n375 |PAD1|Open LN2 Dewar Vent                                                             |O   |0.0    |        |        |1\n380 |PAD1|Close LN2 Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n385 |PAD1|Open LOX Dewar Vent                                                             |O   |0.0    |        |        |1\n390 |PAD1|Close LOX Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n395 |PAD1|Open LNG Dewar Vent                                                             |O   |0.0    |        |        |1\n400 |PAD1|Close LNG Dewar Pressure-builder                                                |O   |0.0    |        |        |1\n405 |PAD1|Turn of Helium Regulator                                                        |O   |0.0    |        |        |1\n410 |PAD1|Report final Helium pressure __________________                                 |O   |0.0    |        |        |1\n415 |PAD1|Close  Helium  bottle valve                                                     |O   |0.0    |        |        |1\n420 |ALL |TURN OFF RADIOS                                                                 |O   |0.0    |        |        |1\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
   }
 }
