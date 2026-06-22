@@ -15,8 +15,8 @@ Expression interface (see EXPRESSION_REFERENCE.md, "Stepper Drives (STEP)"):
   read   "STEP:Name".VEL/.POS/.RUNNING/.ENABLED/.COMPLETE/.ALARM
   command "STEP:Name.ENABLE/.VELOCITY/.MOVE/.MOVETO/.STOP/.JOG/.RESET" = value
 """
-__version__ = "1.6.1"
-__updated__ = "2026-06-20"  # 1.6.1: per-instance reliability overrides read in build() from the stepper instance (io_retries, io_gap_ms, io_reply_ms) -> exposed in the Stepper Units editor; fall back to module defaults. 1.6.0: Modbus RTU reliability -- _txn now resends on a lost/garbled reply (timeout/short/CRC, NOT on a Modbus exception reply), enforces a minimum inter-frame gap (RTU 3.5-char silence, stops bus overrun), and uses a short reply timeout (~120ms vs the 0.5s instance timeout) so a miss is caught + resent fast. Knobs: STEP_IO_RETRIES/STEP_IO_RETRY_DELAY/STEP_IO_GAP/STEP_REPLY_TIMEOUT. 1.5.0: Modbus TX/RX console logging -- _txn logs each write/command frame + reply (decoded: 'W 0x6203 = 0xFF38 (-200)') so the ENABLE/VELOCITY/setup exchange is visible; build() prints CONNECTED/setup lines. Writes logged by default (sparse, on-change); STEP_LOG_READS toggles chatty poll-read logging. 1.4.0: presence probe -- StepperController.probe() does a real Modbus read after connect(); build() now reports a drive that doesn't answer as FAILED ("no reply from drive on COMx") instead of "connected" (opening the serial port succeeds with nothing attached). 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
+__version__ = "1.6.2"
+__updated__ = "2026-06-20"  # 1.6.2: STEP_LOG_IO defaults OFF now the drive is proven (per-instance "Log IO" override via inst.io_log; connect/setup lines + undelivered-command warnings still always print). 1.6.1: per-instance reliability overrides read in build() from the stepper instance (io_retries, io_gap_ms, io_reply_ms) -> exposed in the Stepper Units editor; fall back to module defaults. 1.6.0: Modbus RTU reliability -- _txn now resends on a lost/garbled reply (timeout/short/CRC, NOT on a Modbus exception reply), enforces a minimum inter-frame gap (RTU 3.5-char silence, stops bus overrun), and uses a short reply timeout (~120ms vs the 0.5s instance timeout) so a miss is caught + resent fast. Knobs: STEP_IO_RETRIES/STEP_IO_RETRY_DELAY/STEP_IO_GAP/STEP_REPLY_TIMEOUT. 1.5.0: Modbus TX/RX console logging -- _txn logs each write/command frame + reply (decoded: 'W 0x6203 = 0xFF38 (-200)') so the ENABLE/VELOCITY/setup exchange is visible; build() prints CONNECTED/setup lines. Writes logged by default (sparse, on-change); STEP_LOG_READS toggles chatty poll-read logging. 1.4.0: presence probe -- StepperController.probe() does a real Modbus read after connect(); build() now reports a drive that doesn't answer as FAILED ("no reply from drive on COMx") instead of "connected" (opening the serial port succeeds with nothing attached). 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
 
 import struct
 import time
@@ -191,12 +191,13 @@ _STEP_CMD_ALIASES = {
     "RESET": "ALARM_RESET", "FAULT_RESET": "ALARM_RESET",
 }
 
-# Console logging of the Modbus exchange. Writes/commands are sparse (sent
-# on-change), so logging them by default is cheap and shows exactly what each
-# ENABLE/VELOCITY/setup command put on the wire + the drive's reply. Polling
-# reads run at the worker rate (chatty) -- flip STEP_LOG_READS=True to include
-# them when you need a full trace.
-STEP_LOG_IO = True
+# Console logging of the Modbus exchange. OFF by default now that the drive is
+# proven -- flip the per-instance "Log IO" checkbox in the Stepper Units editor
+# (or STEP_LOG_IO here) to see each ENABLE/VELOCITY/setup frame + reply when
+# debugging. STEP_LOG_READS additionally includes the (chatty) polling reads.
+# NOTE: connect/setup status lines + undelivered-command warnings always print
+# regardless of these flags.
+STEP_LOG_IO = False
 STEP_LOG_READS = False
 
 # --- Modbus RTU reliability ---
@@ -757,6 +758,8 @@ class StepperManager:
                 # editor). Fall back to the module defaults when unset.
                 # reply_timeout must be applied BEFORE connect() (it sets the
                 # serial read timeout).
+                if inst.get("io_log") is not None:
+                    ctrl.log_io = bool(inst["io_log"])
                 if inst.get("io_retries") is not None:
                     ctrl.io_retries = max(0, int(inst["io_retries"]))
                 if inst.get("io_gap_ms") is not None:
