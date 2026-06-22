@@ -76,6 +76,17 @@ def _safe(v):
     return v
 
 
+def _gvars(frame: dict) -> dict:
+    """All static/global variables for the gvar_ columns. In C++ DLL mode the
+    runtime statics live in frame['static_vars'] (the cpp_backend array); the
+    Python evaluator uses frame['global_vars']. Merge both (static_vars wins) so
+    the gvar_ columns carry real values regardless of which backend is active --
+    previously C++ mode logged empty gvar_ columns."""
+    merged = dict(frame.get("global_vars", {}) or {})
+    merged.update(frame.get("static_vars", {}) or {})
+    return merged
+
+
 def _extract_cols(frame: dict) -> list:
     """Return the ordered list of column names that a frame contributes."""
     cols = ["t"]
@@ -100,7 +111,7 @@ def _extract_cols(frame: dict) -> list:
     for i, _ in enumerate(frame.get("scales", [])):
         cols.append(f"scale{i}")
 
-    for name in sorted(frame.get("global_vars", {}).keys()):
+    for name in sorted(_gvars(frame).keys()):
         cols.append(f"gvar_{name}")
 
     for name in sorted(frame.get("button_vars", {}).keys()):
@@ -152,7 +163,7 @@ def _row_from_frame(frame: dict, col_idx: dict) -> list:
     for i, v in enumerate(frame.get("scales", [])):
         put(f"scale{i}", v)
 
-    for name, val in frame.get("global_vars", {}).items():
+    for name, val in _gvars(frame).items():
         put(f"gvar_{name}", val)
 
     for name, val in frame.get("button_vars", {}).items():
@@ -293,7 +304,7 @@ class SessionLogger:
             if col not in self._col_idx:
                 self._rewrite_with_new_col(col)
 
-        for name in frame.get("global_vars", {}).keys():
+        for name in _gvars(frame).keys():
             col = f"gvar_{name}"
             if col not in self._col_idx:
                 self._rewrite_with_new_col(col)
