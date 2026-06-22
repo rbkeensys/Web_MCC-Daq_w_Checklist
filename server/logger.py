@@ -87,18 +87,39 @@ def _gvars(frame: dict) -> dict:
     return merged
 
 
-def _extract_cols(frame: dict) -> list:
-    """Return the ordered list of column names that a frame contributes."""
+def _build_name_for(col_names: dict) -> dict:
+    """Map the generic column id (ai0, tc1, do2, expr5, ...) to a friendly
+    header name from config / expression names, e.g. ai0 -> 'EvapPress',
+    do0 -> 'MakeupHtr', expr5 -> 'MakeupControl'. Unnamed channels keep the
+    generic id; a duplicate name is disambiguated with its generic id so CSV
+    headers stay unique (duplicate headers would corrupt the value mapping)."""
+    name_for, used = {}, set()
+    for kind in ("ai", "ao", "do", "tc", "expr"):
+        for i, nm in enumerate((col_names or {}).get(kind, []) or []):
+            nm = str(nm).strip() if nm else ""
+            if not nm:
+                continue
+            final = nm if nm not in used else f"{nm}_{kind}{i}"
+            used.add(final)
+            name_for[f"{kind}{i}"] = final
+    return name_for
+
+
+def _extract_cols(frame: dict, name_for: dict = None) -> list:
+    """Return the ordered list of column names that a frame contributes.
+    name_for translates generic ids (ai0/tc1/do2/expr5) to friendly names."""
+    name_for = name_for or {}
+    def nm(g): return name_for.get(g, g)
     cols = ["t"]
 
     for i, _ in enumerate(frame.get("ai", [])):
-        cols.append(f"ai{i}")
+        cols.append(nm(f"ai{i}"))
     for i, _ in enumerate(frame.get("ao", [])):
-        cols.append(f"ao{i}")
+        cols.append(nm(f"ao{i}"))
     for i, _ in enumerate(frame.get("do", [])):
-        cols.append(f"do{i}")
+        cols.append(nm(f"do{i}"))
     for i, _ in enumerate(frame.get("tc", [])):
-        cols.append(f"tc{i}")
+        cols.append(nm(f"tc{i}"))
 
     for i, pid in enumerate(frame.get("pid", [])):
         prefix = f"pid{i}"
@@ -106,7 +127,7 @@ def _extract_cols(frame: dict) -> list:
             cols.append(prefix + suffix)
 
     for i, _ in enumerate(frame.get("expr", [])):
-        cols.append(f"expr{i}")
+        cols.append(nm(f"expr{i}"))
 
     for i, _ in enumerate(frame.get("scales", [])):
         cols.append(f"scale{i}")
@@ -120,9 +141,12 @@ def _extract_cols(frame: dict) -> list:
     return cols
 
 
-def _row_from_frame(frame: dict, col_idx: dict) -> list:
-    """Serialise one frame into a CSV row using the given column index."""
+def _row_from_frame(frame: dict, col_idx: dict, name_for: dict = None) -> list:
+    """Serialise one frame into a CSV row using the given column index.
+    name_for must match the one used to build the header (generic id -> name)."""
     row = [""] * len(col_idx)
+    name_for = name_for or {}
+    def nm(g): return name_for.get(g, g)
 
     def put(col, val):
         idx = col_idx.get(col)
@@ -132,13 +156,13 @@ def _row_from_frame(frame: dict, col_idx: dict) -> list:
     put("t", frame.get("t"))
 
     for i, v in enumerate(frame.get("ai", [])):
-        put(f"ai{i}", v)
+        put(nm(f"ai{i}"), v)
     for i, v in enumerate(frame.get("ao", [])):
-        put(f"ao{i}", v)
+        put(nm(f"ao{i}"), v)
     for i, v in enumerate(frame.get("do", [])):
-        put(f"do{i}", int(bool(v)) if v is not None else "")
+        put(nm(f"do{i}"), int(bool(v)) if v is not None else "")
     for i, v in enumerate(frame.get("tc", [])):
-        put(f"tc{i}", v)
+        put(nm(f"tc{i}"), v)
 
     for i, pid in enumerate(frame.get("pid", [])):
         if not isinstance(pid, dict):
@@ -156,9 +180,9 @@ def _row_from_frame(frame: dict, col_idx: dict) -> list:
 
     for i, expr in enumerate(frame.get("expr", [])):
         if isinstance(expr, dict):
-            put(f"expr{i}", expr.get("output"))
+            put(nm(f"expr{i}"), expr.get("output"))
         elif expr is not None:
-            put(f"expr{i}", expr)
+            put(nm(f"expr{i}"), expr)
 
     for i, v in enumerate(frame.get("scales", [])):
         put(f"scale{i}", v)
@@ -173,7 +197,11 @@ def _row_from_frame(frame: dict, col_idx: dict) -> list:
 
 
 class SessionLogger:
-    def __init__(self, folder: Path, known_columns: Optional[list] = None):
+    def __init__(self, folder: Path, known_columns: Optional[list] = None,
+                 col_names: Optional[dict] = None):
+        # col_names: {'ai':[names], 'ao':[...], 'do':[...], 'tc':[...], 'expr':[...]}
+        # -> friendly CSV headers instead of ai0/ao0/do0/tc0/expr0.
+        self._name_for = _build_name_for(col_names or {})
         self.path = folder / "session.csv"
         # CRITICAL: 1 MB buffer prevents synchronous disk flushes (Windows 80 ms+ spikes)
         self.f = open(self.path, "w", newline="", buffering=1024 * 1024)
@@ -223,7 +251,7 @@ class SessionLogger:
         # Union of all columns seen across all buffered frames, in stable order
         seen = {}
         for frame in self._pending_frames:
-            for col in _extract_cols(frame):
+            for col in _extract_cols(frame, self._name_for):
                 if col not in seen:
                     seen[col] = None
         # Add the pre-declared columns at the end so they're in the header
@@ -239,7 +267,7 @@ class SessionLogger:
         # Write header then flush buffered rows
         self.w.writerow(self._cols)
         for frame in self._pending_frames:
-            self.w.writerow(_row_from_frame(frame, self._col_idx))
+            self.w.writerow(_row_from_frame(frame, self._col_idx, self._name_for))
 
         self._pending_frames = []
         self._settled = True
@@ -309,7 +337,7 @@ class SessionLogger:
             if col not in self._col_idx:
                 self._rewrite_with_new_col(col)
 
-        self.w.writerow(_row_from_frame(frame, self._col_idx))
+        self.w.writerow(_row_from_frame(frame, self._col_idx, self._name_for))
 
     def write_check_events(self, events: list):
         """
