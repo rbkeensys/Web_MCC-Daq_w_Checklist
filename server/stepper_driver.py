@@ -15,8 +15,8 @@ Expression interface (see EXPRESSION_REFERENCE.md, "Stepper Drives (STEP)"):
   read   "STEP:Name".VEL/.POS/.RUNNING/.ENABLED/.COMPLETE/.ALARM
   command "STEP:Name.ENABLE/.VELOCITY/.MOVE/.MOVETO/.STOP/.JOG/.RESET" = value
 """
-__version__ = "1.6.2"
-__updated__ = "2026-06-20"  # 1.6.2: STEP_LOG_IO defaults OFF now the drive is proven (per-instance "Log IO" override via inst.io_log; connect/setup lines + undelivered-command warnings still always print). 1.6.1: per-instance reliability overrides read in build() from the stepper instance (io_retries, io_gap_ms, io_reply_ms) -> exposed in the Stepper Units editor; fall back to module defaults. 1.6.0: Modbus RTU reliability -- _txn now resends on a lost/garbled reply (timeout/short/CRC, NOT on a Modbus exception reply), enforces a minimum inter-frame gap (RTU 3.5-char silence, stops bus overrun), and uses a short reply timeout (~120ms vs the 0.5s instance timeout) so a miss is caught + resent fast. Knobs: STEP_IO_RETRIES/STEP_IO_RETRY_DELAY/STEP_IO_GAP/STEP_REPLY_TIMEOUT. 1.5.0: Modbus TX/RX console logging -- _txn logs each write/command frame + reply (decoded: 'W 0x6203 = 0xFF38 (-200)') so the ENABLE/VELOCITY/setup exchange is visible; build() prints CONNECTED/setup lines. Writes logged by default (sparse, on-change); STEP_LOG_READS toggles chatty poll-read logging. 1.4.0: presence probe -- StepperController.probe() does a real Modbus read after connect(); build() now reports a drive that doesn't answer as FAILED ("no reply from drive on COMx") instead of "connected" (opening the serial port succeeds with nothing attached). 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
+__version__ = "1.6.3"
+__updated__ = "2026-06-20"  # 1.6.3: read_status now reads the PROFILE velocity (0x1044) + position (0x1012) alongside feedback (0x1046/0x1014) as two contiguous 4-reg block reads (same poll cost), and reports velocity/position from feedback-or-profile so open-loop steppers (no encoder -> 0 feedback) still show live rpm + step count. Snapshot also carries profile_/feedback_ pairs. 1.6.2: STEP_LOG_IO defaults OFF now the drive is proven (per-instance "Log IO" override via inst.io_log; connect/setup lines + undelivered-command warnings still always print). 1.6.1: per-instance reliability overrides read in build() from the stepper instance (io_retries, io_gap_ms, io_reply_ms) -> exposed in the Stepper Units editor; fall back to module defaults. 1.6.0: Modbus RTU reliability -- _txn now resends on a lost/garbled reply (timeout/short/CRC, NOT on a Modbus exception reply), enforces a minimum inter-frame gap (RTU 3.5-char silence, stops bus overrun), and uses a short reply timeout (~120ms vs the 0.5s instance timeout) so a miss is caught + resent fast. Knobs: STEP_IO_RETRIES/STEP_IO_RETRY_DELAY/STEP_IO_GAP/STEP_REPLY_TIMEOUT. 1.5.0: Modbus TX/RX console logging -- _txn logs each write/command frame + reply (decoded: 'W 0x6203 = 0xFF38 (-200)') so the ENABLE/VELOCITY/setup exchange is visible; build() prints CONNECTED/setup lines. Writes logged by default (sparse, on-change); STEP_LOG_READS toggles chatty poll-read logging. 1.4.0: presence probe -- StepperController.probe() does a real Modbus read after connect(); build() now reports a drive that doesn't answer as FAILED ("no reply from drive on COMx") instead of "connected" (opening the serial port succeeds with nothing attached). 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
 
 import struct
 import time
@@ -130,9 +130,15 @@ class StepperProfile:
 
     # status / feedback
     motion_state_reg: int = 0x1003   # bit0 fault,1 enabled,2 running,4 cmd done,5 path done,6 home done
-    fb_vel_hi_reg: int = 0x1046      # feedback velocity (rpm, signed 32-bit)
+    # NOTE: 0x1044..0x1047 are contiguous (profile vel hi/lo, feedback vel hi/lo)
+    # and 0x1012..0x1015 (profile pos, feedback pos) -- read each as one 4-reg
+    # block. An open-loop stepper (no encoder) reports 0 feedback, so the live
+    # value comes from the PROFILE (executing/commanded) registers.
+    prof_vel_hi_reg: int = 0x1044    # profile (executing) velocity (rpm, signed 32-bit)
+    fb_vel_hi_reg: int = 0x1046      # feedback velocity (rpm, signed 32-bit; 0 if no encoder)
     fb_vel_lo_reg: int = 0x1047
-    fb_pos_hi_reg: int = 0x1014      # feedback position (steps, signed 32-bit)
+    prof_pos_hi_reg: int = 0x1012    # profile (commanded) position (steps, signed 32-bit)
+    fb_pos_hi_reg: int = 0x1014      # feedback position (steps, signed 32-bit; 0 if no encoder)
     fb_pos_lo_reg: int = 0x1015
     alarm_reg: int = 0x2203          # current alarm code
 
@@ -504,6 +510,17 @@ class StepperController:
     def read_status(self) -> dict:
         p = self.profile
         st = self.read_register(p.motion_state_reg)
+        # Velocities + positions each come as one contiguous 4-register block:
+        #   0x1044/45 profile vel, 0x1046/47 feedback vel
+        #   0x1012/13 profile pos, 0x1014/15 feedback pos
+        vregs = self.read_registers(p.prof_vel_hi_reg, 4)
+        prof_vel, fb_vel = _join32(vregs[0], vregs[1]), _join32(vregs[2], vregs[3])
+        pregs = self.read_registers(p.prof_pos_hi_reg, 4)
+        prof_pos, fb_pos = _join32(pregs[0], pregs[1]), _join32(pregs[2], pregs[3])
+        # Open-loop drives report 0 feedback (no encoder) -> use the profile
+        # (executing/commanded) value so the widget + STEP: reads show real data.
+        velocity = fb_vel if fb_vel != 0 else prof_vel
+        position = fb_pos if fb_pos != 0 else prof_pos
         snap = {
             "fault": bool(st & 0x01),
             "enabled": bool(st & 0x02),
@@ -511,8 +528,12 @@ class StepperController:
             "cmd_complete": bool(st & 0x10),
             "path_complete": bool(st & 0x20),
             "homing_complete": bool(st & 0x40),
-            "velocity": float(self.read_register32(p.fb_vel_hi_reg)),
-            "position": float(self.read_register32(p.fb_pos_hi_reg)),
+            "velocity": float(velocity),
+            "position": float(position),
+            "profile_velocity": float(prof_vel),
+            "feedback_velocity": float(fb_vel),
+            "profile_position": float(prof_pos),
+            "feedback_position": float(fb_pos),
             "alarm": int(self.read_register(p.alarm_reg)),
             "write_fault": bool(self._last_write_fault),
         }
