@@ -39,7 +39,7 @@
     {
       "name": "FeedwaterControl",
       "enabled": true,
-      "expression": "// Feedwater peristaltic (stepper) dosing rate; gated by runSystem & not trip.\nrun = static.runSystem and (static.trip == 0)\n\"STEP:Feed.ENABLE\" = run\nif ( run ) then\n    \"STEP:Feed.VELOCITY\" = static.feedRpmSet\nelse\n    \"STEP:Feed.STOP\" = 1\nendif\n",
+      "expression": "// Feedwater peristaltic (stepper) dosing; gated by runSystem & not trip.\n// Velocity is driven as a LEVEL (0 = stop) so every run/stop transition is a\n// real value change and re-triggers the drive. (A separate STOP command would\n// leave VELOCITY cached at the run value, so a re-run after a stop would be\n// deduped and never re-fire -- the motor would stay still.)\n\nrun = static.runSystem and (static.trip == 0)\n\"STEP:Feed.ENABLE\" = run\n\nvel = 0\nif ( run ) then\n    vel = static.feedRpmSet\nendif\n\"STEP:Feed.VELOCITY\" = vel",
       "execution_rate_hz": null
     },
     {
