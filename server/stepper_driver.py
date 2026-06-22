@@ -15,8 +15,8 @@ Expression interface (see EXPRESSION_REFERENCE.md, "Stepper Drives (STEP)"):
   read   "STEP:Name".VEL/.POS/.RUNNING/.ENABLED/.COMPLETE/.ALARM
   command "STEP:Name.ENABLE/.VELOCITY/.MOVE/.MOVETO/.STOP/.JOG/.RESET" = value
 """
-__version__ = "1.6.3"
-__updated__ = "2026-06-20"  # 1.6.3: read_status now reads the PROFILE velocity (0x1044) + position (0x1012) alongside feedback (0x1046/0x1014) as two contiguous 4-reg block reads (same poll cost), and reports velocity/position from feedback-or-profile so open-loop steppers (no encoder -> 0 feedback) still show live rpm + step count. Snapshot also carries profile_/feedback_ pairs. 1.6.2: STEP_LOG_IO defaults OFF now the drive is proven (per-instance "Log IO" override via inst.io_log; connect/setup lines + undelivered-command warnings still always print). 1.6.1: per-instance reliability overrides read in build() from the stepper instance (io_retries, io_gap_ms, io_reply_ms) -> exposed in the Stepper Units editor; fall back to module defaults. 1.6.0: Modbus RTU reliability -- _txn now resends on a lost/garbled reply (timeout/short/CRC, NOT on a Modbus exception reply), enforces a minimum inter-frame gap (RTU 3.5-char silence, stops bus overrun), and uses a short reply timeout (~120ms vs the 0.5s instance timeout) so a miss is caught + resent fast. Knobs: STEP_IO_RETRIES/STEP_IO_RETRY_DELAY/STEP_IO_GAP/STEP_REPLY_TIMEOUT. 1.5.0: Modbus TX/RX console logging -- _txn logs each write/command frame + reply (decoded: 'W 0x6203 = 0xFF38 (-200)') so the ENABLE/VELOCITY/setup exchange is visible; build() prints CONNECTED/setup lines. Writes logged by default (sparse, on-change); STEP_LOG_READS toggles chatty poll-read logging. 1.4.0: presence probe -- StepperController.probe() does a real Modbus read after connect(); build() now reports a drive that doesn't answer as FAILED ("no reply from drive on COMx") instead of "connected" (opening the serial port succeeds with nothing attached). 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
+__version__ = "1.7.0"
+__updated__ = "2026-06-20"  # 1.7.0: zero_position() (ZERO_POSITION cmd) zeroes the displayed step count via a software offset (no drive position-clear exists); read_status subtracts it. StepperConfig gains optional standstill_current_pct + editable standstill_current_reg (default Pr5.01, datasheet-unverified) applied in apply_setup -- reduces idle holding current/heat. 1.6.3: read_status now reads the PROFILE velocity (0x1044) + position (0x1012) alongside feedback (0x1046/0x1014) as two contiguous 4-reg block reads (same poll cost), and reports velocity/position from feedback-or-profile so open-loop steppers (no encoder -> 0 feedback) still show live rpm + step count. Snapshot also carries profile_/feedback_ pairs. 1.6.2: STEP_LOG_IO defaults OFF now the drive is proven (per-instance "Log IO" override via inst.io_log; connect/setup lines + undelivered-command warnings still always print). 1.6.1: per-instance reliability overrides read in build() from the stepper instance (io_retries, io_gap_ms, io_reply_ms) -> exposed in the Stepper Units editor; fall back to module defaults. 1.6.0: Modbus RTU reliability -- _txn now resends on a lost/garbled reply (timeout/short/CRC, NOT on a Modbus exception reply), enforces a minimum inter-frame gap (RTU 3.5-char silence, stops bus overrun), and uses a short reply timeout (~120ms vs the 0.5s instance timeout) so a miss is caught + resent fast. Knobs: STEP_IO_RETRIES/STEP_IO_RETRY_DELAY/STEP_IO_GAP/STEP_REPLY_TIMEOUT. 1.5.0: Modbus TX/RX console logging -- _txn logs each write/command frame + reply (decoded: 'W 0x6203 = 0xFF38 (-200)') so the ENABLE/VELOCITY/setup exchange is visible; build() prints CONNECTED/setup lines. Writes logged by default (sparse, on-change); STEP_LOG_READS toggles chatty poll-read logging. 1.4.0: presence probe -- StepperController.probe() does a real Modbus read after connect(); build() now reports a drive that doesn't answer as FAILED ("no reply from drive on COMx") instead of "connected" (opening the serial port succeeds with nothing attached). 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
 
 import struct
 import time
@@ -187,6 +187,12 @@ class StepperConfig:
     max_rpm: float = 3000.0         # clamp for set_velocity
     accel: int = 100                # ms / 1000 rpm
     decel: int = 100                # ms / 1000 rpm
+    # Standstill (holding) current as % of peak when idle -- reduces heat/noise.
+    # None = leave the drive's own setting alone. The register is configurable
+    # because the DM556RS standstill-current parameter is not in the datasheet
+    # extract; "Pr5.01" is a best guess to VERIFY on the bench (or use #0xADDR).
+    standstill_current_pct: Optional[float] = None
+    standstill_current_reg: str = "Pr5.01"
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +257,8 @@ class StepperController:
         self._proved_read = False
         self._enabled = False
         self._last_write_fault = None
+        self._pos_zero = 0.0       # software offset for the displayed step count
+        self._last_raw_pos = 0.0   # most recent raw position (for zero_position)
 
     # ---- connection ------------------------------------------------------
     def connect(self, quiet: bool = False) -> bool:
@@ -487,12 +495,26 @@ class StepperController:
     def alarm_reset(self):
         self.write_register(self.profile.control_word_reg, self.profile.cw_alarm_reset)
 
+    def zero_position(self):
+        """Zero the reported step count. The DM556RS has no documented
+        position-clear command, so this offsets the displayed total in software
+        (ideal for a 'total pumped' counter) -- it does not move the motor."""
+        self._pos_zero = self._last_raw_pos
+
     def apply_setup(self):
         """Write microstep, peak current, direction from the StepperConfig."""
         p, c = self.profile, self.config
         self.write_register(p.microstep_reg, _u16(c.steps_per_rev))
         self.write_register(p.peak_current_reg, _u16(int(round(c.peak_current_a * 10))))
         self.write_register(p.direction_reg, 1 if c.reverse else 0)
+        # Optional standstill (holding) current reduction. Opt-in: only written
+        # when configured. Register token is editable (datasheet-unverified).
+        if c.standstill_current_pct is not None and str(c.standstill_current_reg).strip():
+            try:
+                self.write_param(c.standstill_current_reg,
+                                 _u16(int(round(c.standstill_current_pct))))
+            except StepperError as e:
+                self._last_write_fault = "standstill current: %s" % e
 
     # ---- params / raw registers -----------------------------------------
     def read_param(self, token: str) -> int:
@@ -520,7 +542,9 @@ class StepperController:
         # Open-loop drives report 0 feedback (no encoder) -> use the profile
         # (executing/commanded) value so the widget + STEP: reads show real data.
         velocity = fb_vel if fb_vel != 0 else prof_vel
-        position = fb_pos if fb_pos != 0 else prof_pos
+        raw_pos = fb_pos if fb_pos != 0 else prof_pos
+        self._last_raw_pos = raw_pos
+        position = raw_pos - self._pos_zero   # zeroable displayed step count
         snap = {
             "fault": bool(st & 0x01),
             "enabled": bool(st & 0x02),
@@ -576,6 +600,8 @@ class StepperController:
             elif c == "ALARM_RESET":
                 if float(value) >= 1.0:
                     self.alarm_reset()
+            elif c in ("ZERO_POSITION", "ZERO_POS", "ZERO"):
+                self.zero_position()
             else:
                 return False
             self._last_write_fault = None
@@ -711,6 +737,9 @@ def _config_from_cfg(d: dict) -> StepperConfig:
         max_rpm=float(d.get("max_rpm", 3000.0)),
         accel=int(d.get("accel", 100)),
         decel=int(d.get("decel", 100)),
+        standstill_current_pct=(None if d.get("standstill_current_pct") in (None, "")
+                                else float(d.get("standstill_current_pct"))),
+        standstill_current_reg=str(d.get("standstill_current_reg") or "Pr5.01"),
     )
 
 
