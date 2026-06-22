@@ -311,8 +311,13 @@ class CPPExpressionBackend:
                     was_written = True
                     break
             if was_written:
-                results['do_writes'][i] = bool(self.do_out[i] >= 1.0)
-        
+                # RAW value (PWM duty 0..1, or 0/1 for digital). Do NOT threshold
+                # here -- a PWM heater at 0.84 duty must survive to the apply site
+                # (set_pwm_duty) and to the UI; digital DOs get thresholded at the
+                # apply (set_do(val>=1.0)). Thresholding here collapsed any partial
+                # duty to 0, so PWM heater indicators read off below full duty.
+                results['do_writes'][i] = float(self.do_out[i])
+
         # Collect global AO writes (check was_written flag, not value!)
         for i in range(16):
             # Check if ANY expression wrote to this AO
@@ -332,7 +337,7 @@ class CPPExpressionBackend:
             for ch in range(64):
                 if self.do_was_written_per_expr[expr_idx][ch] > 0:
                     val = self.do_writes_per_expr[expr_idx][ch]
-                    expr_hw['do'][ch] = bool(val >= 1.0)
+                    expr_hw['do'][ch] = float(val)   # raw duty (was thresholded to bool)
             
             # AO writes for this expression
             for ch in range(16):
