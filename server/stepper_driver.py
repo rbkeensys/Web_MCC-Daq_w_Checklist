@@ -15,8 +15,8 @@ Expression interface (see EXPRESSION_REFERENCE.md, "Stepper Drives (STEP)"):
   read   "STEP:Name".VEL/.POS/.RUNNING/.ENABLED/.COMPLETE/.ALARM
   command "STEP:Name.ENABLE/.VELOCITY/.MOVE/.MOVETO/.STOP/.JOG/.RESET" = value
 """
-__version__ = "1.4.0"
-__updated__ = "2026-06-19"  # 1.4.0: presence probe -- StepperController.probe() does a real Modbus read after connect(); build() now reports a drive that doesn't answer as FAILED ("no reply from drive on COMx") instead of "connected" (opening the serial port succeeds with nothing attached). 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
+__version__ = "1.6.1"
+__updated__ = "2026-06-20"  # 1.6.1: per-instance reliability overrides read in build() from the stepper instance (io_retries, io_gap_ms, io_reply_ms) -> exposed in the Stepper Units editor; fall back to module defaults. 1.6.0: Modbus RTU reliability -- _txn now resends on a lost/garbled reply (timeout/short/CRC, NOT on a Modbus exception reply), enforces a minimum inter-frame gap (RTU 3.5-char silence, stops bus overrun), and uses a short reply timeout (~120ms vs the 0.5s instance timeout) so a miss is caught + resent fast. Knobs: STEP_IO_RETRIES/STEP_IO_RETRY_DELAY/STEP_IO_GAP/STEP_REPLY_TIMEOUT. 1.5.0: Modbus TX/RX console logging -- _txn logs each write/command frame + reply (decoded: 'W 0x6203 = 0xFF38 (-200)') so the ENABLE/VELOCITY/setup exchange is visible; build() prints CONNECTED/setup lines. Writes logged by default (sparse, on-change); STEP_LOG_READS toggles chatty poll-read logging. 1.4.0: presence probe -- StepperController.probe() does a real Modbus read after connect(); build() now reports a drive that doesn't answer as FAILED ("no reply from drive on COMx") instead of "connected" (opening the serial port succeeds with nothing attached). 1.3.0: dropped ml_per_rev (pump cal is handled in expressions, not the generic stepper). 1.2.0: StepperConfig adds full_step_deg for the MOD Drv stepper editor. 1.1.0: StepperWorker + StepperManager (background workers/instances); 1.0.0: DM556RS profile + StepperController
 
 import struct
 import time
@@ -191,6 +191,24 @@ _STEP_CMD_ALIASES = {
     "RESET": "ALARM_RESET", "FAULT_RESET": "ALARM_RESET",
 }
 
+# Console logging of the Modbus exchange. Writes/commands are sparse (sent
+# on-change), so logging them by default is cheap and shows exactly what each
+# ENABLE/VELOCITY/setup command put on the wire + the drive's reply. Polling
+# reads run at the worker rate (chatty) -- flip STEP_LOG_READS=True to include
+# them when you need a full trace.
+STEP_LOG_IO = True
+STEP_LOG_READS = False
+
+# --- Modbus RTU reliability ---
+# RS-485 frames occasionally drop (overrun / noise). These make a single lost
+# frame self-heal instead of aborting a whole move.
+STEP_IO_RETRIES = 2          # extra attempts on a lost/garbled reply (0 = off)
+STEP_IO_RETRY_DELAY = 0.01   # s between attempts
+STEP_IO_GAP = 0.003          # s minimum silence between transactions (RTU 3.5-char)
+STEP_REPLY_TIMEOUT = 0.12    # s to wait for a reply (capped by the instance timeout);
+                             # a Modbus reply is ~ms, so this catches a miss fast
+                             # instead of stalling on the full 0.5 s instance timeout
+
 
 class StepperController:
     """Owns the serial port and talks to one stepper drive via its profile.
@@ -208,6 +226,17 @@ class StepperController:
         self.address = address if address is not None else profile.default_address
         self.timeout = timeout
         self.config = config or StepperConfig()
+
+        self.name = port                 # overwritten with the instance name by build()
+        self.log_io = STEP_LOG_IO         # log Modbus writes/commands
+        self.log_reads = STEP_LOG_READS   # also log polling reads (chatty)
+
+        # Modbus RTU reliability knobs
+        self.io_retries = STEP_IO_RETRIES
+        self.io_retry_delay = STEP_IO_RETRY_DELAY
+        self.io_gap = STEP_IO_GAP
+        self.reply_timeout = min(self.timeout, STEP_REPLY_TIMEOUT)
+        self._last_txn_t = 0.0
 
         self.ser = None
         self.connected = False
@@ -227,7 +256,7 @@ class StepperController:
         try:
             self.ser = serial.Serial(
                 port=self.port, baudrate=self.baud, bytesize=serial.EIGHTBITS,
-                parity=par, stopbits=sb, timeout=self.timeout,
+                parity=par, stopbits=sb, timeout=self.reply_timeout,
                 write_timeout=self.timeout)
             self.connected = True
             return True
@@ -250,32 +279,116 @@ class StepperController:
         return [p.device for p in serial.tools.list_ports.comports()]
 
     # ---- low-level Modbus ------------------------------------------------
+    @staticmethod
+    def _hex(frame: bytes) -> str:
+        return " ".join("%02X" % b for b in frame) if frame else "(none)"
+
+    @staticmethod
+    def _decode_req(frame: bytes) -> str:
+        """Human-readable summary of an outgoing request frame
+        [addr, fn, hi, lo, ...]."""
+        if len(frame) < 4:
+            return ""
+        fn = frame[1]
+        try:
+            if fn == 0x06 and len(frame) >= 6:           # write single
+                addr = (frame[2] << 8) | frame[3]
+                val = (frame[4] << 8) | frame[5]
+                sval = val - 0x10000 if val >= 0x8000 else val
+                return "W 0x%04X = 0x%04X (%d)" % (addr, val, sval)
+            if fn == 0x10 and len(frame) >= 6:           # write multiple
+                addr = (frame[2] << 8) | frame[3]
+                cnt = (frame[4] << 8) | frame[5]
+                return "W* 0x%04X x%d" % (addr, cnt)
+            if fn == 0x03 and len(frame) >= 6:           # read
+                addr = (frame[2] << 8) | frame[3]
+                cnt = (frame[4] << 8) | frame[5]
+                return "R 0x%04X x%d" % (addr, cnt)
+        except Exception:
+            pass
+        return "fn 0x%02X" % fn
+
+    def _iolog(self, tag: str, frame: bytes, note: str = ""):
+        try:
+            print("[STEP %s %s] %s%s" % (
+                self.name, tag, self._hex(frame),
+                ("   " + note) if note else ""), flush=True)
+        except Exception:
+            pass
+
     def _txn(self, pdu: bytes, expected_len: int) -> bytes:
+        """One Modbus transaction with automatic resend on a lost/garbled reply.
+
+        A timeout / short frame / CRC / address mismatch is retried up to
+        io_retries times -- those mean the request or its reply was dropped on
+        the wire, so re-sending is the right move (every register write here is
+        idempotent; NOTE: a *relative* position-move trigger would double-move
+        if its reply were lost, so use absolute moves for dosing). A Modbus
+        *exception* reply is NOT retried -- the drive answered, so it's a real
+        error. A minimum inter-frame gap is enforced first to honor RTU 3.5-char
+        silence and stop overrunning the drive (the usual cause of the drops)."""
         if not self.ser or not getattr(self.ser, "is_open", False):
             raise StepperCommError("serial port not open")
         frame = bytes([self.address]) + pdu
         frame += struct.pack("<H", modbus_crc16(frame))
-        with self._io_lock:
-            self.ser.reset_input_buffer()
-            self.ser.write(frame)
-            head = self.ser.read(2)
-            if len(head) < 2:
-                raise StepperCommError("no response (timeout)")
-            fn = head[1]
-            if fn & 0x80:
-                code = self.ser.read(1)
-                self.ser.read(2)
-                raise StepperModbusException(fn & 0x7F, code[0] if code else 0)
-            rest = self.ser.read(expected_len - 2 + 2)
-            reply = head + rest
-        if len(reply) < expected_len + 2:
-            raise StepperCommError(f"short reply: got {len(reply)} want {expected_len + 2}")
-        body, crc_rx = reply[:-2], struct.unpack("<H", reply[-2:])[0]
-        if modbus_crc16(body) != crc_rx:
-            raise StepperCommError("CRC mismatch")
-        if body[0] != self.address:
-            raise StepperCommError(f"address mismatch: got {body[0]} want {self.address}")
-        return body
+        req_fn = pdu[0] if pdu else 0
+        do_log = self.log_io and (req_fn in (0x06, 0x10) or self.log_reads)
+        attempts = 1 + max(0, int(self.io_retries))
+        last_err = None
+        for attempt in range(attempts):
+            try:
+                return self._txn_once(frame, expected_len, do_log, attempt, attempts)
+            except StepperModbusException:
+                raise                       # drive answered with an error -> real
+            except StepperCommError as e:
+                last_err = e
+                if attempt + 1 < attempts:
+                    time.sleep(self.io_retry_delay)
+                    continue
+                raise
+        raise last_err or StepperCommError("transaction failed")
+
+    def _txn_once(self, frame: bytes, expected_len: int,
+                  do_log: bool, attempt: int, attempts: int) -> bytes:
+        # Enforce minimum silence before keying the bus (RTU inter-frame gap).
+        if self.io_gap > 0:
+            wait = self.io_gap - (time.time() - self._last_txn_t)
+            if wait > 0:
+                time.sleep(wait)
+        note = self._decode_req(frame) + ("" if attempt == 0 else " (retry %d)" % attempt)
+        try:
+            with self._io_lock:
+                self.ser.reset_input_buffer()
+                if do_log:
+                    self._iolog("TX", frame, note)
+                self.ser.write(frame)
+                head = self.ser.read(2)
+                if len(head) < 2:
+                    raise StepperCommError("no response (timeout)")
+                fn = head[1]
+                if fn & 0x80:
+                    code = self.ser.read(1)
+                    self.ser.read(2)
+                    raise StepperModbusException(fn & 0x7F, code[0] if code else 0)
+                rest = self.ser.read(expected_len - 2 + 2)
+                reply = head + rest
+            if len(reply) < expected_len + 2:
+                raise StepperCommError(f"short reply: got {len(reply)} want {expected_len + 2}")
+            body, crc_rx = reply[:-2], struct.unpack("<H", reply[-2:])[0]
+            if modbus_crc16(body) != crc_rx:
+                raise StepperCommError("CRC mismatch")
+            if body[0] != self.address:
+                raise StepperCommError(f"address mismatch: got {body[0]} want {self.address}")
+            if do_log:
+                self._iolog("RX", reply)
+            return body
+        except StepperCommError as e:
+            if do_log:
+                self._iolog("RX", b"", "ERROR: %s%s" % (
+                    e, " -- resending" if attempt + 1 < attempts else " -- gave up"))
+            raise
+        finally:
+            self._last_txn_t = time.time()
 
     def read_registers(self, start: int, count: int, fn: Optional[int] = None) -> List[int]:
         fn = fn if fn is not None else self.profile.read_fn
@@ -639,20 +752,40 @@ class StepperManager:
                     profile, port, baud=inst.get("baud"), parity=inst.get("parity"),
                     stopbits=inst.get("stopbits"), address=inst.get("address"),
                     timeout=float(inst.get("timeout", 0.5)), config=config)
+                ctrl.name = name
+                # Per-instance Modbus-reliability overrides (UI: Stepper Units
+                # editor). Fall back to the module defaults when unset.
+                # reply_timeout must be applied BEFORE connect() (it sets the
+                # serial read timeout).
+                if inst.get("io_retries") is not None:
+                    ctrl.io_retries = max(0, int(inst["io_retries"]))
+                if inst.get("io_gap_ms") is not None:
+                    ctrl.io_gap = max(0.0, float(inst["io_gap_ms"])) / 1000.0
+                if inst.get("io_reply_ms") is not None:
+                    ctrl.reply_timeout = max(0.005, float(inst["io_reply_ms"]) / 1000.0)
                 ok = ctrl.connect() if connect else True
-                if ok and connect and not ctrl.probe():
+                if ok and connect:
                     # Port opened but no drive answered -> report absent rather
                     # than silently reporting "connected" (serial open alone is
                     # not proof a device is present).
-                    ctrl.disconnect()
-                    results.append((name, False, f"no reply from drive on {port}"))
-                    continue
+                    if not ctrl.probe():
+                        ctrl.disconnect()
+                        print("[STEP %s] connect FAILED: no Modbus reply on %s @ %s"
+                              % (name, port, ctrl.baud), flush=True)
+                        results.append((name, False, f"no reply from drive on {port}"))
+                        continue
+                    print("[STEP %s] CONNECTED on %s @ %s %s%d1 addr=%d -- drive answered"
+                          % (name, port, ctrl.baud, ctrl.parity,
+                             8, ctrl.address), flush=True)
                 if ok and connect and do_setup and inst.get("auto_setup"):
+                    print("[STEP %s] applying setup: microstep=%d, peak=%.1fA, reverse=%s"
+                          % (name, ctrl.config.steps_per_rev,
+                             ctrl.config.peak_current_a, ctrl.config.reverse), flush=True)
                     try:
                         ctrl.read_status()
                         ctrl.apply_setup()
-                    except Exception:
-                        pass
+                    except Exception as _se:
+                        print("[STEP %s] setup warning: %s" % (name, _se), flush=True)
                 self.controllers[name] = ctrl
                 results.append((name, ok, None if ok else "connect failed"))
             except Exception as e:
