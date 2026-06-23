@@ -138,6 +138,7 @@ Everything downstream reads only `y*`.
 |---|---|---|---|---|---|
 | `simEnable` | 0 | 0 | 1 | 0/1 | 0 = real AI/TC, 1 = run the plant simulator. |
 | `simDriveHW` | 0 | 0 | 1 | 0 | In sim: 0 = dry-run, 1 = hardware-in-the-loop. |
+| `simReset` | 0 | 0 | 1 | 0 | One-shot: set to 1 (Sim-panel **Reset** button) to snap the plant + control state to cold/ambient startup. Self-clears; only acts while simulating. |
 | `simSpeed` | 120 | 1 | 160 | 60–160 | Sim time accel ×real (dt clamps at 1.0 s, so ≳160 saturates). |
 | `simHeatLoss` | 0 | 0 | ~250 | 200–240 | **Instantaneous standby heat loss** (W) = `simUAloss×(evapT−ambient)`. |
 | `simHeatIn` | 0 | 0 | ~4500 | 2000–4500 | Total heat into the evaporator (makeup + recovery) (W). |
