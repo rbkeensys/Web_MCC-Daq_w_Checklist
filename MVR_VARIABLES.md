@@ -1,192 +1,203 @@
 # MVR Control & Simulator — Static Variable Reference
 
-Every `static.*` variable used by the MVR expressions, grouped by role, with its
-units / typical range and what it represents. All are defined or first written in
-`server/config/expressions.json`. Temperatures are °C, pressures **psia**, heater
-outputs are PWM duty 0..1, flows L/min unless noted.
+Every `static.*` variable used by the MVR expressions, with **default, min, max,
+typical** values and what it represents. Defined / first written in
+`server/config/expressions.json`. Temps °C, pressures **psia**, heater outputs
+PWM duty 0..1, flows L/min, volumes ml unless noted.
 
-Two execution backends evaluate these identically: the Python engine
-(`expr_engine.py`) and the compiled C++ DLL (`expr_to_cpp.py` → `compiled/expressions.dll`).
-**Top-level `static.x = const` lines in `Setpoints` initialize once** (so read-before-write
-statics don't start as NaN in the DLL).
+Two backends evaluate these identically: Python (`expr_engine.py`) and the
+compiled C++ DLL (`expr_to_cpp.py` → `compiled/expressions.dll`). Top-level
+`static.x = const` lines in `Setpoints` initialize **once**.
 
-The data flow each tick:
-`MVR System` (phase) → `SensorMux` (real **or** sim sensors → `y*`) → `SteamTables`
-→ `Interlocks` → heater PIs → `BlowerControl`/`FeedwaterControl` → `CondensatePump`
-→ `ProductionControl`/`FeedFollow` → `MVRSim` (plant model, sim only).
+Tick data flow: `MVR System` (phase) → `SensorMux` (real **or** sim → `y*`) →
+`SteamTables` → `Interlocks` → heater PIs → `BlowerControl` / `FeedwaterControl`
+→ `CondensatePump` → `ProductionControl` / `FeedFollow` → `MVRSim` (plant, sim only).
+
+For **derived / state / sim-output** variables (sections 5, 6, 9) the "Default"
+is the init value and Min/Max/Typical are the physical operating envelope, not
+user settings.
 
 ---
 
 ## 1. Operating setpoints — the knobs you set
 
-| Variable | Range | Meaning |
-|---|---|---|
-| `runSystem` | 0 / 1 | Master run (driven by the RUN button via `buttonVars.runSystem`). 0 → everything idle. |
-| `productionSet` | 0.02–0.24 L/min | **Primary knob.** Target distillate (condensate) rate. The blower and feed pump chase this. |
-| `evapTempSet` | ~100 °C | Evaporator boiling-temperature setpoint (makeup-heater PI target). |
-| `superheatSet` | 1–5 °C | Vapor superheat setpoint (superheat-cartridge PI target). |
-| `evapPressSet` | ~14.7 psia | Evaporator pressure reference (informational / future use). |
-| `blowerRpmSet` | 800–4000 rpm | Blower (compressor) speed. **Auto-driven** by `ProductionControl` when `autoBlow=1`; manual when 0. |
-| `feedRpmSet` | 0–~300 rpm | Feed pump motor speed. **Auto-driven** by `FeedFollow` when `autoFeed=1`; manual when 0. |
-| `evapLevelSet` | ~1500 ml | Evaporator working-level target the feed pump holds (level control). |
-| `autoBlow` | 0 / 1 | 1 = blower auto-trims to hold `productionSet`. |
-| `autoFeed` | 0 / 1 | 1 = feed pump auto-holds evaporator level / mass balance. |
+| Variable | Default | Min | Max | Typical | Meaning |
+|---|---|---|---|---|---|
+| `runSystem` | 0 | 0 | 1 | 0/1 | Master run (RUN button → `buttonVars.runSystem`). |
+| `productionSet` | 0.12 | 0.02 | 0.24 | 0.08–0.18 | **Primary knob** — target distillate rate (L/min). Blower + feed chase it. |
+| `evapTempSet` | 100.0 | 95 | 105 | 100 | Evaporator boiling setpoint (makeup-PI target), °C. |
+| `superheatSet` | 3.0 | 1 | 8 | 2–4 | Vapor superheat setpoint (superheat-PI target), °C. |
+| `evapPressSet` | 14.7 | 10 | 20 | 14.7 | Evaporator pressure reference (psia, informational). |
+| `blowerRpmSet` | 1500 | 800 | 4000 | 1300–2500 | Blower rpm. **Auto** when `autoBlow=1`, else manual. |
+| `feedRpmSet` | 60 | 0 | 300 | 100–300 | Feed-pump motor rpm. **Auto** when `autoFeed=1`, else manual. |
+| `evapLevelSet` | 1500 | 500 | 4000 | 1200–1800 | Evaporator working-level target (ml) the feed holds. |
+| `autoBlow` | 1 | 0 | 1 | 1 | 1 = blower auto-trims to `productionSet`. |
+| `autoFeed` | 1 | 0 | 1 | 1 | 1 = feed auto-holds evaporator level. |
 
 ## 2. Startup sequence & feed-pump calibration
 
-| Variable | Range | Meaning |
-|---|---|---|
-| `mvrPhase` | 0–3 | Startup state: 0 IDLE, 1 PRIME, 2 HEAT, 3 RUN. `mvrState` mirrors it. |
-| `feedLPerStep` | ~2e-6 L/step | **FEED PUMP CAL** — liters delivered per motor **step**. `L/min = rpm × feedStepsPerRev × feedLPerStep`. |
-| `feedStepsPerRev` | =driver | Motor steps per revolution; must match the driver microstep (Pr0.00, e.g. 10000). |
-| `feedPrimeML` | ~1500 ml | Volume the PRIME phase dead-reckons into the evaporator before heat is allowed. |
-| `feedPrimeRpm` | ~120 rpm | Feed-pump speed during the PRIME fill. |
-| `feedPrimedML` | 0…feedPrimeML | Running count of primed volume (dead-reckon integrator); resets each start. |
-| `feedCmdRpm` | 0–300 rpm | The **actual** feed rpm commanded this tick (prime rate or run rate). Sim reads this. |
-| `blowerMinRpm` / `blowerMaxRpm` | 800 / 4000 | Production-control blower clamps. 4000 = allowed overspeed. |
-| `kProd` | ~40 | Blower production-control gain (rpm per L/min-error-second). Lower = gentler/slower. |
-| `kFeedLevel` | ~0.003 | Feed level-control gain (L/min per ml of level error). 0 = pure feed-forward. |
-| `blowdownFrac` | ~0.05 | Feed excess over distillate (blowdown / concentrate purge). |
-| `prodMeas` | 0–0.25 L/min | Smoothed measured distillate (from the calibrated flow meter); the blower loop's feedback. |
+| Variable | Default | Min | Max | Typical | Meaning |
+|---|---|---|---|---|---|
+| `mvrPhase` | 0 | 0 | 3 | 0–3 | Phase: 0 IDLE, 1 PRIME, 2 HEAT, 3 RUN. `mvrState` mirrors it. |
+| `feedLPerStep` | 8.96861e-8 | 1e-9 | 1e-5 | ~9e-8 | **FEED PUMP CAL** — L per motor step (200 mL ÷ 223 rev ÷ 10000 steps). |
+| `feedStepsPerRev` | 10000 | 200 | 60000 | 10000 | Motor steps/rev — match driver microstep Pr0.00. `L/min = rpm×stepsPerRev×LPerStep`. |
+| `feedPrimeML` | 1500 | 200 | 4000 | 1000–2000 | Volume PRIME dead-reckons before heat (≈half a ~3 L HX side). |
+| `feedPrimeRpm` | 120 | 30 | 300 | 100–200 | Feed rpm during the PRIME fill. |
+| `feedCmdRpm` | 0 | 0 | 300 | 0–300 | **Actual** feed rpm commanded this tick (output). |
+| `feedInvEst` | 0 | 0 | 20000 | ~`evapLevelSet` | **Feed-side inventory dead-reckon** (ml): Σ feed-in − Σ calibrated distillate-out. Watch for "getting low". |
+| `blowerMinRpm` | 800 | 0 | 4000 | 800 | Production-control blower clamp (min). |
+| `blowerMaxRpm` | 4000 | 800 | 4000 | 4000 | Production-control blower clamp (max) — overspeed allowed. |
+| `kProd` | 40 | 5 | 300 | 30–80 | Blower production gain (rpm per L/min-error-second). Lower = gentler. |
+| `kFeedLevel` | 0.003 | 0 | 0.02 | 0.002–0.005 | Feed level-control gain (L/min per ml error). 0 = feed-forward only. |
+| `blowdownFrac` | 0.05 | 0 | 0.3 | 0.05 | Feed excess over distillate (blowdown / concentrate purge). |
+| `prodMeas` | 0 | 0 | 0.25 | ≈`productionSet` | Smoothed measured distillate (blower-loop feedback). |
 
 ## 3. Control tuning, interlocks & limits
 
-| Variable | Range | Meaning |
-|---|---|---|
-| `kpMakeup` / `kiMakeup` | 0.05 / 0.01 | Makeup-heater PI gains. |
-| `kpSuper` / `kiSuper` | 0.05 / 0.01 | Superheat-heater PI gains. |
-| `surgeThresh` | 1.0 °C | ΔT below which the anti-surge bypass valve opens. |
-| `surgeGain` | 5.0 V/°C | Bypass-valve volts per °C of surge. |
-| `minSuperheat` | 0.5 °C | Wet-compression trip threshold (latched-arm protection). |
-| `superheatGraceTemp` | 90 °C | Superheat interlock only arms above this (no cold-start trip). |
-| `condLevelThresh` | 2.5 | Real condensate-level analog threshold (high/low band) until 2 switches are wired. |
-| `demisterThresh` | 2.5 | Demister liquid-present threshold (drain + flood). |
-| `maxEvapPress` / `maxSteamPress` | 25 / 35 psia | Over-pressure trips. |
-| `maxVaporOut` | 140 °C | Vapor-out over-temp trip. |
-| `timeIncSec` | 0.00625 s | Control tick period (used by integrators). |
+| Variable | Default | Min | Max | Typical | Meaning |
+|---|---|---|---|---|---|
+| `kpMakeup` | 0.05 | 0 | 0.5 | 0.05 | Makeup-heater P gain. |
+| `kiMakeup` | 0.01 | 0 | 0.2 | 0.01 | Makeup-heater I gain. |
+| `kpSuper` | 0.05 | 0 | 0.5 | 0.05 | Superheat-heater P gain. |
+| `kiSuper` | 0.01 | 0 | 0.2 | 0.01 | Superheat-heater I gain. |
+| `surgeThresh` | 1.0 | 0 | 5 | 1.0 | ΔT below which the anti-surge bypass opens (°C). |
+| `surgeGain` | 5.0 | 0 | 10 | 5 | Bypass-valve volts per °C of surge. |
+| `minSuperheat` | 0.5 | 0 | 5 | 0.5 | Wet-compression trip threshold (°C, latched-arm). |
+| `superheatGraceTemp` | 90 | 50 | 100 | 90 | Superheat interlock arms only above this (°C). |
+| `condLevelThresh` | 2.5 | 0 | 10 | 2.5 | Real condensate analog level threshold. |
+| `demisterThresh` | 2.5 | 0 | 10 | 2.5 | Demister liquid-present threshold. |
+| `maxEvapPress` | 25.0 | 15 | 40 | 25 | Evaporator over-pressure trip (psia). |
+| `maxSteamPress` | 35.0 | 20 | 50 | 35 | Steam-side over-pressure trip (psia). |
+| `maxVaporOut` | 140.0 | 110 | 160 | 140 | Vapor-out over-temp trip (°C). |
+| `timeIncSec` | 0.00625 | — | — | 0.00625 | Control tick period (s) — set to the real loop rate. |
 
-## 4. Sensor mux — abstracted sensors (`y*`)
+## 4. Sensor mux — abstracted sensors (`y*`, outputs)
 
-`SensorMux` sets these from the **real** AI/TC when `simEnable=0`, or from the
-**sim** model when `simEnable=1`. Everything downstream reads only `y*`, so the
-controllers are identical in both modes.
+`SensorMux` sets these from real AI/TC (`simEnable=0`) or the sim (`=1`).
+Everything downstream reads only `y*`.
 
-| Variable | Units | Real source / meaning |
-|---|---|---|
-| `yEvapTemp` | °C | Evaporator temp (`TC:EvapTemp`). |
-| `yEvapPress` / `ySteamPress` | psia | Evaporator / steam-side pressure (`AI:EvapPress` / `AI:SteamPress`). |
-| `yVaporIn` / `yVaporOut` | °C | Vapor temp into / out of the blower (`TC:VaporIn` / `TC:VaporOut`). |
-| `yEvapLevel` | ml | Evaporator level (`AI:EvapLevel`; sim = `simEvapInv`). Feed level control reads this. |
-| `yCondLevel` | — | Condensate analog level (`AI:CondLevel`). |
-| `yCondHigh` / `yCondLow` | 0/1 | Condensate tank HIGH / LOW switches (sim = two real levels; real = band off `AI:CondLevel`). |
-| `yCondFlow` | L/min | Condensate flow meter (`AI:CondFlow`). |
-| `yDemisterWater` / `yDemisterFlood` | — | Demister liquid-present / flood sensors. |
+| Variable | Init | Operating range | Real source |
+|---|---|---|---|
+| `yEvapTemp` | — | 18–105 °C | `TC:EvapTemp` |
+| `yEvapPress` / `ySteamPress` | — | 0.5–35 psia | `AI:EvapPress` / `AI:SteamPress` |
+| `yVaporIn` / `yVaporOut` | — | 18–150 °C | `TC:VaporIn` / `TC:VaporOut` |
+| `yEvapLevel` | — | 0–4000 ml | `AI:EvapLevel` (sim = `simEvapInv`) — feed level feedback |
+| `yCondLevel` | — | 0–10 | `AI:CondLevel` |
+| `yCondHigh` / `yCondLow` | — | 0/1 | Condensate HIGH / LOW switches |
+| `yCondFlow` | — | 0–0.3 L/min | `AI:CondFlow` |
+| `yDemisterWater` / `yDemisterFlood` | — | 0–5 | Demister liquid / flood |
 
 ## 5. Derived signals & control outputs
 
-| Variable | Units | Meaning |
-|---|---|---|
-| `evapTsat` / `steamTsat` | °C | Saturation temps from the pressures (Antoine). |
-| `superheatIn` / `superheatOut` | °C | Vapor superheat in / out (`VaporIn−evapTsat`, `VaporOut−steamTsat`). |
-| `deltaT` | °C | `steamTsat − evapTsat` — the compression lift (≈2–6 °C). |
-| `PressRatio` | — | Steam/evap pressure ratio. |
-| `heatOK` | 0/1 | Heaters enabled (run, no trip, phase ≥ HEAT). |
-| `trip` | 0/1 | Any interlock tripped. |
-| `evapPErr`/`steamPErr`/`vaporOutTErr`/`superHErr` | 0/1 | Individual trip flags (indicators). |
-| `shArmed` | 0/1 | Superheat protection armed (latched once superheat first established). |
-| `makeupDuty` / `superDuty` | 0..1 | Heater PWM duties → `DO:MakeupHtr` / `DO:SuperHtr`. |
-| `makeupI` / `superI` | 0..1 | Heater-PI integrator states. |
-| `bypassV` | 0–10 V | Anti-surge bypass-valve command (`AO:BypassValve`). |
-| `vfdRpmRead`,`vfdOutVolt/Amps/Pwr`,`vfdTorque`,`vfdEnable`,`accel`,`accelraw`,`sink` | — | VFD telemetry read back from the blower drive (`monitorMotor`). |
-| `condPumpOn` | 0/1 | Condensate pump state (`DO:CondPump`), 2-level hysteresis. |
+| Variable | Init | Operating range | Meaning |
+|---|---|---|---|
+| `evapTsat` / `steamTsat` | — | 30–110 °C | Saturation temps from the pressures. |
+| `superheatIn` / `superheatOut` | — | 0–10 °C | Vapor superheat in / out. |
+| `deltaT` | — | 2–6 °C | `steamTsat−evapTsat` — the compression lift. |
+| `PressRatio` | — | 1.0–1.25 | Steam/evap pressure ratio. |
+| `heatOK` | — | 0/1 | Heaters enabled (run, no trip, phase ≥ HEAT). |
+| `trip` | — | 0/1 | Any interlock tripped. |
+| `evapPErr`/`steamPErr`/`vaporOutTErr`/`superHErr` | — | 0/1 | Individual trip flags. |
+| `shArmed` | 0 | 0/1 | Superheat protection armed (latched). |
+| `makeupDuty` / `superDuty` | — | 0..1 | Heater PWM duties (→ `DO:MakeupHtr` / `DO:SuperHtr`). Typical makeup 0.1–0.3, super 0.05–0.15. |
+| `makeupI` / `superI` | 0 | 0..1 | Heater-PI integrator states. |
+| `bypassV` | — | 0–10 V | Anti-surge bypass command (`AO:BypassValve`). |
+| `vfdRpmRead`,`vfdOutVolt/Amps/Pwr`,`vfdTorque`,`vfdEnable`,`accel`,`accelraw`,`sink` | — | — | Blower VFD telemetry (`monitorMotor`). |
+| `condPumpOn` | 0 | 0/1 | Condensate pump (`DO:CondPump`), 2-level hysteresis. |
 
-## 6. Condensate flow-meter self-calibration (control side)
+## 6. Condensate flow-meter self-calibration (control state)
 
-| Variable | Units | Meaning |
-|---|---|---|
-| `condCalFactor` | ~0.8–1.1 | Running flow-meter calibration factor; re-fit each fill against the known 120 ml. |
-| `condFillRaw` | ml | RAW meter volume integrated over the current fill. |
-| `condProduct` | ml | Calibrated lifetime distillate total. |
-| `condVolEst` | ml | Control's tank-level estimate (snaps to the level switches). |
-| `prevCondHigh` / `prevCondLow` | 0/1 | Previous-tick switch states (edge detection). |
+| Variable | Default | Min | Max | Typical | Meaning |
+|---|---|---|---|---|---|
+| `condCalFactor` | 1.0 | 0.5 | 1.5 | 0.8–1.0 | Running flow-meter cal; re-fit each fill vs the known 120 ml. |
+| `condFillRaw` | 0 | 0 | ~150 | 0–120 | RAW meter volume over the current fill (ml). |
+| `condProduct` | 0 | 0 | ∞ | grows | Calibrated lifetime distillate total (ml). |
+| `condVolEst` | 0 | 50 | 170 | 50–170 | Control's tank-level estimate (ml), snaps at switches. |
+| `prevCondHigh` / `prevCondLow` | 0 | 0 | 1 | 0/1 | Previous-tick switch states (edge detect). |
 
 ## 7. Simulator — master switches & monitoring
 
-| Variable | Range | Meaning |
-|---|---|---|
-| `simEnable` | 0 / 1 | 0 = real AI/TC, 1 = run the plant simulator. (Sim button.) |
-| `simDriveHW` | 0 / 1 | In sim: 0 = dry-run (no real relays/VFD), 1 = hardware-in-the-loop. |
-| `simSpeed` | 1–160 | Sim time-acceleration ×real. (Tick dt is clamped at 1.0 s, so ≳160 saturates.) |
-| `simHeatLoss` | W | **Instantaneous standby heat loss** = `simUAloss × (evapT − ambient)`. ← the heat-loss monitor. |
-| `simHeatIn` | W | Total heat into the evaporator (makeup + recovered). |
+| Variable | Default | Min | Max | Typical | Meaning |
+|---|---|---|---|---|---|
+| `simEnable` | 0 | 0 | 1 | 0/1 | 0 = real AI/TC, 1 = run the plant simulator. |
+| `simDriveHW` | 0 | 0 | 1 | 0 | In sim: 0 = dry-run, 1 = hardware-in-the-loop. |
+| `simSpeed` | 120 | 1 | 160 | 60–160 | Sim time accel ×real (dt clamps at 1.0 s, so ≳160 saturates). |
+| `simHeatLoss` | 0 | 0 | ~250 | 200–240 | **Instantaneous standby heat loss** (W) = `simUAloss×(evapT−ambient)`. |
+| `simHeatIn` | 0 | 0 | ~4500 | 2000–4500 | Total heat into the evaporator (makeup + recovery) (W). |
 
 ## 8. Simulator plant parameters
 
-| Variable | Typical | Meaning |
-|---|---|---|
-| `simAmbient` | 25 °C | Ambient / floor temperature (all temps clamp ≥ this). |
-| `simFeedSupply` | 18 °C | Cold feed-water supply temp. |
-| `simMakeupPow` | 2000 W | Makeup/startup heater rating (Qmakeup = duty × this). |
-| `simSuperPow` | 300 W | Superheat cartridge rating. |
-| `simSHmeshEff` | 0.4 | Fraction of cartridge watts the copper mesh delivers to the steam. |
-| `simSteamCp` | 2000 J/kg·°C | Steam specific heat (superheat calc). |
-| `simUAsteam` | 1500 W/°C | HX → evaporator heat-recovery conductance. |
-| `simChx` | 14000 J/°C | HX (steam-chest) thermal mass — 24 lb steel + ~2 L water; sets warm-up lag. |
-| `simCevap` | 60000 J/°C | Evaporator thermal mass — sets the warm-up lag. |
-| `simUAloss` | 3 W/°C | **Standby heat-loss coefficient** (insulated rig). Drives `simHeatLoss`. |
-| `simPRmax` | 1.25 | Blower full-speed pressure ratio (sets ΔT span). |
-| `simCompGain` | 60 °C/(PR−1) | Compression superheat added to VaporOut. |
-| `simBlowerRated` | 3450 rpm | Blower rated speed (blowFrac = rpm/this). |
-| `simVaporMax` | 0.25 L/min | Vapor production at full blower + full boil (production scale). |
-| `simLatentPerLpm` | 38000 W | Latent heat per L/min of production (~ real water). |
-| `simRecovEff` | 0.97 | Latent fraction recovered (HX condensing + compressor work). 1.0 = makeup→losses only. |
-| `simFeedRegen` | 0.85 | Cold feed preheated by the outgoing condensate (feed/condensate regen). |
-| `simHXapproach` | 6 °C | HX-bottom temp above the feed inlet at steady state. |
-| `simTauHXgrad` | 15 s | HX top→bottom gradient development time. |
-| `simTauBlower`/`simTauP`/`simTauSH` | 2/3/5 s | First-order time constants: blower spin-up, evap pressure, superheat. |
-| `simSurgeAmp` | 0.06 | Production surge amplitude (fraction). |
-| `simFeedNoise` | 2.0 °C | Feed-temp fluctuation (RMS). |
-
-### Condensate-tank / flow-meter sim model
-| Variable | Typical | Meaning |
-|---|---|---|
-| `simCondHoldMax` | 45 ml | Condensate that must build in the HX before it flows (formation delay). |
-| `condHighML` / `condLowML` | 170 / 50 ml | Tank HIGH / LOW level-switch volumes (120 ml between = the cal reference). |
-| `simPumpMlMin` | 1100 ml/min | Condensate pump removal rate when on. |
-| `simFlowCalErr` | 1.12 | Deliberate flow-meter mis-calibration (reads ~12 % high) — the control corrects it. |
-| `simFlowNoise` | 0.05 | Flow-meter rate noise (fraction RMS). |
+| Variable | Default | Min | Max | Typical | Meaning |
+|---|---|---|---|---|---|
+| `simAmbient` | 25 | 5 | 40 | 20–25 | Ambient / floor temp (°C; temps clamp ≥ this). |
+| `simFeedSupply` | 18 | 5 | 30 | 15–20 | Cold feed-water supply temp (°C). |
+| `simMakeupPow` | 2000 | 500 | 6000 | 2000 | Makeup/startup heater rating (W). |
+| `simSuperPow` | 300 | 100 | 1000 | 300 | Superheat cartridge rating (W). |
+| `simSHmeshEff` | 0.4 | 0.1 | 1.0 | 0.3–0.5 | Fraction of cartridge W the copper mesh delivers to the steam. |
+| `simSteamCp` | 2000 | 1800 | 2200 | 2000 | Steam specific heat (J/kg·°C). |
+| `simUAsteam` | 1500 | 500 | 4000 | 1500 | HX → evaporator heat-recovery conductance (W/°C). |
+| `simChx` | 14000 | 5000 | 40000 | 14000 | HX thermal mass (J/°C) — 24 lb steel + ~2 L water; warm-up lag. |
+| `simCevap` | 60000 | 20000 | 200000 | 60000 | Evaporator thermal mass (J/°C) — warm-up lag. |
+| `simUAloss` | 3 | 0 | 30 | 3–5 | **Standby heat-loss coefficient** (W/°C). Drives `simHeatLoss`. |
+| `simPRmax` | 1.25 | 1.05 | 1.6 | 1.2–1.3 | Blower full-speed pressure ratio (sets ΔT span). |
+| `simCompGain` | 60 | 0 | 150 | 60 | Compression superheat on VaporOut (°C per PR−1). |
+| `simBlowerRated` | 3450 | 1000 | 5000 | 3450 | Blower rated rpm (blowFrac = rpm/this). |
+| `simVaporMax` | 0.25 | 0.05 | 1.0 | 0.25 | Vapor production at full blower + full boil (L/min). |
+| `simLatentPerLpm` | 38000 | 30000 | 42000 | 38000 | Latent heat per L/min of production (W). |
+| `simRecovEff` | 0.97 | 0.8 | 1.0 | 0.95–0.99 | Latent fraction recovered. 1.0 = makeup → losses only. |
+| `simFeedRegen` | 0.85 | 0 | 0.98 | 0.8–0.9 | Cold feed preheated by the condensate (feed/cond regen). |
+| `simHXapproach` | 6 | 2 | 20 | 5–10 | HX-bottom temp above the feed inlet at steady state (°C). |
+| `simTauHXgrad` | 15 | 2 | 60 | 10–20 | HX top→bottom gradient development time (s). |
+| `simTauBlower` | 2.0 | 0.5 | 10 | 2 | Blower spin-up / vapor-out time const (s). |
+| `simTauP` | 3.0 | 0.5 | 10 | 3 | Evaporator pressure response (s). |
+| `simTauSH` | 5.0 | 1 | 15 | 5 | Superheat response (s). |
+| `simSurgeAmp` | 0.06 | 0 | 0.3 | 0.05–0.1 | Production surge amplitude (fraction). |
+| `simFeedNoise` | 2.0 | 0 | 5 | 1–3 | Feed-temp fluctuation (°C RMS). |
+| `simCondHoldMax` | 45 | 0 | 200 | 30–60 | Condensate built in HX before it flows (ml). |
+| `condHighML` | 170 | 60 | 500 | 170 | Tank HIGH level-switch volume (ml). |
+| `condLowML` | 50 | 10 | 150 | 50 | Tank LOW level-switch volume (ml). The 120 ml gap is the cal reference. |
+| `simPumpMlMin` | 1100 | 200 | 3000 | 1100 | Condensate pump removal rate when on (ml/min). |
+| `simFlowCalErr` | 1.12 | 0.8 | 1.3 | 1.0–1.15 | Deliberate flow-meter mis-cal (reads high); control corrects it. |
+| `simFlowNoise` | 0.05 | 0 | 0.2 | 0.05 | Flow-meter rate noise (fraction RMS). |
 
 ## 9. Simulator state (model outputs — chart these)
 
-| Variable | Units | Meaning |
-|---|---|---|
-| `simEvapTemp` | °C | Evaporator temperature. |
-| `simEvapPress` / `simSteamPress` | psia | Evaporator / steam-side pressure. |
-| `simVaporIn` / `simVaporOut` | °C | Vapor temp in / out of the blower. |
-| `simSteamChest` | °C | **HX condensing (top) temp** ("steam chest" = the HX shell where vapor condenses). |
-| `simHXbottom` | °C | HX cold (feed-inlet, bottom) temp — develops the top→bottom gradient. |
-| `simCondTemp` | °C | Condensate temperature (ambient until liquid forms, then subcooled HX-bottom). |
-| `simFeedTemp` | °C | Cold feed temp (supply + noise). |
-| `simSuperheat` | °C | Vapor superheat produced by the cartridge. |
-| `simBlowerRpm` | rpm | Actual blower rpm (lags the command via `simTauBlower`). |
-| `simProd` | L/min | Vapor production (boil-off) rate. |
-| `simEvapInv` | ml | Evaporator water inventory (prime fills it; feed holds `evapLevelSet`). |
-| `simCondVol` | ml | Condensate-tank volume. |
-| `simCondHold` | ml | Condensate held in the HX (formation delay). |
-| `simCondHigh` / `simCondLow` | 0/1 | Sim tank level switches. |
-| `simCondLevel` | 0..1 | Tank fill fraction (chart proxy). |
-| `simCondFlow` | L/min | Sim condensate flow-meter reading (mis-cal + noise). |
-| `simDemisterWater` / `simDemisterFlood` | — | Sim demister liquid / flood. |
-| `simClock` | s | Accumulating sim-seconds (surge/noise phase). |
+| Variable | Init | Operating range | Meaning |
+|---|---|---|---|
+| `simEvapTemp` | 25 | 25–105 °C | Evaporator temperature. |
+| `simEvapPress` / `simSteamPress` | 0.5 | 0.5–18 psia | Evaporator / steam-side pressure. |
+| `simVaporIn` / `simVaporOut` | 25 | 25–150 °C | Vapor temp in / out of the blower. |
+| `simSteamChest` | 25 | 25–106 °C | **HX condensing (top) temp** — the "steam chest". |
+| `simHXbottom` | 25 | 25–106 °C | HX cold feed-inlet (bottom) temp — develops the gradient. |
+| `simCondTemp` | 25 | 25–100 °C | Condensate temp (ambient until liquid forms, then subcooled). |
+| `simFeedTemp` | 18 | 13–23 °C | Cold feed temp (supply + noise). |
+| `simSuperheat` | 0 | 0–6 °C | Vapor superheat from the cartridge. |
+| `simBlowerRpm` | 0 | 0–4000 | Actual blower rpm (lags command). |
+| `simProd` | 0 | 0–0.25 L/min | Vapor production (boil-off) rate. |
+| `simEvapInv` | 0 | 0–4000 ml | True evaporator inventory (prime fills; feed holds `evapLevelSet`). |
+| `simCondVol` | 0 | 0–170 ml | Condensate-tank volume. |
+| `simCondHold` | 0 | 0–45 ml | Condensate held in the HX (formation delay). |
+| `simCondHigh` / `simCondLow` | 0 | 0/1 | Sim tank level switches. |
+| `simCondLevel` | 1.0 | 0–1 | Tank fill fraction (chart proxy). |
+| `simCondFlow` | 0 | 0–0.3 L/min | Sim flow-meter reading (mis-cal + noise). |
+| `simDemisterWater` / `simDemisterFlood` | 0 | 0–5 | Sim demister liquid / flood. |
+| `simClock` | 0 | grows | Accumulating sim-seconds (surge/noise phase). |
 
 ---
 
 ### Notes
-- **Heat loss:** the value you asked about is `simHeatLoss` (W), computed every tick
-  as `simUAloss × (simEvapTemp − simAmbient)` and clamped ≥0. `simUAloss` is the
-  coefficient; lower it for a better-insulated rig. `simHeatIn` shows total heat in.
-- **HX volume estimate:** `feedPrimeML`/`evapLevelSet` default to 1500 ml ≈ half of one
-  ~3 L fluid side of a 100-plate 5×12″ brazed-plate HX (≈0.06 L per channel × ~50
-  channels/side). Tune against the real unit once measured.
-- **Pump cal:** set `feedLPerStep` (L/step) and make `feedStepsPerRev` match the
-  driver's microstep (Pr0.00). Then `feed L/min = rpm × feedStepsPerRev × feedLPerStep`.
+- **Heat loss:** `simHeatLoss` (W) = `simUAloss × (simEvapTemp − simAmbient)`,
+  clamped ≥0. `simUAloss` is the coefficient (lower = better insulated).
+  `simHeatIn` = total heat in.
+- **Feed-side water:** `feedInvEst` is the dead-reckoned feedwater on the HX feed
+  side — feed pumped in (positive-displacement, exactly known) minus calibrated
+  distillate out (anchored by the condensate 120 ml high/low cal). Watch it to
+  see how close to dry you are. It also gates PRIME completion and can drive the
+  feed level control directly (set `kFeedLevel` and swap `yEvapLevel→feedInvEst`
+  in FeedFollow) if you have **no** evaporator level sensor.
+- **HX volume:** `feedPrimeML` / `evapLevelSet` ≈ 1500 ml ≈ half of one ~3 L
+  fluid side of a 100-plate 5×12″ brazed-plate HX (≈0.06 L/channel × ~50
+  channels). Tune to the real unit.
+- **Pump cal:** `feedLPerStep` (L/step) × `feedStepsPerRev` (match driver Pr0.00),
+  then `feed L/min = rpm × feedStepsPerRev × feedLPerStep`. Current value:
+  200 mL / 223 rev / 10000 steps = 8.96861e-8 L/step.
