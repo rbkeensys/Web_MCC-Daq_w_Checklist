@@ -1,285 +1,285 @@
 {
-  "boards1608": [
+ "boards1608": [
+  {
+   "boardNum": 0,
+   "sampleRateHz": 160.0,
+   "blockSize": 128,
+   "aiMode": "SE",
+   "enabled": true,
+   "analogs": [
     {
-      "boardNum": 0,
-      "sampleRateHz": 160.0,
-      "blockSize": 128,
-      "aiMode": "SE",
-      "enabled": true,
-      "analogs": [
-        {
-          "name": "EvapPress",
-          "slope": 8.625,
-          "offset": 14.173971557617188,
-          "cutoffHz": 0.1,
-          "units": "psia",
-          "include": true,
-          "counter_num": null,
-          "pulses_per_unit": 1.0,
-          "counter_window_s": 1.0
-        },
-        {
-          "name": "SteamPress",
-          "slope": 8.625,
-          "offset": 17.74154930114746,
-          "cutoffHz": 0.1,
-          "units": "psia",
-          "include": true,
-          "counter_num": null,
-          "pulses_per_unit": 1.0,
-          "counter_window_s": 1.0
-        },
-        {
-          "name": "DemisterWater",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 5.0,
-          "units": "V",
-          "include": true,
-          "counter_num": null,
-          "pulses_per_unit": 1.0,
-          "counter_window_s": 1.0
-        },
-        {
-          "name": "DemisterFlood",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 5.0,
-          "units": "V",
-          "include": true,
-          "counter_num": null,
-          "pulses_per_unit": 1.0,
-          "counter_window_s": 1.0
-        },
-        {
-          "name": "CondLevel",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 5.0,
-          "units": "V",
-          "include": true,
-          "counter_num": null,
-          "pulses_per_unit": 1.0,
-          "counter_window_s": 1.0
-        },
-        {
-          "name": "FeedPress",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 2.0,
-          "units": "psia",
-          "include": true,
-          "counter_num": null,
-          "pulses_per_unit": 1.0,
-          "counter_window_s": 1.0
-        },
-        {
-          "name": "CondFlow",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
-          "units": "L/min",
-          "include": true,
-          "counter_num": 0,
-          "pulses_per_unit": 22000.0,
-          "counter_window_s": 1.0
-        },
-        {
-          "name": "AI7",
-          "slope": 1.0,
-          "offset": 0.5096731746897978,
-          "cutoffHz": 1.0,
-          "units": "",
-          "include": false,
-          "counter_num": null,
-          "pulses_per_unit": 1.0,
-          "counter_window_s": 1.0
-        }
-      ],
-      "digitalOutputs": [
-        {
-          "name": "MakeupHtr",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "pwm",
-          "pwmPeriodMs": 1000.0
-        },
-        {
-          "name": "SuperHtr",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "pwm",
-          "pwmPeriodMs": 1000.0
-        },
-        {
-          "name": "CondPump",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle",
-          "pwmPeriodMs": 1000.0
-        },
-        {
-          "name": "DemisterDrain",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle",
-          "pwmPeriodMs": 1000.0
-        },
-        {
-          "name": "BlowdownValve",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle",
-          "pwmPeriodMs": 1000.0
-        },
-        {
-          "name": "VentValve",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle",
-          "pwmPeriodMs": 1000.0
-        },
-        {
-          "name": "HeaterEnable",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle",
-          "pwmPeriodMs": 1000.0
-        },
-        {
-          "name": "Alarm",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle",
-          "pwmPeriodMs": 1000.0
-        }
-      ],
-      "analogOutputs": [
-        {
-          "name": "BypassValve",
-          "minV": 0.0,
-          "maxV": 10.0,
-          "startupV": 0.0,
-          "include": true,
-          "enable_gate": false,
-          "enable_kind": "do",
-          "enable_index": 6
-        },
-        {
-          "name": "BlowerRPM",
-          "minV": 0.0,
-          "maxV": 10.0,
-          "startupV": 0.0,
-          "include": true,
-          "enable_gate": false,
-          "enable_kind": "do",
-          "enable_index": 6
-        }
-      ]
-    }
-  ],
-  "boardsetc": [
+     "name": "EvapPress",
+     "slope": 8.625,
+     "offset": 14.173971557617188,
+     "cutoffHz": 0.1,
+     "units": "psia",
+     "include": true,
+     "counter_num": null,
+     "pulses_per_unit": 1.0,
+     "counter_window_s": 1.0
+    },
     {
-      "boardNum": 1,
-      "sampleRateHz": 10.0,
-      "blockSize": 1,
-      "enabled": true,
-      "thermocouples": [
-        {
-          "include": true,
-          "ch": 0,
-          "name": "FeedTemp",
-          "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
-        },
-        {
-          "include": true,
-          "ch": 1,
-          "name": "EvapTemp",
-          "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
-        },
-        {
-          "include": true,
-          "ch": 2,
-          "name": "VaporIn",
-          "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
-        },
-        {
-          "include": true,
-          "ch": 3,
-          "name": "VaporOut",
-          "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
-        },
-        {
-          "include": true,
-          "ch": 4,
-          "name": "CondTemp",
-          "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
-        },
-        {
-          "include": true,
-          "ch": 5,
-          "name": "SteamChest",
-          "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
-        },
-        {
-          "include": false,
-          "ch": 6,
-          "name": "TC6",
-          "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
-        },
-        {
-          "include": false,
-          "ch": 7,
-          "name": "TC7",
-          "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
-        }
-      ]
+     "name": "SteamPress",
+     "slope": 8.625,
+     "offset": 17.74154930114746,
+     "cutoffHz": 0.1,
+     "units": "psia",
+     "include": true,
+     "counter_num": null,
+     "pulses_per_unit": 1.0,
+     "counter_window_s": 1.0
+    },
+    {
+     "name": "DemisterWater",
+     "slope": 1.0,
+     "offset": 0.0,
+     "cutoffHz": 5.0,
+     "units": "V",
+     "include": true,
+     "counter_num": null,
+     "pulses_per_unit": 1.0,
+     "counter_window_s": 1.0
+    },
+    {
+     "name": "DemisterFlood",
+     "slope": 1.0,
+     "offset": 0.0,
+     "cutoffHz": 5.0,
+     "units": "V",
+     "include": true,
+     "counter_num": null,
+     "pulses_per_unit": 1.0,
+     "counter_window_s": 1.0
+    },
+    {
+     "name": "CondLevel",
+     "slope": 1.0,
+     "offset": 0.0,
+     "cutoffHz": 5.0,
+     "units": "V",
+     "include": true,
+     "counter_num": null,
+     "pulses_per_unit": 1.0,
+     "counter_window_s": 1.0
+    },
+    {
+     "name": "FeedPress",
+     "slope": 1.0,
+     "offset": 0.0,
+     "cutoffHz": 2.0,
+     "units": "psia",
+     "include": true,
+     "counter_num": null,
+     "pulses_per_unit": 1.0,
+     "counter_window_s": 1.0
+    },
+    {
+     "name": "CondFlow",
+     "slope": 1.0,
+     "offset": 0.0,
+     "cutoffHz": 0.0,
+     "units": "L/min",
+     "include": true,
+     "counter_num": 0,
+     "pulses_per_unit": 22000.0,
+     "counter_window_s": 1.0
+    },
+    {
+     "name": "AI7",
+     "slope": 1.0,
+     "offset": 0.5096731746897978,
+     "cutoffHz": 1.0,
+     "units": "",
+     "include": false,
+     "counter_num": null,
+     "pulses_per_unit": 1.0,
+     "counter_window_s": 1.0
     }
-  ],
-  "board1608": null,
-  "boardetc": null,
-  "analogs": null,
-  "digitalOutputs": null,
-  "analogOutputs": null,
-  "thermocouples": null
+   ],
+   "digitalOutputs": [
+    {
+     "name": "MakeupHtr",
+     "normallyOpen": false,
+     "momentary": false,
+     "actuationTime": 0.0,
+     "include": true,
+     "logicElement": null,
+     "mode": "pwm",
+     "pwmPeriodMs": 1000.0
+    },
+    {
+     "name": "SuperHtr",
+     "normallyOpen": false,
+     "momentary": false,
+     "actuationTime": 0.0,
+     "include": true,
+     "logicElement": null,
+     "mode": "pwm",
+     "pwmPeriodMs": 1000.0
+    },
+    {
+     "name": "CondPump",
+     "normallyOpen": false,
+     "momentary": false,
+     "actuationTime": 0.0,
+     "include": true,
+     "logicElement": null,
+     "mode": "toggle",
+     "pwmPeriodMs": 1000.0
+    },
+    {
+     "name": "DemisterDrain",
+     "normallyOpen": false,
+     "momentary": false,
+     "actuationTime": 0.0,
+     "include": true,
+     "logicElement": null,
+     "mode": "toggle",
+     "pwmPeriodMs": 1000.0
+    },
+    {
+     "name": "BlowdownValve",
+     "normallyOpen": false,
+     "momentary": false,
+     "actuationTime": 0.0,
+     "include": true,
+     "logicElement": null,
+     "mode": "toggle",
+     "pwmPeriodMs": 1000.0
+    },
+    {
+     "name": "VentValve",
+     "normallyOpen": false,
+     "momentary": false,
+     "actuationTime": 0.0,
+     "include": true,
+     "logicElement": null,
+     "mode": "toggle",
+     "pwmPeriodMs": 1000.0
+    },
+    {
+     "name": "HeaterEnable",
+     "normallyOpen": false,
+     "momentary": false,
+     "actuationTime": 0.0,
+     "include": true,
+     "logicElement": null,
+     "mode": "toggle",
+     "pwmPeriodMs": 1000.0
+    },
+    {
+     "name": "Alarm",
+     "normallyOpen": false,
+     "momentary": false,
+     "actuationTime": 0.0,
+     "include": true,
+     "logicElement": null,
+     "mode": "toggle",
+     "pwmPeriodMs": 1000.0
+    }
+   ],
+   "analogOutputs": [
+    {
+     "name": "BypassValve",
+     "minV": 0.0,
+     "maxV": 10.0,
+     "startupV": 0.0,
+     "include": true,
+     "enable_gate": false,
+     "enable_kind": "do",
+     "enable_index": 6
+    },
+    {
+     "name": "BlowerRPM",
+     "minV": 0.0,
+     "maxV": 10.0,
+     "startupV": 0.0,
+     "include": true,
+     "enable_gate": false,
+     "enable_kind": "do",
+     "enable_index": 6
+    }
+   ]
+  }
+ ],
+ "boardsetc": [
+  {
+   "boardNum": 1,
+   "sampleRateHz": 10.0,
+   "blockSize": 1,
+   "enabled": true,
+   "thermocouples": [
+    {
+     "include": true,
+     "ch": 0,
+     "name": "FeedTemp",
+     "type": "K",
+     "offset": 0.0,
+     "cutoffHz": 0.2
+    },
+    {
+     "include": true,
+     "ch": 1,
+     "name": "EvapTemp",
+     "type": "K",
+     "offset": 0.0,
+     "cutoffHz": 0.2
+    },
+    {
+     "include": true,
+     "ch": 2,
+     "name": "VaporIn",
+     "type": "K",
+     "offset": 0.0,
+     "cutoffHz": 0.2
+    },
+    {
+     "include": true,
+     "ch": 3,
+     "name": "VaporOut",
+     "type": "K",
+     "offset": 0.0,
+     "cutoffHz": 0.2
+    },
+    {
+     "include": true,
+     "ch": 4,
+     "name": "CondTemp",
+     "type": "K",
+     "offset": 0.0,
+     "cutoffHz": 0.2
+    },
+    {
+     "include": true,
+     "ch": 5,
+     "name": "SteamChest",
+     "type": "K",
+     "offset": 0.0,
+     "cutoffHz": 0.2
+    },
+    {
+     "include": true,
+     "ch": 6,
+     "name": "MakeupHtr",
+     "type": "K",
+     "offset": 0.0,
+     "cutoffHz": 0.2
+    },
+    {
+     "include": true,
+     "ch": 7,
+     "name": "SuperHtr",
+     "type": "K",
+     "offset": 0.0,
+     "cutoffHz": 0.2
+    }
+   ]
+  }
+ ],
+ "board1608": null,
+ "boardetc": null,
+ "analogs": null,
+ "digitalOutputs": null,
+ "analogOutputs": null,
+ "thermocouples": null
 }
