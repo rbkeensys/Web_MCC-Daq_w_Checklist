@@ -26,12 +26,13 @@ VERSION 2.0 Changes:
 - Added buttonVars support for reading frontend button states
 - buttonVars are read-only in expressions (set by UI buttons)
 """
-__version__ = "2.5.0"
-__updated__ = "2026-06-19"  # 2.5.0: SWITCH/CASE/DEFAULT/ENDSWITCH keyword block added (parse_switch). Pure parser-level desugar into the existing IF/ELSE-IF/ELSE AST -- no new eval or codegen, so the Python evaluator AND the C++ transpiler (which reuse this Lexer/Parser) both get it identically. No fall-through (CASE is independent; no break). SWITCH/CASE/DEFAULT/ENDSWITCH are now reserved words. 2.4.0: DO_ASSIGN records the RAW value (threshold/PWM-duty applied at write time). 2.3.0: added STEP: stepper-drive reads/status/commands (mirrors VFD:, routed to the stepper manager via manager='stepper' tag). 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
+__version__ = "2.6.0"
+__updated__ = "2026-06-23"  # 2.6.0: new math fns rand() (uniform [0,1)), randn() (standard normal), floor/ceil/round, sign() -- for dithering/noise modeling. C++ path uses xorshift32 helpers (expr_rand/expr_randn/expr_sign); both backends case-insensitive. 2.5.0: SWITCH/CASE/DEFAULT/ENDSWITCH keyword block added (parse_switch). Pure parser-level desugar into the existing IF/ELSE-IF/ELSE AST -- no new eval or codegen, so the Python evaluator AND the C++ transpiler (which reuse this Lexer/Parser) both get it identically. No fall-through (CASE is independent; no break). SWITCH/CASE/DEFAULT/ENDSWITCH are now reserved words. 2.4.0: DO_ASSIGN records the RAW value (threshold/PWM-duty applied at write time). 2.3.0: added STEP: stepper-drive reads/status/commands (mirrors VFD:, routed to the stepper manager via manager='stepper' tag). 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
 
 import re
 import math
 import copy
+import random
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
@@ -642,6 +643,14 @@ class Evaluator:
         'min': lambda *args: min(args),
         'max': lambda *args: max(args),
         'clamp': lambda x, lo, hi: max(lo, min(hi, x)),
+        # randomness (handy for dithering, sensor-noise modeling, breaking limit
+        # cycles). rand() = uniform [0,1); randn() = standard normal (mean 0).
+        'rand':  lambda *a: random.random(),
+        'randn': lambda *a: random.gauss(0.0, 1.0),
+        'floor': lambda x: math.floor(x),
+        'ceil':  lambda x: math.ceil(x),
+        'round': lambda x: float(round(x)),
+        'sign':  lambda x: (1.0 if x > 0 else (-1.0 if x < 0 else 0.0)),
     }
     
     def __init__(self, signal_state: Dict[str, Any], local_vars: Optional[Dict[str, float]] = None):

@@ -1,7 +1,8 @@
 # Expression Language Reference Guide
 
-**Version 1.5** | MCC DAQ System | Expression Engine Documentation  
-**Updated:** June 2026 - `SWITCH/CASE/DEFAULT/ENDSWITCH` keyword block (desugars to an IF/ELSE-IF chain; no fall-through)  
+**Version 1.6** | MCC DAQ System | Expression Engine Documentation  
+**Updated:** June 2026 - `rand()` / `randn()` / `sign()` / `floor()` / `ceil()` / `round()` math functions (noise/dithering/modeling)  
+**Previous:** v1.5 - `SWITCH/CASE/DEFAULT/ENDSWITCH` keyword block (desugars to an IF/ELSE-IF chain; no fall-through)  
 **Previous:** v1.4 (June 2026) - PWM-mode digital outputs (write a 0..1 duty); Stepper Drives (`STEP:`); counter-sourced AI channels (pulse flow meters on CTR0); v1.2 (Jan 2026) - ENDIF requirement, nested IF examples, Math/Expr as PID inputs, enable gates
 
 ---
@@ -1316,6 +1317,25 @@ vel0    = "STEP:Feed#0x6203"     # raw PR0 velocity register
 ---
 
 ## Built-in Functions
+
+### Random / Modeling Functions
+
+**rand()** — uniform random in `[0, 1)`. New each evaluation. For dithering, noise injection, breaking limit cycles, Monte-Carlo.
+```javascript
+// sensor noise: ±0.05 psia on a reading
+noisy = "AI:EvapPress" + 0.1 * (rand() - 0.5)
+// dither a PWM duty
+"DO:Heater" = clamp(duty + 0.02*(rand()-0.5), 0, 1)
+```
+
+**randn()** — standard normal random (mean 0, std-dev 1). Better for realistic Gaussian sensor noise.
+```javascript
+flowNoisy = trueFlow + 0.3 * randn()      // ~0.3 L/min RMS noise
+```
+
+**sign(x)** — −1, 0, or +1. **floor(x) / ceil(x) / round(x)** — rounding.
+
+> The compiled (DLL) path uses a fast xorshift PRNG — a fixed seed per server start, so a run is reproducible; the Python fallback uses the OS-seeded `random`. Both give uniform `rand()` / normal `randn()`; the exact stream differs between backends (expected for randomness).
 
 ### Mathematical Functions
 
