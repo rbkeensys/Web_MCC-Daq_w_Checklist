@@ -71,6 +71,9 @@ user settings.
 | `maxEvapPress` | 25.0 | 15 | 40 | 25 | Evaporator over-pressure trip (psia). |
 | `maxSteamPress` | 35.0 | 20 | 50 | 35 | Steam-side over-pressure trip (psia). |
 | `maxVaporOut` | 140.0 | 110 | 160 | 140 | Vapor-out over-temp trip (°C). |
+| `makeupHtrMax` | 110 | 100 | 130 | 110 | Makeup-cartridge TC trip (°C) — heater uncovered / feed overheat → immediate shutdown. |
+| `superHtrMax` | 150 | 120 | 200 | 150 | Superheat-cartridge TC trip (°C) → immediate shutdown. |
+| `makeupHtrTrip` / `superHtrTrip` | 0 | 0 | 1 | 0 | Latched overheat-trip flags (clear by cycling `runSystem`). Indicators. |
 | `timeIncSec` | 0.00625 | — | — | 0.00625 | Control tick period (s) — set to the real loop rate. |
 
 ### Setpoint safety bounds (validate-and-ignore)
@@ -98,6 +101,8 @@ Everything downstream reads only `y*`.
 | `yEvapTemp` | — | 18–105 °C | `TC:EvapTemp` |
 | `yEvapPress` / `ySteamPress` | — | 0.5–35 psia | `AI:EvapPress` / `AI:SteamPress` |
 | `yVaporIn` / `yVaporOut` | — | 18–150 °C | `TC:VaporIn` / `TC:VaporOut` |
+| `yMakeupHtrTemp` | — | 25–160 °C | Makeup-cartridge TC (`TC:MakeupHtr`, E-TC ch6) — overheat/uncover trip |
+| `ySuperHtrTemp` | — | 25–200 °C | Superheat-cartridge TC (`TC:SuperHtr`, E-TC ch7) — overheat trip |
 | `yEvapLevel` | — | 0–4000 ml | `AI:EvapLevel` (sim = `simEvapInv`) — feed level feedback |
 | `yCondLevel` | — | 0–10 | `AI:CondLevel` |
 | `yCondHigh` / `yCondLow` | — | 0/1 | Condensate HIGH / LOW switches |
@@ -171,6 +176,12 @@ Everything downstream reads only `y*`.
 | `simTauSH` | 5.0 | 1 | 15 | 5 | Superheat response (s). |
 | `simSurgeAmp` | 0.06 | 0 | 0.3 | 0.05–0.1 | Production surge amplitude (fraction). |
 | `simFeedNoise` | 2.0 | 0 | 5 | 1–3 | Feed-temp fluctuation (°C RMS). |
+| `simHtrCoverML` | 300 | 100 | 1000 | 300 | Evaporator inventory above which the makeup cartridge stays covered (ml). |
+| `simMakeupCovRise` | 3 | 0 | 20 | 3 | Makeup cartridge surface rise/duty when covered (°C). |
+| `simMakeupRise` | 150 | 50 | 400 | 150 | Extra makeup surface rise/duty when **uncovered** (°C) — drives the trip. |
+| `simSuperRise` | 300 | 100 | 600 | 300 | Superheat cartridge surface rise/duty (°C). |
+| `simTauHtr` | 3.0 | 0.5 | 10 | 3 | Cartridge surface thermal response (s). |
+| `simMakeupHtrTemp` / `simSuperHtrTemp` | 25 | 25 | 200 | — | Sim cartridge surface temps (feed `yMakeupHtrTemp` / `ySuperHtrTemp`). |
 | `simCondHoldMax` | 45 | 0 | 200 | 30–60 | Condensate built in HX before it flows (ml). |
 | `condHighML` | 170 | 60 | 500 | 170 | Tank HIGH level-switch volume (ml). |
 | `condLowML` | 50 | 10 | 150 | 50 | Tank LOW level-switch volume (ml). The 120 ml gap is the cal reference. |
