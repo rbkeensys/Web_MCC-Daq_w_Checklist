@@ -73,6 +73,21 @@ user settings.
 | `maxVaporOut` | 140.0 | 110 | 160 | 140 | Vapor-out over-temp trip (°C). |
 | `timeIncSec` | 0.00625 | — | — | 0.00625 | Control tick period (s) — set to the real loop rate. |
 
+### Setpoint safety bounds (validate-and-ignore)
+
+Each live setpoint is range-checked in `MVR System` every tick. If the entered
+value is **out of bounds it is IGNORED** and the controllers keep the last valid
+value (held in a `*Safe` companion). Set the entered value back in-range to
+resume. Controllers read the `*Safe` var, never the raw input.
+
+| Setpoint | Bound vars | Range | `*Safe` (used by) |
+|---|---|---|---|
+| `productionSet` | `prodSetMax` (0.3) | 0 … prodSetMax L/min | `prodSetSafe` → blower loop |
+| `superheatSet` | `superheatSetMax` (10) | 0 … 10 °C | `superheatSetSafe` → SuperheatControl |
+| `evapTempSet` | `evapTempSetMin` (90), `evapTempSetMax` (110) | 90 … 110 °C | `evapTempSetSafe` → MakeupControl |
+| `blowerRpmSet` | `blowerMaxRpm` (4000) | 0 … 4000 rpm | `blowerRpmSafe` → VFD command |
+| `feedRpmSet` | `feedRpmMax` (300) | 0 … 300 rpm | `feedRpmSafe` → stepper command |
+
 ## 4. Sensor mux — abstracted sensors (`y*`, outputs)
 
 `SensorMux` sets these from real AI/TC (`simEnable=0`) or the sim (`=1`).
