@@ -24,7 +24,9 @@ user settings.
 | Variable | Default | Min | Max | Typical | Meaning |
 |---|---|---|---|---|---|
 | `runSystem` | 0 | 0 | 1 | 0/1 | Master run (RUN button → `buttonVars.runSystem`). |
-| `productionSet` | 0.12 | 0.02 | 0.24 | 0.08–0.18 | **Primary knob** — target distillate rate (L/min). Blower + feed chase it. |
+| `productionSet` | 0.12 | 0.02 | 0.24 | 0.08–0.18 | **Primary knob** — target distillate rate (L/min). Blower + feed chase it. Values outside `[0, prodSetMax]` are **ignored** (safety). |
+| `prodSetMax` | 0.3 | 0.05 | 1.0 | 0.3 | Safety clamp on `productionSet`; an input above this (or below 0) is rejected and the last valid target is kept. |
+| `prodSetSafe` | 0.12 | 0 | `prodSetMax` | =`productionSet` | The **validated** target the controllers actually use (last in-bounds `productionSet`). |
 | `evapTempSet` | 100.0 | 95 | 105 | 100 | Evaporator boiling setpoint (makeup-PI target), °C. |
 | `superheatSet` | 3.0 | 1 | 8 | 2–4 | Vapor superheat setpoint (superheat-PI target), °C. |
 | `evapPressSet` | 14.7 | 10 | 20 | 14.7 | Evaporator pressure reference (psia, informational). |
