@@ -69,7 +69,8 @@ user settings.
 | `condLevelThresh` | 2.5 | 0 | 10 | 2.5 | Real condensate analog level threshold. |
 | `demisterThresh` | 2.5 | 0 | 10 | 2.5 | Demister liquid-present threshold. |
 | `ventOpenDuty` | 0.6 | 0 | 1 | 0.6 | Steam vent opens while makeup duty is above this (startup steam). |
-| `ventCloseDuty` | 0.35 | 0 | 1 | 0.35 | Steam vent closes once makeup duty drops below this (recovery established). |
+| `condLiquidTemp` | 98 | 80 | 100 | 98 | Condensate **outlet** temp below this = liquid → count the flow meter + close the vent (above = steam, ignored). |
+| `condCoolDuty` | 0.4 | 0.1 | 0.8 | 0.4 | Makeup duty below which the condensate cools below boiling (steam→liquid). Higher = shorter steam phase. |
 | `trimHX` | 0 | 0 | 1 | 0/1 | 1 = a feedwater-cooled **trim condenser** is fitted before the flow meter; the cold feed condenses the fraction of venting steam it can (≈15 %) so the meter reads a little during startup. |
 | `prodPerRpm` | 0.00007 | 0 | 0.001 | — | Production estimate (L/min) per blower rpm — used for `feedInvEst` while venting (flow meter reads 0). Calibrate to your blower. |
 | `blowerProdEst` | 0 | 0 | — | — | Blower-throughput production estimate (output), `prodPerRpm × rpm × boiling-readiness`. |
@@ -111,7 +112,8 @@ Everything downstream reads only `y*`.
 | `yEvapLevel` | — | 0–4000 ml | `AI:EvapLevel` (sim = `simEvapInv`) — feed level feedback |
 | `yCondLevel` | — | 0–10 | `AI:CondLevel` |
 | `yCondHigh` / `yCondLow` | — | 0/1 | Condensate HIGH / LOW switches |
-| `yCondFlow` | — | 0–0.3 L/min | `AI:CondFlow` |
+| `yCondFlow` | — | 0–0.3 L/min | `AI:CondFlow` (steam/air spins it while venting — ignored until `condLiquid`) |
+| `yCondTemp` | — | 25–106 °C | Condensate **outlet** temp (`TC:CondTemp`, ch4) — steam vs liquid gate |
 | `yDemisterWater` / `yDemisterFlood` | — | 0–5 | Demister liquid / flood |
 
 ## 5. Derived signals & control outputs
@@ -131,7 +133,8 @@ Everything downstream reads only `y*`.
 | `bypassV` | — | 0–10 V | Anti-surge bypass command (`AO:BypassValve`). |
 | `vfdRpmRead`,`vfdOutVolt/Amps/Pwr`,`vfdTorque`,`vfdEnable`,`accel`,`accelraw`,`sink` | — | — | Blower VFD telemetry (`monitorMotor`). |
 | `condPumpOn` | 0 | 0/1 | Condensate pump (`DO:CondPump`), 2-level hysteresis. |
-| `ventOpen` | 0 | 0/1 | Steam vent (`DO:VentValve`) — open during the steamy startup, closed once makeup backs off. |
+| `ventOpen` | 0 | 0/1 | Steam vent (`DO:VentValve`) = NOT `condLiquid` — open while the output is steam. |
+| `condLiquid` | 0 | 0/1 | 1 = condensate output is liquid (`yCondTemp < condLiquidTemp`): count the flow meter + close vent. 0 = steam (ignore meter, vent). |
 
 ## 6. Condensate flow-meter self-calibration (control state)
 
