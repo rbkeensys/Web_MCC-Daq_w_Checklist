@@ -70,6 +70,9 @@ user settings.
 | `demisterThresh` | 2.5 | 0 | 10 | 2.5 | Demister liquid-present threshold. |
 | `ventOpenDuty` | 0.6 | 0 | 1 | 0.6 | Steam vent opens while makeup duty is above this (startup steam). |
 | `ventCloseDuty` | 0.35 | 0 | 1 | 0.35 | Steam vent closes once makeup duty drops below this (recovery established). |
+| `trimHX` | 0 | 0 | 1 | 0/1 | 1 = a feedwater-cooled **trim condenser** is fitted before the flow meter; the cold feed condenses the fraction of venting steam it can (≈15 %) so the meter reads a little during startup. |
+| `prodPerRpm` | 0.00007 | 0 | 0.001 | — | Production estimate (L/min) per blower rpm — used for `feedInvEst` while venting (flow meter reads 0). Calibrate to your blower. |
+| `blowerProdEst` | 0 | 0 | — | — | Blower-throughput production estimate (output), `prodPerRpm × rpm × boiling-readiness`. |
 | `maxEvapPress` | 25.0 | 15 | 40 | 25 | Evaporator over-pressure trip (psia). |
 | `maxSteamPress` | 35.0 | 20 | 50 | 35 | Steam-side over-pressure trip (psia). |
 | `maxVaporOut` | 140.0 | 110 | 160 | 140 | Vapor-out over-temp trip (°C). |
