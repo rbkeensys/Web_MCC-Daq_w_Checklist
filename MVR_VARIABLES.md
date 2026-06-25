@@ -68,6 +68,8 @@ user settings.
 | `superheatGraceTemp` | 90 | 50 | 100 | 90 | Superheat interlock arms only above this (°C). |
 | `condLevelThresh` | 2.5 | 0 | 10 | 2.5 | Real condensate analog level threshold. |
 | `demisterThresh` | 2.5 | 0 | 10 | 2.5 | Demister liquid-present threshold. |
+| `ventOpenDuty` | 0.6 | 0 | 1 | 0.6 | Steam vent opens while makeup duty is above this (startup steam). |
+| `ventCloseDuty` | 0.35 | 0 | 1 | 0.35 | Steam vent closes once makeup duty drops below this (recovery established). |
 | `maxEvapPress` | 25.0 | 15 | 40 | 25 | Evaporator over-pressure trip (psia). |
 | `maxSteamPress` | 35.0 | 20 | 50 | 35 | Steam-side over-pressure trip (psia). |
 | `maxVaporOut` | 140.0 | 110 | 160 | 140 | Vapor-out over-temp trip (°C). |
@@ -126,6 +128,7 @@ Everything downstream reads only `y*`.
 | `bypassV` | — | 0–10 V | Anti-surge bypass command (`AO:BypassValve`). |
 | `vfdRpmRead`,`vfdOutVolt/Amps/Pwr`,`vfdTorque`,`vfdEnable`,`accel`,`accelraw`,`sink` | — | — | Blower VFD telemetry (`monitorMotor`). |
 | `condPumpOn` | 0 | 0/1 | Condensate pump (`DO:CondPump`), 2-level hysteresis. |
+| `ventOpen` | 0 | 0/1 | Steam vent (`DO:VentValve`) — open during the steamy startup, closed once makeup backs off. |
 
 ## 6. Condensate flow-meter self-calibration (control state)
 
