@@ -67,7 +67,11 @@ const ctrl = [
  ["blowdownFrac","0.05","-","Feed excess over distillate (blowdown / concentrate purge)."],
  ["prodPerRpm","0.00007","(L/min)/rpm","Blower->production estimate (feedInvEst while venting). Calibrate."],
  ["surgeThresh / surgeGain","1.0 / 5.0","C / (V/C)","Anti-surge bypass: opens below this dT, this many V/C."],
- ["condLiquidTemp","98","C","Condensate OUTLET temp below this = liquid -> count meter + close vent."],
+ ["condLevelThresh","2.5","V/units","AI:CondLevel above this = tube ~3/4 full -> start the condensate pump (the point sensor trip)."],
+ ["condEmptyFlow","0.5","L/min","Pump-outlet flow below this = tube DRY. Set between the max production trickle and the condensate-pump rate."],
+ ["condEmptyDebounce","2.0","s","Dry must persist this long before the pump stops (debounce)."],
+ ["condPumpMinRun / condPumpMaxRun","1 / 90","s","Min run before dry-detect is armed / safety timeout if it never goes dry (sets condPumpFault)."],
+ ["condLiquidTemp","98","C","Vent only now: condensate outlet below this = liquid -> close the steam vent (DO:VentValve)."],
  ["timeIncSec","0.00625","s","Control tick period (set to the real loop rate)."],
 ];
 const startup = [
@@ -77,7 +81,8 @@ const startup = [
  ["feedPrimeML","1500","ml","Volume PRIME dead-reckons before heat (~half a ~3L HX side)."],
  ["feedPrimeRpm","120","rpm","Feed rpm during the PRIME fill."],
  ["feedInvEst","0 (->~1500)","ml","Feed-side inventory dead-reckon: feed in - distillate out. Watch for 'getting low'."],
- ["condHighML / condLowML","170 / 50","ml","Catch-tank HIGH / LOW switch volumes (120ml between = cal reference)."],
+ ["condTubeTripML","130","ml","Volume in the HX bottom tube at the ~3/4 sensor (1.16in ID x 7.5in). The nominal distillate batch."],
+ ["condTubeFullML","173","ml","Full HX bottom tube volume (1.16in ID x 10in deep)."],
 ];
 const simParams = [
  ["simEnable / simDriveHW","0 / 0","Sim master / hardware-in-the-loop."],
@@ -101,6 +106,7 @@ const simParams = [
  ["simHtrCoverML","300 ml","Evaporator inventory above which the makeup cartridge stays covered."],
  ["simMakeupRise / simSuperRise","150 / 300 C","Cartridge surface rise per duty (uncovered makeup / superheat)."],
  ["condCoolDuty","0.4","(legacy) makeup-duty cool threshold -- superseded by the subcool-HX model."],
+ ["simPumpMlMin","1100","Condensate-pump flow rate (ml/min) -- must exceed production so the pump empties the tube; also the sim meter reading while pumping liquid."],
  ["simFlowCalErr / simFlowNoise","1.12 / 0.05","Flow-meter mis-cal (reads ~12% high) / rate noise."],
  ["simSurgeAmp / simFeedNoise","0.06 / 2.0","Production surge amplitude / feed-temp fluctuation (C RMS)."],
 ];
@@ -113,12 +119,14 @@ const simState = [
  ["simEvapPress / simSteamPress","Evaporator / steam-side pressure (psia)."],
  ["simProd","Vapor production (boil-off) rate (L/min)."],
  ["simEvapInv","True evaporator inventory (ml); prime fills, feed holds evapLevelSet."],
- ["simCondVol","Condensate-tank volume (ml)."],
- ["simCondFlow","Sim flow-meter reading (steam while venting, liquid once collecting)."],
+ ["simCondVol","Condensate volume in the HX bottom tube (ml) -- sim state."],
+ ["simCondFlow","Sim pump-outlet flow meter (L/min): pump rate while liquid, drops to the trickle when dry."],
  ["simBlowerRpm","Actual blower rpm (lags the command)."],
- ["condLiquid / ventOpen","Liquid-vs-steam gate / steam vent (DO:VentValve = NOT condLiquid)."],
+ ["condLiquid / ventOpen","Liquid-vs-steam gate (vent only) / steam vent (DO:VentValve)."],
  ["simHeatLoss / simHeatIn","Standby heat loss / total heat in (W) -- monitoring."],
- ["condCalFactor / condProduct","Running flow-meter cal / lifetime calibrated distillate (ml)."],
+ ["condPumpOn / condProduct","Condensate pump command / lifetime calibrated distillate total (ml)."],
+ ["condBatchMl / condRateLpm","Last pumped batch (ml) / measured production rate = batch / fill time (L/min)."],
+ ["condCalFactor / condPumpFault","Flow-meter calibration (bench, x raw) / 1 = pump hit timeout without going dry."],
 ];
 
 // ---- calibration tests ----
@@ -219,8 +227,8 @@ const doc = new Document({
       EQ("duty = clamp( kpSuper * err + I , 0 , 1 )       ->  DO:SuperHtr  (superDuty)"),
 
       H2("2.6  Blower production control (ProductionControl)"),
-      P("Trims the blower (the compressor / vapor pump) to hold the target distillate rate. Measured production = the calibrated condensate flow meter; while venting (meter ~0) it uses a blower-throughput estimate. cdt accelerates the integral in sim so it converges at the same wall-clock feel."),
-      EQ("measProd = yCondFlow * condCalFactor          (when condLiquid; else blowerProdEst)"),
+      P("Trims the blower (the compressor / vapor pump) to hold the target distillate rate. Measured production now comes from the condensate BATCHES (see 2.9): each pump-to-dry cycle meters a known distillate volume, and volume / fill-time is the average production rate -- the only rate a single point-level sensor can give. Updated once per empty cycle (condRateLpm) and held between; before the first batch the blower holds nominal rpm. cdt accelerates the integral in sim so it converges at the same wall-clock feel."),
+      EQ("measProd = condRateLpm                         (batch volume / fill time)"),
       EQ("prodMeas += (measProd - prodMeas) * smoothing"),
       EQ("blowerRpmSet = clamp( blowerRpmSet + kProd*(prodSetSafe - prodMeas)*cdt , min , max )"),
       P([new TextRun("Blower estimate (used while venting and for feedInvEst): "), code("blowerProdEst = prodPerRpm * blowerRpmSafe * clamp((eT-95)/5,0,1)"), new TextRun(".")]),
@@ -235,11 +243,13 @@ const doc = new Document({
       P("Positive-displacement feed pumped IN minus calibrated distillate OUT -- a level estimate that needs no sensor. While venting (meter ~0) it subtracts the blower estimate instead, so it tracks through the steamy startup."),
       EQ("feedInvEst += feedInMl - vaporOutMl     ; vaporOutMl = metered (liquid) | blower est (steam)"),
 
-      H2("2.9  Condensate pump + flow-meter self-cal (CondensatePump)"),
-      P("2-level pump (on at HIGH, off at LOW). The flow meter is integrated only while the condensate is LIQUID, and re-calibrated each fill against the known 120 ml (condHighML - condLowML)."),
-      EQ("condLiquid = yCondTemp < condLiquidTemp          (hysteresis)"),
-      EQ("ventOpen   = NOT condLiquid                      ->  DO:VentValve"),
-      EQ("on each LOW->HIGH fill:  condCalFactor <- fit so the integrated raw = 120 ml"),
+      H2("2.9  Condensate -- single point sensor, pump-to-dry (CondensatePump)"),
+      P("No separate catch tank: condensate collects in the bottom TUBE of the HX. One point-level sensor ~3/4 up the tube (AI:CondLevel > condLevelThresh -> yCondHigh) starts the pump. The flow meter sits on the PUMP OUTLET, so it directly meters distillate leaving. The pump runs until the tube is DRY: when it sucks air the metered flow drops to the incoming trickle (below condEmptyFlow) -- that sustained drop, debounced, is the empty signal. Pumped volume per cycle is the distillate batch; batch / fill-time is the production rate."),
+      EQ("start pump when  AI:CondLevel > condLevelThresh   (tube ~3/4 full)"),
+      EQ("stop  when  yCondFlow < condEmptyFlow for condEmptyDebounce   (tube dry)  [or condPumpMaxRun]"),
+      EQ("condBatchMl = integral(yCondFlow) * condCalFactor    ;  condProduct += condBatchMl"),
+      EQ("condRateLpm = condBatchMl / fill-cycle-time     ->  ProductionControl (2.6)"),
+      P([new TextRun("The steam vent (DO:VentValve, "), code("ventOpen = yCondTemp > condLiquidTemp"), new TextRun(") still purges steam/air at startup, but the flow meter no longer depends on it -- the level sensor + pump gate the metering.")]),
 
       H2("2.10  Anti-surge bypass (BlowerControl)"),
       EQ("bypassV = clamp( (surgeThresh - deltaT) * surgeGain , 0 , 10 )   ->  AO:BypassValve"),
@@ -346,11 +356,14 @@ const doc = new Document({
         ["Energy balance:  Qmakeup + Qsteam = Qboil + Qfeed + Qloss",
          "Qsteam = simUAsteam*(steamChest - eT)  ->  solve for simUAsteam from the measured makeup"]),
 
-      ...calTest("4.7  Catch-tank levels  ->  condHighML, condLowML",
-        "The two level-switch volumes (and the 120 ml cal reference).",
-        ["Fill the catch tank slowly; record the volume (graduated / scale) at which the LOW switch and then the HIGH switch trip."],
-        ["condLowML  = volume at the LOW switch",
-         "condHighML = volume at the HIGH switch     (HIGH - LOW = the self-cal reference)"]),
+      ...calTest("4.7  Condensate flow meter + tube  ->  condCalFactor, condEmptyFlow, condTubeTripML",
+        "Pump-outlet flow-meter calibration, the dry threshold, and the tube/sensor volume.",
+        ["Bench: pump a known liquid volume through the meter; record pulses (or the app's integrated raw) to get pulses/L -> condCalFactor.",
+         "Run the condensate pump empty (dry) and note its steady flow reading, then pumping liquid and note that reading -- the dry threshold sits between them.",
+         "Fill the HX bottom tube to the sensor trip and measure the volume pumped out (the app shows condBatchMl)."],
+        ["condCalFactor = known_volume / metered_raw     (bench, fixed)",
+         "condEmptyFlow ~ halfway between the dry trickle (~production) and the full pump rate",
+         "condTubeTripML = measured batch per cycle (geometric ~130 ml at 3/4 of the 1.16in x 10in tube)"]),
 
       ...calTest("4.8  Pump cal  ->  feedLPerStep   (already done)",
         "Peristaltic feed-pump volume per motor step.",
