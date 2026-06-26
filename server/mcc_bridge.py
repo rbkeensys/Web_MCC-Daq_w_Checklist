@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.1.0"  # Counter-sourced AI channels + PWM-mode DOs (set_pwm_duty/pwm_step). Fixed _dac_counts for multi-board
+__version__ = "2.2.0"  # Counter 'total' mode: a counter-sourced AI can report a rollover-safe CUMULATIVE total (eng units) as well as the windowed rate (condensate totalizer). Prev 2.1.0: counter-sourced AI channels + PWM-mode DOs
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -171,7 +171,8 @@ class MCCBridge:
                             "index": gidx, "board": board_cfg.boardNum, "ctr": int(cnum),
                             "K": float(getattr(ch, "pulses_per_unit", 1.0) or 1.0),
                             "window": float(getattr(ch, "counter_window_s", 1.0) or 1.0),
-                            "prev_count": None, "prev_t": None, "rate": 0.0,
+                            "mode": str(getattr(ch, "counter_mode", "rate") or "rate"),
+                            "prev_count": None, "prev_t": None, "rate": 0.0, "cum": 0,
                         })
                         if HAVE_MCCULW:
                             try:
@@ -262,21 +263,30 @@ class MCCBridge:
                     count = ul.c_in_32(c["board"], c["ctr"])
                 except Exception:
                     count = None
-            if count is None:
-                ai_scaled[idx] = c["rate"]      # hold last good rate on read failure
+            mode = c.get("mode", "rate")
+            if count is None:                    # hold last good value on read failure
+                ai_scaled[idx] = (c["cum"] / c["K"]) if mode == "total" else c["rate"]
                 continue
             if c["prev_count"] is None:          # prime on first read
                 c["prev_count"] = count
                 c["prev_t"] = now
                 ai_scaled[idx] = 0.0
                 continue
-            dt = now - c["prev_t"]
-            if dt >= c["window"] and dt > 0:
-                dcount = (count - c["prev_count"]) & 0xFFFFFFFF   # 32-bit rollover-safe
-                c["rate"] = (dcount / dt) * 60.0 / c["K"]         # units per minute
+            # rollover-safe pulse delta since the last read (32-bit hardware counter)
+            dcount = (count - c["prev_count"]) & 0xFFFFFFFF
+            if mode == "total":
+                # accumulate every read into a Python big-int -> never overflows,
+                # survives any number of 32-bit wraps. Report cumulative eng units.
+                c["cum"] += dcount
                 c["prev_count"] = count
-                c["prev_t"] = now
-            ai_scaled[idx] = c["rate"]
+                ai_scaled[idx] = c["cum"] / c["K"]
+            else:
+                dt = now - c["prev_t"]
+                if dt >= c["window"] and dt > 0:
+                    c["rate"] = (dcount / dt) * 60.0 / c["K"]     # units per minute
+                    c["prev_count"] = count
+                    c["prev_t"] = now
+                ai_scaled[idx] = c["rate"]
 
     # ---------------- PWM digital outputs ----------------
     def is_pwm(self, index) -> bool:

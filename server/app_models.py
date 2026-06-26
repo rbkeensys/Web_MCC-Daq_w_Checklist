@@ -13,7 +13,7 @@ NEW STRUCTURE:
 This allows multiple E-1608 and E-TC boards, each with their own channels.
 """
 
-__version__ = "2.1.0"  # PWM DO mode (DigitalOutCfg.pwmPeriodMs) + counter-sourced AI fields. Fixed missing PID fields
+__version__ = "2.2.0"  # AnalogCfg.counter_mode ('rate'|'total'): a counter channel can now report a rollover-safe cumulative total (eng units) for the condensate totalizer, in addition to the windowed rate. Prev 2.1.0: PWM DO mode + counter-sourced AI fields
 
 from pydantic import BaseModel
 from typing import List, Optional
@@ -33,6 +33,7 @@ class AnalogCfg(BaseModel):
     counter_num: Optional[int] = None
     pulses_per_unit: float = 1.0       # K-factor, pulses per engineering unit (e.g. 22000 pulses/L)
     counter_window_s: float = 1.0      # rate averaging window, seconds
+    counter_mode: str = "rate"         # 'rate' = eng-units/min (windowed); 'total' = cumulative eng-units (rollover-safe)
 
 class DigitalOutCfg(BaseModel):
     name: str = "DO"
