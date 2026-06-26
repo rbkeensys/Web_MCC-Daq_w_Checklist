@@ -90,6 +90,7 @@ const simParams = [
  ["simCevap","60000 J/C","Evaporator thermal mass -- warm-up lag."],
  ["simUAloss","3 W/C","Standby heat-loss coefficient (insulated rig). Drives simHeatLoss."],
  ["simPRmax / simCompGain","1.25 / 60","Blower pressure ratio / compression superheat (C per PR-1)."],
+ ["simAtmPress","14.7","Atmospheric / vent reference (psia). Evaporator pressure is floored here (non-condensable air + vent) until Psat(eT) exceeds it at boiling, so it stays flat through warm-up then lifts at Tsat. Set to local barometric."],
  ["simBlowerRated","3450 rpm","Blower rated speed (blowFrac = rpm/this)."],
  ["simVaporMax","0.25 L/min","Vapor production at full blower + full boil (production scale)."],
  ["simLatentPerLpm","38000 W","Latent heat per L/min of production (~ real water)."],
@@ -254,6 +255,9 @@ const doc = new Document({
       EQ("simProd  -> compEff * simVaporMax * boilReady * surge      (L/min, blower-driven)"),
 
       H2("3.2  Pressures, deltaT (Antoine)"),
+      P("The vessel holds non-condensable air and is vented at startup, so the absolute pressure sits at atmospheric and only lifts off as the water's vapor pressure reaches it near boiling -- NOT during warm-up. The pure-vapor Psat is therefore floored at simAtmPress; the steam side inherits the flat-then-rise through PR."),
+      EQ("PsatEvap = Antoine(eT)   (water saturation pressure, psia)"),
+      EQ("simEvapPress -> max( PsatEvap , simAtmPress )    (flat ~atm below ~100C, lifts at Tsat)"),
       EQ("PR = 1 + (simPRmax-1)*compEff ;  simSteamPress = simEvapPress * PR"),
       EQ("Tsat(P)  via Antoine ;  deltaT = steamTsat - evapTsat"),
 
