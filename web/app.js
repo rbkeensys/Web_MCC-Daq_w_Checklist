@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.63";  // 2026-06-26: analog channel editor gains a counter "mode" selector (rate | total) next to K/win -- exposes AnalogCfg.counter_mode so a counter channel can report a rollover-safe cumulative TOTAL (condensate totalizer / AI:CondTotal) without editing config.json. Pairs with mcc_bridge 2.2.0 + app_models 2.2.0. Prev 2.1.62: LOG REPLAY FIX -- makeTickFromRow now strips the gvar_ prefix on static-var columns (like sv_) so replayed static-var charts get data; previously gvar_simEvapTemp was stored under that literal key while charts look up the bare name (simEvapTemp) -> every static-var chart was empty on log read-back ("almost no data", since the MVR dashboard is mostly sim* statics). Prev 2.1.61: Sim panel gains a "Reset sim to ambient" button -- POSTs static.simReset=1; the MVR System expression snaps the plant + control state back to cold/ambient startup and self-clears (instant cool-down). Prev 2.1.60: PWM DO indicators -- readSelection('do') now returns the RAW value (was boolean'd to 0/1), and the indicator BLINKS when a watched DO holds a partial PWM duty (0<v<1): lit for `duty` of each ~0.8s cycle, solid at full duty, off at 0. Pairs with cpp_expr_backend fix (do_writes carried the raw duty, was thresholded to bool>=1 -> partial duties read as off). Prev 2.1.59: top bar -- removed Logic + Math buttons (handlers kept as harmless no-ops; editor code intact), added a "Sim" button opening a Simulator panel with two checkboxes (Simulate inputs=simEnable, Hardware enabled/HIL=simDriveHW) backed by static vars + a live mode status line so suppressed outputs are never a mystery. Prev 2.1.58: stepper holding-current "Hold Pr" default corrected to Pr5.03 (0x0197, confirmed DM556RS standstill current reg) from the Pr5.01 guess. Prev 2.1.57: drive widget Reset now also zeroes the stepper step count (POST .../zero_position) alongside alarm reset; stepper library editor gains "Hold %" (standstill/holding current as % of peak when idle, blank=drive default) + editable "Hold Pr" register (default Pr5.01, datasheet-unverified). Pairs with stepper_driver 1.7.0 + server.py 2.11.6. Prev 2.1.56: Stepper Units editor gains a "Log IO" checkbox (per-instance inst.io_log -> ctrl.log_io; Modbus TX/RX logging now OFF by default). Pairs with stepper_driver 1.6.2 + server.py 2.11.4 (undelivered-command warning + stepper on-change cache cleared on rebuild). Prev 2.1.55: NEW unified "MOD Drv" widget (type 'drive') -- pick VFD or stepper in settings then the instance; live status + manual controls (VFD: RPM/Fwd/Rev/Stop/Reset; stepper: velocity/Enable/Fwd/Rev/Stop/Disable/Reset) via /api/{vfd,stepper}/{name}/*. Palette "VFD" button -> "MOD Drv" (old 'vfd' widgets still render). Stepper Units editor gains per-instance Modbus reliability fields (Retries/Gap ms/Reply ms). Pairs with server.py 2.11.3 + stepper_driver 1.6.1. Prev 2.1.54: expression help cheatsheet now lists the SWITCH/CASE/DEFAULT/ENDSWITCH block (pairs with expr_engine.py 2.5.0). Note: the live expr-debug branch colorizer doesn't yet tint SWITCH case bodies (cosmetic only; SWITCH works in both backends). Prev 2.1.53: MOD Drv Save is now SCOPED to the active domain -- VFD tabs save only VFD libs+instances, Stepper tabs save only stepper config+instances (button relabels "Save VFD"/"Save Steppers"). Previously one Save PUT both vfd/instances AND stepper/instances every time, so saving steppers rebuilt + re-commanded the running VFD and surfaced VFD connect results (the "VFD isn't there" flakiness came from that needless rebuild probe). Pair with server.py 2.11.2 (stepper PUT result normalization). Prev 2.1.52: FIX stepper-unit Port column showed "[object Object]" -- the editor appended the portSelectControl() return object (psc) into the cell instead of psc.wrap (the VFD editor already did .wrap correctly). Now el('td',{},psc.wrap). Prev 2.1.51: VFD instance editor gains a "Poll ms" column (per-instance poll_rate_ms; blank/unset shows 250 = 4/sec default, 0 = continuous) -- sets how fast the worker reads the drive over Modbus; saved to vfd_instances.json and applied on rebuild. Prev 2.1.50: chart "Keep×" spinner (1-100, default 4) sets how much history to retain in multiples of the span -- live keeps keep*span of scrollback, paused keeps ~keep*span split around the freeze (so memory is user-bounded; 100 ~= 100 spans). Filter[Hz] box narrowed to make room. Prev 2.1.49: paused charts stay filled -- the live-buffer trim now also honors the Pause-button flag (w.opts.paused), not only the zoom/pan freeze (w.view.paused); a button-paused chart previously kept doing buf.shift() each tick and wiped its left edge as new samples arrived. Span-change trim is skipped while paused too. Pairs with vfd_driver.py worker carry-forward (holds the last-good VFD reading instead of emitting 0 on a missed Modbus read, so .RPM etc. no longer drop to 0 during AO-slider command bursts). Prev 2.1.48: startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
+const UI_VERSION = "2.1.64";  // 2026-06-27: CTR (hardware counter) is a first-class signal type in the UI -- getAllCounters(), a "Counters (CTR)" config editor section (name/ctr#/K/mode/win/units) with + Add CTR, 'ctr' added to every signal-selection picker (createSignalSelector/labelFor/kind lists/numericKinds), readSelection('ctr') reads state.ctr for live charts, and msg.ctr ingested into state. Counter fields removed from the analog editor (counters are no longer AI). Pairs with the 19-arg CTR DLL (app_models 2.3.0 / mcc_bridge 2.3.0 / expr_to_cpp 3.7.0 / cpp_expr_backend 3.4.0 / expr_engine 2.7.0 / server CTR frame). Prev 2.1.63: analog counter 'mode' selector (rate | total) next to K/win -- exposes AnalogCfg.counter_mode so a counter channel can report a rollover-safe cumulative TOTAL (condensate totalizer / AI:CondTotal) without editing config.json. Pairs with mcc_bridge 2.2.0 + app_models 2.2.0. Prev 2.1.62: LOG REPLAY FIX -- makeTickFromRow now strips the gvar_ prefix on static-var columns (like sv_) so replayed static-var charts get data; previously gvar_simEvapTemp was stored under that literal key while charts look up the bare name (simEvapTemp) -> every static-var chart was empty on log read-back ("almost no data", since the MVR dashboard is mostly sim* statics). Prev 2.1.61: Sim panel gains a "Reset sim to ambient" button -- POSTs static.simReset=1; the MVR System expression snaps the plant + control state back to cold/ambient startup and self-clears (instant cool-down). Prev 2.1.60: PWM DO indicators -- readSelection('do') now returns the RAW value (was boolean'd to 0/1), and the indicator BLINKS when a watched DO holds a partial PWM duty (0<v<1): lit for `duty` of each ~0.8s cycle, solid at full duty, off at 0. Pairs with cpp_expr_backend fix (do_writes carried the raw duty, was thresholded to bool>=1 -> partial duties read as off). Prev 2.1.59: top bar -- removed Logic + Math buttons (handlers kept as harmless no-ops; editor code intact), added a "Sim" button opening a Simulator panel with two checkboxes (Simulate inputs=simEnable, Hardware enabled/HIL=simDriveHW) backed by static vars + a live mode status line so suppressed outputs are never a mystery. Prev 2.1.58: stepper holding-current "Hold Pr" default corrected to Pr5.03 (0x0197, confirmed DM556RS standstill current reg) from the Pr5.01 guess. Prev 2.1.57: drive widget Reset now also zeroes the stepper step count (POST .../zero_position) alongside alarm reset; stepper library editor gains "Hold %" (standstill/holding current as % of peak when idle, blank=drive default) + editable "Hold Pr" register (default Pr5.01, datasheet-unverified). Pairs with stepper_driver 1.7.0 + server.py 2.11.6. Prev 2.1.56: Stepper Units editor gains a "Log IO" checkbox (per-instance inst.io_log -> ctrl.log_io; Modbus TX/RX logging now OFF by default). Pairs with stepper_driver 1.6.2 + server.py 2.11.4 (undelivered-command warning + stepper on-change cache cleared on rebuild). Prev 2.1.55: NEW unified "MOD Drv" widget (type 'drive') -- pick VFD or stepper in settings then the instance; live status + manual controls (VFD: RPM/Fwd/Rev/Stop/Reset; stepper: velocity/Enable/Fwd/Rev/Stop/Disable/Reset) via /api/{vfd,stepper}/{name}/*. Palette "VFD" button -> "MOD Drv" (old 'vfd' widgets still render). Stepper Units editor gains per-instance Modbus reliability fields (Retries/Gap ms/Reply ms). Pairs with server.py 2.11.3 + stepper_driver 1.6.1. Prev 2.1.54: expression help cheatsheet now lists the SWITCH/CASE/DEFAULT/ENDSWITCH block (pairs with expr_engine.py 2.5.0). Note: the live expr-debug branch colorizer doesn't yet tint SWITCH case bodies (cosmetic only; SWITCH works in both backends). Prev 2.1.53: MOD Drv Save is now SCOPED to the active domain -- VFD tabs save only VFD libs+instances, Stepper tabs save only stepper config+instances (button relabels "Save VFD"/"Save Steppers"). Previously one Save PUT both vfd/instances AND stepper/instances every time, so saving steppers rebuilt + re-commanded the running VFD and surfaced VFD connect results (the "VFD isn't there" flakiness came from that needless rebuild probe). Pair with server.py 2.11.2 (stepper PUT result normalization). Prev 2.1.52: FIX stepper-unit Port column showed "[object Object]" -- the editor appended the portSelectControl() return object (psc) into the cell instead of psc.wrap (the VFD editor already did .wrap correctly). Now el('td',{},psc.wrap). Prev 2.1.51: VFD instance editor gains a "Poll ms" column (per-instance poll_rate_ms; blank/unset shows 250 = 4/sec default, 0 = continuous) -- sets how fast the worker reads the drive over Modbus; saved to vfd_instances.json and applied on rebuild. Prev 2.1.50: chart "Keep×" spinner (1-100, default 4) sets how much history to retain in multiples of the span -- live keeps keep*span of scrollback, paused keeps ~keep*span split around the freeze (so memory is user-bounded; 100 ~= 100 spans). Filter[Hz] box narrowed to make room. Prev 2.1.49: paused charts stay filled -- the live-buffer trim now also honors the Pause-button flag (w.opts.paused), not only the zoom/pan freeze (w.view.paused); a button-paused chart previously kept doing buf.shift() each tick and wiped its left edge as new samples arrived. Span-change trim is skipped while paused too. Pairs with vfd_driver.py worker carry-forward (holds the last-good VFD reading instead of emitting 0 on a missed Modbus read, so .RPM etc. no longer drop to 0 during AO-slider command bursts). Prev 2.1.48: startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -683,6 +683,7 @@ function updateGaugesAndBarsFromReplayIndex(){
   if (msg.ao) state.ao = msg.ao;
   if (msg.do) state.do = msg.do;
   if (msg.tc) state.tc = msg.tc;
+  if (msg.ctr) state.ctr = msg.ctr;
   if (msg.pid) state.pid = msg.pid;
   if (msg.motors) state.motors = msg.motors;
 
@@ -1974,6 +1975,25 @@ function getAllAnalogs(cfg) {
   }
 }
 
+function getAllCounters(cfg) {
+  // Hardware counters (CTR) -- a first-class input type, separate from AI.
+  try {
+    if (!cfg) return [];
+    const all = [];
+    if (cfg.boards1608 && Array.isArray(cfg.boards1608)) {
+      cfg.boards1608.forEach(board => {
+        if (board && board.enabled && board.counters && Array.isArray(board.counters)) {
+          all.push(...board.counters);
+        }
+      });
+    }
+    return all;
+  } catch (e) {
+    console.error('[getAllCounters] Error:', e);
+    return [];
+  }
+}
+
 function getAllDigitalOutputs(cfg) {
   try {
     if (!cfg) return [];
@@ -2137,6 +2157,7 @@ function feedTick(msg){
   if (msg.ao)  state.ao  = msg.ao;
   if (msg.do)  state.do  = msg.do;
   if (msg.tc)  state.tc  = msg.tc;
+  if (msg.ctr) state.ctr = msg.ctr;
   if (msg.pid) state.pid = msg.pid;
   if (msg.motors) state.motors = msg.motors;
   if (msg.le) state.le = msg.le;
@@ -2918,6 +2939,7 @@ async function _collectSignalNames() {
   getAllAnalogOutputs(cfg).forEach((a, i)  => put('ao' + i, a && a.name));
   getAllDigitalOutputs(cfg).forEach((d, i) => put('do' + i, d && d.name));
   getAllThermocouples(cfg).forEach((t, i)  => put('tc' + i, t && t.name));
+  getAllCounters(cfg).forEach((c, i)       => put('ctr' + i, c && c.name));
   (window.exprCache?.expressions || []).forEach((e, i) => put('expr' + i, e && e.name));
   (window.mathCache?.operators   || []).forEach((m, i) => put('math' + i, m && m.name));
   (window.pidCache?.loops        || []).forEach((p, i) => {
@@ -3949,6 +3971,13 @@ async function createSignalSelector(kind, currentIndex, onChange) {
         index: i,
         name: item.name || `TC${i}`
       }));
+    } else if (kind === 'ctr') {
+      const cfg = await (await fetch('/api/config')).json();
+      const list = getAllCounters(cfg);
+      items = list.map((item, i) => ({
+        index: i,
+        name: item.name || `CTR${i}`
+      }));
     } else if (kind === 'pid' || kind === 'pid_u') {
       const data = await (await fetch('/api/pid')).json();
       items = (data.loops || []).map((loop, i) => ({
@@ -4327,7 +4356,7 @@ function openWidgetSettings(w) {
         s.displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
         s.displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
 
-        const kindSel = selectEnum(['ai', 'ao', 'do', 'tc', 'pid', 'math', 'expr', 'button', 'static', 'scale'], s.kind || 'ai', async v => {
+        const kindSel = selectEnum(['ai', 'ao', 'do', 'tc', 'ctr', 'pid', 'math', 'expr', 'button', 'static', 'scale'], s.kind || 'ai', async v => {
           s.kind = v;
           s.name = s.name || labelFor(s);
           // Rebuild selector when kind changes
@@ -4496,7 +4525,7 @@ function openWidgetSettings(w) {
 
           // Signal-mode kind+selector pair
           const signalKindSel = selectEnum(
-            ['ai', 'ao', 'do', 'tc', 'pid', 'math', 'expr', 'button', 'static', 'scale'],
+            ['ai', 'ao', 'do', 'tc', 'ctr', 'pid', 'math', 'expr', 'button', 'static', 'scale'],
             initialSel.kind,
             () => {}  // wired below after we have a closure to rebuild signalSel
           );
@@ -4546,7 +4575,7 @@ function openWidgetSettings(w) {
                 // (or the kind-change handler's rebuild) will fix it up.
                 return;
               }
-              const numericKinds = ['ai','ao','do','tc','pid','math','le','expr','scale'];
+              const numericKinds = ['ai','ao','do','tc','ctr','pid','math','le','expr','scale'];
               const index = numericKinds.includes(kind) ? (parseInt(rawIdx, 10) || 0) : rawIdx;
               s.target = { mode: 'signal', sel: { kind, index } };
             }
@@ -5054,7 +5083,7 @@ function openWidgetSettings(w) {
     // (mode 'fixed' = number, mode 'signal' = signal selector). We build the
     // signal selectors asynchronously and swap them in when they mount, same
     // pattern target-line uses.
-    const TARGET_KINDS = ['ai','ao','do','tc','pid','math','expr','button','static','scale'];
+    const TARGET_KINDS = ['ai','ao','do','tc','ctr','pid','math','expr','button','static','scale'];
 
     /**
      * Build a row of widgets that lets the user edit one operand of a
@@ -5100,7 +5129,7 @@ function openWidgetSettings(w) {
           const kind = kindSel.value;
           let rawIdx = sigSel.value;
           if (rawIdx === 'Loading...' || rawIdx == null) return;
-          const numericKinds = ['ai','ao','do','tc','pid','math','le','expr','scale'];
+          const numericKinds = ['ai','ao','do','tc','ctr','pid','math','le','expr','scale'];
           const index = numericKinds.includes(kind) ? (parseInt(rawIdx, 10) || 0) : rawIdx;
           operand.sel = { kind, index };
         }
@@ -6998,6 +7027,7 @@ function labelFor(sel){
     if(sel.kind==='ao'){ return getAllAnalogOutputs(configCache)?.[sel.index]?.name || `AO${sel.index}`; }
     if(sel.kind==='do'){ return getAllDigitalOutputs(configCache)?.[sel.index]?.name || `DO${sel.index}`; }
     if(sel.kind==='tc'){ return getAllThermocouples(configCache)?.[sel.index]?.name || `TC${sel.index}`; }
+    if(sel.kind==='ctr'){ return getAllCounters(configCache)?.[sel.index]?.name || `CTR${sel.index}`; }
     if(sel.kind==='pid'){ 
       // Fetch PID name from cache if available
       if (window.pidCache && window.pidCache.loops && window.pidCache.loops[sel.index]) {
@@ -10276,7 +10306,8 @@ function readSelection(sel){
     case 'ao': return state.ao[sel.index|0]??0;
     case 'do': return state.do[sel.index|0] ?? 0;   // raw (PWM duty 0..1, or 0/1 digital)
     case 'tc': return state.tc[sel.index|0]??0;
-    case 'pid': 
+    case 'ctr': return state.ctr?.[sel.index|0] ?? 0;   // hardware counter (rate or total)
+    case 'pid':
       const pidLoop = state.pid[sel.index|0];
       return pidLoop ? (pidLoop.out ?? 0) : 0;
     case 'math':
@@ -10930,13 +10961,12 @@ async function openConfigForm(providedConfig = null, banner = null){
             offset: 0.0,
             cutoffHz: 0.1,
             units: 'V',
-            include: true,
-            counter_num: null,        // null = normal AI pin; 0 = hardware counter CTR0 as a rate
-            pulses_per_unit: 1.0,     // K-factor (pulses per engineering unit)
-            counter_window_s: 1.0,    // rate averaging window (s)
-            counter_mode: 'rate'      // 'rate' = eng-units/min (windowed); 'total' = cumulative eng-units (rollover-safe)
+            include: true
           });
         }
+        // Counters (CTR) are their own type, separate from AI -- default empty;
+        // the E-1608 has one 32-bit event counter (CTR0). Add via the Counters editor.
+        const counters = [];
         
         // Add 8 DO channels
         for (let i = 0; i < 8; i++) {
@@ -10971,7 +11001,8 @@ async function openConfigForm(providedConfig = null, banner = null){
           enabled: true,
           analogs: analogs,
           digitalOutputs: digitalOutputs,
-          analogOutputs: analogOutputs
+          analogOutputs: analogOutputs,
+          counters: counters
         });
         
         console.log(`[CONFIG] Added E-1608 board #${boardIdx} with 8 AI, 8 DO, 2 AO`);
@@ -11102,19 +11133,6 @@ async function openConfigForm(providedConfig = null, banner = null){
   if (cfg.boards1608) {
     cfg.boards1608.forEach((board, boardIdx) => {
       const analogRows = (board.analogs||[]).map((a,i)=>{
-        // Counter config collapses to ONE cell: a '—'/'0' selector, and the
-        // K (pulses/unit) + window inputs only appear when a counter is chosen.
-        const mut = 'color:var(--muted);font-size:11px';
-        const cExtra = el('span', {style:'display:'+(a.counter_num==null?'none':'inline-flex')+';gap:4px;align-items:center;margin-left:6px'});
-        cExtra.append(el('span',{style:mut},'K'), inputNum(a,'pulses_per_unit',1),
-                      el('span',{style:mut},'win'), inputNum(a,'counter_window_s',0.1),
-                      el('span',{style:mut},'mode'),
-                      selectEnum(['rate','total'], a.counter_mode||'rate', v=>{ a.counter_mode = v; }));
-        const cSel = selectEnum(['—','0'], a.counter_num==null?'—':String(a.counter_num), v=>{
-          a.counter_num = (v==='—'?null:parseInt(v,10));
-          cExtra.style.display = (a.counter_num==null?'none':'inline-flex');
-        });
-        const cCell = el('div',{style:'display:flex;align-items:center'},[cSel, cExtra]);
         return [
           `AI${i}`, inputText(a,'name'),
           `slope`,    inputNum(a,'slope',0.000001),
@@ -11122,12 +11140,31 @@ async function openConfigForm(providedConfig = null, banner = null){
           `cutoffHz`, inputNum(a,'cutoffHz',0.1),
           `units`,    inputText(a,'units'),
           `include`,  inputChk(a,'include'),
-          `CTR`,      cCell,
         ];
       });
       if (analogRows.length > 0) {
         analogSections.push(fieldset(`Analogs - Board #${board.boardNum} (Y = m·X + b)`, tableFormRows(analogRows)));
       }
+
+      // --- Counters (CTR) -- first-class hardware-counter inputs (E-1608 has CTR0) ---
+      if (!Array.isArray(board.counters)) board.counters = [];
+      const ctrRows = board.counters.map((c,i)=>[
+        `CTR${i}`,  inputText(c,'name'),
+        `ctr#`,     selectEnum(['0'], String(c.ctr_num!=null?c.ctr_num:0), v=>{ c.ctr_num = parseInt(v,10); }),
+        `K (pulses/unit)`, inputNum(c,'pulses_per_unit',1),
+        `mode`,     selectEnum(['rate','total'], c.mode||'rate', v=>{ c.mode = v; }),
+        `win (s)`,  inputNum(c,'window_s',0.1),
+        `units`,    inputText(c,'units'),
+        `include`,  inputChk(c,'include'),
+      ]);
+      const addCtrBtn = el('button', {style:'margin-top:6px'}, '+ Add CTR');
+      addCtrBtn.onclick = () => {
+        board.counters.push({ name:`CTR${board.counters.length}`, include:true, ctr_num:0,
+          pulses_per_unit:1.0, window_s:1.0, mode:'rate', units:'' });
+        renderBoards();
+      };
+      analogSections.push(fieldset(`Counters (CTR) - Board #${board.boardNum}`,
+        el('div', {}, [ ctrRows.length ? tableFormRows(ctrRows) : el('div',{style:'color:var(--muted);font-size:12px'},'No counters configured'), addCtrBtn ])));
     });
   }
   const analogs = analogSections.length > 0 ? el('div', {}, analogSections) : el('div', {}, 'No analog channels configured');

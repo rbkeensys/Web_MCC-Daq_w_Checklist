@@ -1952,6 +1952,7 @@ async def acq_loop():
                 "ao": clean_for_json(ao),
                 "do": do,
                 "tc": clean_for_json(tc_vals),
+                "ctr": clean_for_json(ctr_vals),
                 "pid": clean_for_json(telemetry),
                 "motors": clean_for_json(motor_status),
                 "le": clean_for_json(le_tel),
