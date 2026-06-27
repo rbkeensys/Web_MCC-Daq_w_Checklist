@@ -74,17 +74,6 @@
      "counter_window_s": 1.0
     },
     {
-     "name": "CondFlow",
-     "slope": 1.0,
-     "offset": 0.0,
-     "cutoffHz": 0.0,
-     "units": "L/min",
-     "include": true,
-     "counter_num": 0,
-     "pulses_per_unit": 22000.0,
-     "counter_window_s": 1.0
-    },
-    {
      "name": "CondTotal",
      "slope": 1.0,
      "offset": 0.0,
@@ -95,6 +84,17 @@
      "pulses_per_unit": 22000.0,
      "counter_window_s": 1.0,
      "counter_mode": "total"
+    },
+    {
+     "name": "AI7",
+     "slope": 1.0,
+     "offset": 0.0,
+     "cutoffHz": 0.0,
+     "units": "",
+     "include": false,
+     "counter_num": null,
+     "pulses_per_unit": 1.0,
+     "counter_window_s": 1.0
     }
    ],
    "digitalOutputs": [
