@@ -26,7 +26,7 @@ VERSION 2.0 Changes:
 - Added buttonVars support for reading frontend button states
 - buttonVars are read-only in expressions (set by UI buttons)
 """
-__version__ = "2.6.0"
+__version__ = "2.7.0"  # CTR (hardware counter) signal type: "CTR:Name" resolves via ctr_list/ctr in the Evaluator cache + slow path (read-only input, parallel to AI/TC)
 __updated__ = "2026-06-23"  # 2.6.0: new math fns rand() (uniform [0,1)), randn() (standard normal), floor/ceil/round, sign() -- for dithering/noise modeling. C++ path uses xorshift32 helpers (expr_rand/expr_randn/expr_sign); both backends case-insensitive. 2.5.0: SWITCH/CASE/DEFAULT/ENDSWITCH keyword block added (parse_switch). Pure parser-level desugar into the existing IF/ELSE-IF/ELSE AST -- no new eval or codegen, so the Python evaluator AND the C++ transpiler (which reuse this Lexer/Parser) both get it identically. No fall-through (CASE is independent; no break). SWITCH/CASE/DEFAULT/ENDSWITCH are now reserved words. 2.4.0: DO_ASSIGN records the RAW value (threshold/PWM-duty applied at write time). 2.3.0: added STEP: stepper-drive reads/status/commands (mirrors VFD:, routed to the stepper manager via manager='stepper' tag). 2.2.0: Python evaluator now supports print()/printf() (printf-style logging to stdout with [EXPR] prefix, matching the compiled C++ path); a leading message/format string is handled and %-formatted with the numeric args. Fixes "Unknown function: print" in the Python fallback path. Also added VFD: status reads (RPM/HZ/CURRENT/...).
 
 import re
@@ -685,7 +685,12 @@ class Evaluator:
         for i, sig in enumerate(self.signal_state.get('tc_list', [])):
             key = f"TC:{sig['name']}"
             self._signal_cache[key] = {'type': 'tc', 'index': i}
-        
+
+        # Cache CTR signals (hardware counters)
+        for i, sig in enumerate(self.signal_state.get('ctr_list', [])):
+            key = f"CTR:{sig['name']}"
+            self._signal_cache[key] = {'type': 'ctr', 'index': i}
+
         # Cache DO signals
         for i, sig in enumerate(self.signal_state.get('do_list', [])):
             key = f"DO:{sig['name']}"
@@ -1045,7 +1050,12 @@ class Evaluator:
                 values = self.signal_state.get('tc', [])
                 if idx < len(values):
                     return float(values[idx])
-            
+
+            elif sig_type == 'ctr':
+                values = self.signal_state.get('ctr', [])
+                if idx < len(values):
+                    return float(values[idx])
+
             elif sig_type == 'do':
                 values = self.signal_state.get('do', [])
                 if idx < len(values):
@@ -1106,6 +1116,9 @@ class Evaluator:
         elif signal_type == 'TC':
             signals = self.signal_state.get('tc_list', [])
             values = self.signal_state.get('tc', [])
+        elif signal_type == 'CTR':
+            signals = self.signal_state.get('ctr_list', [])
+            values = self.signal_state.get('ctr', [])
         elif signal_type == 'DO':
             signals = self.signal_state.get('do_list', [])
             values = self.signal_state.get('do', [])

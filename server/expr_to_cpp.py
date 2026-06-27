@@ -15,7 +15,7 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 """
 
 __version__ = "3.6.0"
-__updated__ = "2026-06-23"  # 3.6.0: rand()/randn()/sign() map to xorshift32 runtime helpers (expr_rand/expr_randn/expr_sign) added to the C++ preamble; floor/ceil/round pass through <cmath>. Pairs with expr_engine 2.6.0. 3.5.0: DO_ASSIGN emits the RAW value (server thresholds normal DOs / uses it as 0..1 PWM duty). 3.4.0: STEP: stepper-drive refs (reads/status/commands) reuse the vfd_in[]/vfd_out[] machinery tagged manager='stepper'; VFD refs + DLL signature unchanged. 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
+__updated__ = "2026-06-27"  # 3.7.0: CTR (hardware counter) is a first-class signal type -- "CTR:Name" emits ctr[idx]; ctr_map in SignalMap (from boards1608[].counters), CTR in get_signal_index + _KNOWN_SIG_TYPES, a double* ctr param threaded through per-expr + batch C++ signatures and the call site (after scale), ctr_map written to metadata. DLL signature 18 -> 19 params (delete any stale expressions.dll). Prev 3.6.0: rand()/randn()/sign() map to xorshift32 runtime helpers (expr_rand/expr_randn/expr_sign) added to the C++ preamble; floor/ceil/round pass through <cmath>. Pairs with expr_engine 2.6.0. 3.5.0: DO_ASSIGN emits the RAW value (server thresholds normal DOs / uses it as 0..1 PWM duty). 3.4.0: STEP: stepper-drive refs (reads/status/commands) reuse the vfd_in[]/vfd_out[] machinery tagged manager='stepper'; VFD refs + DLL signature unchanged. 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
 
 import json
 import os
@@ -40,6 +40,7 @@ class SignalMap:
         self.ao_map = {}
         self.do_map = {}
         self.tc_map = {}
+        self.ctr_map = {}    # CTR (hardware counter) name -> index (read-only inputs)
         self.pid_map = {}
         self.scale_map = {}  # Serial scale name -> index (read-only inputs)
         
@@ -68,7 +69,19 @@ class SignalMap:
             for ch in board.get('analogOutputs', []):
                 self.ao_map[ch['name']] = ao_index
                 ao_index += 1
-        
+
+        # CTR channels (hardware counters) -- first-class input type, own array.
+        # Index = flatten order of included counters across enabled E-1608 boards
+        # (matches get_all_counters() and mcc_bridge read_counters()).
+        ctr_index = 0
+        for board in config.get('boards1608', []):
+            if not board.get('enabled', True):
+                continue
+            for ch in board.get('counters', []):
+                if ch.get('include', True):
+                    self.ctr_map[ch['name']] = ctr_index
+                    ctr_index += 1
+
         # TC channels
         tc_index = 0
         for board in config.get('boardsetc', []):
@@ -125,6 +138,15 @@ class SignalMap:
                 return int(sig_name)
             else:
                 print(f"[CPP-WARN] Unknown TC signal: {sig_name}, using index 0")
+                return 0
+        elif sig_type == 'CTR':
+            if sig_name in self.ctr_map:
+                return self.ctr_map[sig_name]
+            elif sig_name.isdigit():
+                return int(sig_name)
+            else:
+                print(f"[CPP-WARN] Unknown CTR signal '{sig_name}' not in config, using index 0")
+                print(f"[CPP-WARN] Available CTRs: {list(self.ctr_map.keys())}")
                 return 0
         elif sig_type == 'SCALE':
             if sig_name in self.scale_map:
@@ -196,7 +218,7 @@ class CPPCodeGenerator:
     def indent(self) -> str:
         return "    " * self.indent_level
 
-    _KNOWN_SIG_TYPES = ('AI', 'AO', 'DO', 'TC', 'PID', 'MATH', 'LE', 'EXPR', 'SCALE')
+    _KNOWN_SIG_TYPES = ('AI', 'AO', 'DO', 'TC', 'CTR', 'PID', 'MATH', 'LE', 'EXPR', 'SCALE')
 
     def _is_real_signal(self, sigval: str) -> bool:
         """True if a SIGNAL string is a real 'TYPE:name' reference (known type),
@@ -269,7 +291,7 @@ class CPPCodeGenerator:
         code.append(f"double {func_name}(")
         code.append("    double* ai, double* ao, double* tc, double* do_state, double* pid,")
         code.append("    double* do_out, double* ao_out,")
-        code.append("    double* scale,")
+        code.append("    double* scale, double* ctr,")
         code.append("    double* vfd_in, double* vfd_out,")
         code.append("    double* static_vars, double* buttonVars,")
         code.append(f"    double* local_out_{expr_index}")
@@ -718,12 +740,40 @@ def compile_all_expressions(expressions_file: str, config_file: str, output_dir:
     import os as _os
     print("[CPP] ========== COMPILING EXPRESSIONS ==========")
     print(f"[CPP] expr_to_cpp.py VERSION: {__version__} (updated {__updated__})")
-    print(f"[CPP] DLL Signature: 18 parameters (adds vfd_in[]/vfd_out[])")
+    print(f"[CPP] DLL Signature: 19 parameters (adds ctr[] -- hardware counters as a first-class input)")
     print("[CPP] ===============================================")
     
     # Load config
     with open(config_file) as f:
         config = json.load(f)
+
+    # Auto-migrate legacy counter-sourced AI channels -> first-class CTR, so the
+    # SignalMap exposes them as "CTR:Name" (matches app_models.migrate_counters_to_ctr
+    # done at runtime). Operates on the raw config dict; idempotent.
+    for _board in (config.get('boards1608') or []):
+        _analogs = _board.get('analogs', []) or []
+        if not any(a.get('counter_num') is not None for a in _analogs):
+            continue
+        _counters = list(_board.get('counters', []) or [])
+        _names = {c.get('name') for c in _counters}
+        _kept = []
+        for a in _analogs:
+            _cn = a.get('counter_num')
+            if _cn is None:
+                _kept.append(a)
+                continue
+            if a.get('name') not in _names:
+                _counters.append({
+                    'name': a.get('name'), 'include': a.get('include', True),
+                    'ctr_num': int(_cn),
+                    'pulses_per_unit': float(a.get('pulses_per_unit', 1.0) or 1.0),
+                    'window_s': float(a.get('counter_window_s', 1.0) or 1.0),
+                    'mode': a.get('counter_mode', 'rate') or 'rate',
+                    'units': a.get('units', '') or '',
+                })
+        _board['counters'] = _counters
+        _board['analogs'] = _kept
+        print(f"[CPP] Migrated {len(_counters)} counter channel(s) AI->CTR for the signal map")
 
     # Load scales config (separate file). If not provided, look next to config.
     scales_cfg = []
@@ -865,6 +915,7 @@ inline double expr_print_multi(int n, ...) {
         'buttonvar_map': generator.buttonvar_map,  # name -> index
         'staticvar_map': generator.staticvar_map,  # name -> index
         'scale_map': signal_map.scale_map,         # Scale name -> index (scales.json order)
+        'ctr_map': signal_map.ctr_map,             # CTR (hardware counter) name -> ctr[] index
         'vfd_read_refs': generator.vfd_reads,      # ordered [{drive,token,kind}] -> vfd_in[] index
         'vfd_write_refs': generator.vfd_writes     # ordered [{drive,token,kind}] -> vfd_out[] index
     }
@@ -883,7 +934,7 @@ def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]]) ->
     code.append("EXPORT void evaluate_all_expressions(")
     code.append("    double* ai, double* ao, double* tc, double* do_state, double* pid,")
     code.append("    double* do_out, double* ao_out,")
-    code.append("    double* scale,")
+    code.append("    double* scale, double* ctr,")
     code.append("    double* vfd_in, double* vfd_out,")
     code.append("    double* static_vars, double* buttonVars,")
     code.append("    double* expr_results,")
@@ -931,7 +982,7 @@ def generate_batch_function(num_exprs: int, local_vars: Dict[int, List[str]]) ->
         code.append(f"    // Expression {i}")
         code.append(f"    for (int j = 0; j < 64; j++) {{ temp_do[j] = -1.0; }}")  # -1 = not written yet
         code.append(f"    for (int j = 0; j < 16; j++) {{ temp_ao[j] = -999999.0; }}")  # Sentinel for not written
-        code.append(f"    expr_results[{i}] = expr_{i}(ai, ao, tc, do_state, pid, temp_do, temp_ao, scale, vfd_in, vfd_out, static_vars, buttonVars, local_vars_out + {local_offset});")
+        code.append(f"    expr_results[{i}] = expr_{i}(ai, ao, tc, do_state, pid, temp_do, temp_ao, scale, ctr, vfd_in, vfd_out, static_vars, buttonVars, local_vars_out + {local_offset});")
         
         # Track offset for next expression
         if local_vars.get(i):

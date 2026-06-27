@@ -20,8 +20,8 @@ CHANGELOG:
   • Hardware write support (DO, AO)
   • Static and global variable support
 """
-__version__ = "3.3.0"
-__updated__ = "2026-06-15"  # 3.3.0: added scale[] (16-arg DLL) -- self.scale buffer, scale in argtypes + call, scale_vals on evaluate()
+__version__ = "3.4.0"
+__updated__ = "2026-06-27"  # 3.4.0: added ctr[] (19-arg DLL) -- self.ctr buffer, ctr in argtypes + call (after scale), ctr_vals on evaluate() for first-class hardware counters (CTR:Name). Prev 3.3.0: added scale[] (16-arg DLL)
 
 import ctypes
 import json
@@ -50,6 +50,7 @@ class CPPExpressionBackend:
         self.do_out = np.zeros(64, dtype=np.float64)
         self.ao_out = np.zeros(16, dtype=np.float64)
         self.scale = np.zeros(16, dtype=np.float64)  # Serial scales (read-only inputs)
+        self.ctr = np.zeros(16, dtype=np.float64)    # Hardware counters CTR (read-only inputs)
         self.vfd_in = np.zeros(64, dtype=np.float64)             # VFD reads (server-filled)
         self.vfd_out = np.full(64, np.nan, dtype=np.float64)     # VFD writes (NaN = not written)
         self.vfd_read_refs = []
@@ -158,6 +159,7 @@ class CPPExpressionBackend:
             ctypes.POINTER(ctypes.c_double),  # do_out
             ctypes.POINTER(ctypes.c_double),  # ao_out
             ctypes.POINTER(ctypes.c_double),  # scale
+            ctypes.POINTER(ctypes.c_double),  # ctr
             ctypes.POINTER(ctypes.c_double),  # vfd_in
             ctypes.POINTER(ctypes.c_double),  # vfd_out
             ctypes.POINTER(ctypes.c_double),  # static_vars
@@ -201,7 +203,8 @@ class CPPExpressionBackend:
         pid_vals: List[float],
         button_vars: Optional[Dict[str, float]] = None,
         scale_vals: Optional[List[float]] = None,
-        vfd_in_vals: Optional[List[float]] = None
+        vfd_in_vals: Optional[List[float]] = None,
+        ctr_vals: Optional[List[float]] = None
     ) -> Dict:
         """
         Evaluate all expressions in one shot
@@ -240,6 +243,12 @@ class CPPExpressionBackend:
             n = min(len(scale_vals), len(self.scale))
             self.scale[:n] = scale_vals[:n]
 
+        # Hardware counters CTR (server-filled from the bridge read_counters)
+        self.ctr.fill(0.0)
+        if ctr_vals:
+            n = min(len(ctr_vals), len(self.ctr))
+            self.ctr[:n] = ctr_vals[:n]
+
         # VFD reads in (server-filled, from snapshot); writes out (NaN sentinel)
         self.vfd_in.fill(0.0)
         if vfd_in_vals:
@@ -275,6 +284,7 @@ class CPPExpressionBackend:
             self.do_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.ao_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.scale.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            self.ctr.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.vfd_in.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.vfd_out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             self.static_vars.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),

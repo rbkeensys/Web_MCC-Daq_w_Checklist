@@ -94,8 +94,8 @@ from filters import OnePoleLPFBank
 from logger import SessionLogger
 from app_models import (
     AppConfig, get_all_analogs, get_all_digital_outputs,
-    get_all_analog_outputs, get_all_thermocouples,
-    migrate_config_to_board_centric,
+    get_all_analog_outputs, get_all_thermocouples, get_all_counters,
+    migrate_config_to_board_centric, migrate_counters_to_ctr,
     PIDFile, ScriptFile, MotorFile, default_config
 )
 from motor_controller import MotorManager, list_serial_ports
@@ -910,6 +910,7 @@ def _load_json_model(path: Path, model_cls: Type[BaseModel]):
 app_cfg = _load_json_model(CFG_PATH, AppConfig)
 print(f"[DEBUG] BEFORE migration: boards1608={app_cfg.boards1608 is not None}, board1608={app_cfg.board1608 is not None}")
 app_cfg = migrate_config_to_board_centric(app_cfg)  # Auto-migrate old configs
+app_cfg = migrate_counters_to_ctr(app_cfg)          # Auto-migrate legacy counter-AI -> first-class CTR
 print(f"[DEBUG] AFTER migration: boards1608={app_cfg.boards1608 is not None}, num_boards={len(app_cfg.boards1608) if app_cfg.boards1608 else 0}")
 print(f"[DEBUG] After migration: {len(get_all_analogs(app_cfg))} AI channels, {len(get_all_thermocouples(app_cfg))} TC channels")
 if app_cfg.boards1608:
@@ -1617,10 +1618,12 @@ async def acq_loop():
                 y = lpf.apply(i, y)
                 ai_scaled.append(y)
 
-            # --- Counter-sourced AI channels (e.g. condensate flow on CTR0) ---
-            # Overwrite their slot with a computed rate (eng units/min) from the HW counter.
+            # --- Hardware counters (CTR) -- a first-class input type, own array (not AI). ---
+            # Filled from board.counters[] (rate or rollover-safe total); read in
+            # expressions as "CTR:Name". Order == get_all_counters() == ctr[] indices.
+            ctr_vals: List[float] = [0.0] * len(get_all_counters(app_cfg))
             try:
-                mcc.apply_counter_rates(ai_scaled, time.perf_counter())
+                mcc.read_counters(ctr_vals, time.perf_counter())
             except Exception as e:
                 print(f"[MCC-Hub] counter read failed: {e}")
             # Dry-run gate: when simulating without hardware-in-the-loop, suppress
@@ -1710,7 +1713,8 @@ async def acq_loop():
                         pid_vals=[tel.get('output', 0.0) for tel in telemetry],
                         button_vars=button_vars,  # CRITICAL: Pass buttonVars!
                         scale_vals=scale_mgr.get_values(),  # Serial scales for "Scale:Foo" refs
-                        vfd_in_vals=_vfd_in_vals(cpp_backend, _vfd_status_cache, _step_status_cache)  # VFD + STEP reads (approach B)
+                        vfd_in_vals=_vfd_in_vals(cpp_backend, _vfd_status_cache, _step_status_cache),  # VFD + STEP reads (approach B)
+                        ctr_vals=ctr_vals  # hardware counters for "CTR:Name" reads
                     )
                     
                     # Convert to same format as Python evaluator
@@ -1772,6 +1776,7 @@ async def acq_loop():
                         "ao": ao,
                         "do": do,
                         "tc": tc_vals,
+                        "ctr": ctr_vals,  # hardware counters (CTR:Name)
                         "pid": telemetry,
                         "math": math_tel,
                         "le": le_tel,
@@ -1783,6 +1788,7 @@ async def acq_loop():
                         "ai_list": [{"name": ch.name} for ch in get_all_analogs(app_cfg)],
                         "ao_list": [{"name": ch.name} for ch in get_all_analog_outputs(app_cfg)],
                         "tc_list": [{"name": ch.name} for ch in get_all_thermocouples(app_cfg)],
+                        "ctr_list": [{"name": ch.name} for ch in get_all_counters(app_cfg)],
                         "do_list": [{"name": ch.name} for ch in get_all_digital_outputs(app_cfg)],
                         "pid_list": [{"name": loop.name} for loop in pid_mgr.meta],
                         "math_list": [{"name": op.name} for op in math_mgr.operators],

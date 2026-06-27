@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.2.0"  # Counter 'total' mode: a counter-sourced AI can report a rollover-safe CUMULATIVE total (eng units) as well as the windowed rate (condensate totalizer). Prev 2.1.0: counter-sourced AI channels + PWM-mode DOs
+__version__ = "2.3.0"  # CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -155,33 +155,35 @@ class MCCBridge:
         num_1608 = len(self._boards_1608)
         print(f"[MCCBridge] Configured {num_1608} E-1608 board(s)")
 
-        # === Counter-sourced analog channels (e.g. pulse flow meter on CTR0) ===
-        # An AI channel with counter_num set is driven by CTR<n> as a rate, not its
-        # physical pin. Index matches get_all_analogs() flatten order (enabled boards).
+        # === Hardware counters (CTR) -- a first-class input type, separate from AI. ===
+        # The E-1608 has one 32-bit event counter (CTR0). Each included CounterCfg in
+        # board.counters[] maps to a slot in the CTR signal array, in flatten order
+        # (== get_all_counters()). read_counters() fills that array each tick.
         self._counters = []
-        gidx = 0
+        cidx = 0
         if cfg.boards1608:
             for board_cfg in cfg.boards1608:
                 if not board_cfg.enabled:
                     continue
-                for ch in board_cfg.analogs:
-                    cnum = getattr(ch, "counter_num", None)
-                    if cnum is not None:
-                        self._counters.append({
-                            "index": gidx, "board": board_cfg.boardNum, "ctr": int(cnum),
-                            "K": float(getattr(ch, "pulses_per_unit", 1.0) or 1.0),
-                            "window": float(getattr(ch, "counter_window_s", 1.0) or 1.0),
-                            "mode": str(getattr(ch, "counter_mode", "rate") or "rate"),
-                            "prev_count": None, "prev_t": None, "rate": 0.0, "cum": 0,
-                        })
-                        if HAVE_MCCULW:
-                            try:
-                                ul.c_clear(board_cfg.boardNum, int(cnum))
-                                print(f"[MCCBridge] AI[{gidx}] '{ch.name}' <- CTR{cnum} "
-                                      f"(board {board_cfg.boardNum}) cleared; K={getattr(ch,'pulses_per_unit',1.0)}/unit")
-                            except Exception as e:
-                                print(f"[MCCBridge] CTR{cnum} clear warn: {e}")
-                    gidx += 1
+                for ch in (getattr(board_cfg, "counters", None) or []):
+                    if not getattr(ch, "include", True):
+                        continue
+                    cnum = int(getattr(ch, "ctr_num", 0) or 0)
+                    self._counters.append({
+                        "index": cidx, "board": board_cfg.boardNum, "ctr": cnum,
+                        "K": float(getattr(ch, "pulses_per_unit", 1.0) or 1.0),
+                        "window": float(getattr(ch, "window_s", 1.0) or 1.0),
+                        "mode": str(getattr(ch, "mode", "rate") or "rate"),
+                        "prev_count": None, "prev_t": None, "rate": 0.0, "cum": 0,
+                    })
+                    if HAVE_MCCULW:
+                        try:
+                            ul.c_clear(board_cfg.boardNum, cnum)
+                            print(f"[MCCBridge] CTR[{cidx}] '{ch.name}' <- CTR{cnum} "
+                                  f"(board {board_cfg.boardNum}) cleared; K={getattr(ch,'pulses_per_unit',1.0)}/unit mode={getattr(ch,'mode','rate')}")
+                        except Exception as e:
+                            print(f"[MCCBridge] CTR{cnum} clear warn: {e}")
+                    cidx += 1
         
         # Initialize DO/AO mirrors for all boards
         self._do_bits = [0] * (num_1608 * 8)
@@ -247,13 +249,14 @@ class MCCBridge:
         total_etc = len(self._boards_etc_uldaq) + len(self._boards_etc_mcc)
         print(f"[MCCBridge] Configured {total_etc} E-TC board(s)")
 
-    def apply_counter_rates(self, ai_scaled, now):
-        """Overwrite counter-sourced AI channels with a computed rate (engineering
-        units per minute) read from the E-1608 hardware counter. `now` is a
-        monotonic timestamp (time.perf_counter()). No-op if no counters configured."""
+    def read_counters(self, ctr_out, now):
+        """Fill the CTR signal array from the E-1608 hardware counters. Each slot is
+        either a rate (engineering units/min, windowed) or a rollover-safe cumulative
+        total, per the counter's mode. `now` is a monotonic timestamp
+        (time.perf_counter()). No-op if no counters configured."""
         for c in (self._counters or []):
             idx = c["index"]
-            if idx >= len(ai_scaled):
+            if idx >= len(ctr_out):
                 continue
             count = None
             # Only touch the counter if its E-1608 actually opened -- a configured
@@ -265,12 +268,12 @@ class MCCBridge:
                     count = None
             mode = c.get("mode", "rate")
             if count is None:                    # hold last good value on read failure
-                ai_scaled[idx] = (c["cum"] / c["K"]) if mode == "total" else c["rate"]
+                ctr_out[idx] = (c["cum"] / c["K"]) if mode == "total" else c["rate"]
                 continue
             if c["prev_count"] is None:          # prime on first read
                 c["prev_count"] = count
                 c["prev_t"] = now
-                ai_scaled[idx] = 0.0
+                ctr_out[idx] = 0.0
                 continue
             # rollover-safe pulse delta since the last read (32-bit hardware counter)
             dcount = (count - c["prev_count"]) & 0xFFFFFFFF
@@ -279,14 +282,14 @@ class MCCBridge:
                 # survives any number of 32-bit wraps. Report cumulative eng units.
                 c["cum"] += dcount
                 c["prev_count"] = count
-                ai_scaled[idx] = c["cum"] / c["K"]
+                ctr_out[idx] = c["cum"] / c["K"]
             else:
                 dt = now - c["prev_t"]
                 if dt >= c["window"] and dt > 0:
                     c["rate"] = (dcount / dt) * 60.0 / c["K"]     # units per minute
                     c["prev_count"] = count
                     c["prev_t"] = now
-                ai_scaled[idx] = c["rate"]
+                ctr_out[idx] = c["rate"]
 
     # ---------------- PWM digital outputs ----------------
     def is_pwm(self, index) -> bool:

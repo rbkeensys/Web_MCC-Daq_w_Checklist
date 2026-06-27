@@ -13,7 +13,7 @@ NEW STRUCTURE:
 This allows multiple E-1608 and E-TC boards, each with their own channels.
 """
 
-__version__ = "2.2.0"  # AnalogCfg.counter_mode ('rate'|'total'): a counter channel can now report a rollover-safe cumulative total (eng units) for the condensate totalizer, in addition to the windowed rate. Prev 2.1.0: PWM DO mode + counter-sourced AI fields
+__version__ = "2.3.0"  # COUNTER (CTR) is now a first-class signal type: new CounterCfg model + boards1608[].counters[], get_all_counters(), and migrate_counters_to_ctr() which auto-moves legacy AnalogCfg.counter_num channels into board.counters. The E-1608 32-bit event counter (CTR0) is addressed as "CTR:Name" in expressions, separate from AI. AnalogCfg.counter_* fields kept ONLY for that migration read. Prev 2.2.0: AnalogCfg.counter_mode; 2.1.0: counter-sourced AI fields
 
 from pydantic import BaseModel
 from typing import List, Optional
@@ -30,10 +30,25 @@ class AnalogCfg(BaseModel):
     # Counter-sourced channel: if counter_num is set, this AI's value is the
     # E-1608 hardware counter CTR<n> read as a rate (engineering units / minute),
     # not its physical AI pin. Used for pulse flow meters.
+    # DEPRECATED: counters are now first-class (CounterCfg). These fields are kept
+    # only so migrate_counters_to_ctr() can read a legacy config and move the
+    # channel into board.counters[]. Do not use for new channels.
     counter_num: Optional[int] = None
     pulses_per_unit: float = 1.0       # K-factor, pulses per engineering unit (e.g. 22000 pulses/L)
     counter_window_s: float = 1.0      # rate averaging window, seconds
     counter_mode: str = "rate"         # 'rate' = eng-units/min (windowed); 'total' = cumulative eng-units (rollover-safe)
+
+class CounterCfg(BaseModel):
+    """E-1608 hardware event counter (CTR). A first-class input type, separate from
+    AI -- the E-1608 has one 32-bit counter (CTR0, <=10 MHz TTL) on its own terminal.
+    Referenced in expressions as "CTR:Name"."""
+    name: str = "CTR0"
+    include: bool = True
+    ctr_num: int = 0                   # which hardware counter (E-1608 has CTR0)
+    pulses_per_unit: float = 1.0       # K-factor, pulses per engineering unit (e.g. 22000 pulses/L)
+    window_s: float = 1.0              # rate averaging window, seconds (for mode='rate')
+    mode: str = "rate"                 # 'rate' = eng-units/min (windowed); 'total' = cumulative eng-units (rollover-safe)
+    units: str = ""
 
 class DigitalOutCfg(BaseModel):
     name: str = "DO"
@@ -72,10 +87,11 @@ class Board1608Cfg(BaseModel):
     blockSize: int = 128
     aiMode: str = "SE"
     enabled: bool = True
-    # Each board owns its channels (8 AI, 8 DO, 2 AO per E-1608)
+    # Each board owns its channels (8 AI, 8 DO, 2 AO, 1 CTR per E-1608)
     analogs: List[AnalogCfg] = []
     digitalOutputs: List[DigitalOutCfg] = []
     analogOutputs: List[AnalogOutCfg] = []
+    counters: List[CounterCfg] = []
 
 class BoardEtcCfg(BaseModel):
     """E-TC Board Configuration (Thermocouples)"""
@@ -156,6 +172,47 @@ def get_all_thermocouples(cfg: AppConfig) -> List[ThermocoupleCfg]:
         # Old format fallback
         channels = cfg.thermocouples
     return channels
+
+def get_all_counters(cfg: AppConfig) -> List["CounterCfg"]:
+    """Get all hardware counter (CTR) channels from all enabled E-1608 boards."""
+    channels = []
+    if cfg.boards1608:
+        for board in cfg.boards1608:
+            if board.enabled:
+                channels.extend(getattr(board, "counters", None) or [])
+    return channels
+
+def migrate_counters_to_ctr(cfg: AppConfig) -> AppConfig:
+    """Move legacy counter-sourced AI channels (AnalogCfg.counter_num set) into the
+    first-class board.counters[] list, and drop them from analogs. Idempotent and
+    safe on already-migrated configs. Run AFTER migrate_config_to_board_centric."""
+    if not cfg.boards1608:
+        return cfg
+    for board in cfg.boards1608:
+        analogs = board.analogs or []
+        if not any(getattr(a, "counter_num", None) is not None for a in analogs):
+            continue
+        existing = {c.name for c in (board.counters or [])}
+        kept, moved = [], list(board.counters or [])
+        for a in analogs:
+            cnum = getattr(a, "counter_num", None)
+            if cnum is None:
+                kept.append(a)
+                continue
+            if a.name not in existing:
+                moved.append(CounterCfg(
+                    name=a.name, include=getattr(a, "include", True),
+                    ctr_num=int(cnum),
+                    pulses_per_unit=float(getattr(a, "pulses_per_unit", 1.0) or 1.0),
+                    window_s=float(getattr(a, "counter_window_s", 1.0) or 1.0),
+                    mode=str(getattr(a, "counter_mode", "rate") or "rate"),
+                    units=getattr(a, "units", "") or "",
+                ))
+            # do NOT keep it as an analog (frees the AI slot)
+        board.counters = moved
+        board.analogs = kept
+        print(f"[CONFIG] Migrated {len(moved)} counter channel(s) AI->CTR on board #{board.boardNum}")
+    return cfg
 
 def migrate_config_to_board_centric(cfg: AppConfig) -> AppConfig:
     """
