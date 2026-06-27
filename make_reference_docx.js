@@ -74,7 +74,9 @@ const ctrl = [
  ["condBatchMaxML","450","ml","Stop the pump if a single metered batch exceeds this (backstop for a meter that keeps counting on air)."],
  ["condPumpMinRun / condPumpMaxRun","1 / 120","s","Min run before dry-detect is armed / hard time cap (sets condPumpFault) if it never goes dry."],
  ["condLiquidTemp","98","C","Vent only now: condensate outlet below this = liquid -> close the steam vent (DO:VentValve)."],
- ["timeIncSec","0.00625","s","Control tick period (set to the real loop rate)."],
+ ["sysMs","(server)","ms","System monotonic clock, stamped by the server each tick BEFORE evaluate. Read it for any interval math (now - startMs)."],
+ ["dtReal","~timeIncSec","s","REAL elapsed time since the last tick = (sysMs - lastTickMs)/1000, guarded. ALL expression timing (PI integrals, condensate timers, sim dt) uses this, not timeIncSec."],
+ ["timeIncSec","0.00625","s","Nominal tick period -- now only the FALLBACK for dtReal on the first ticks / a scheduling hiccup."],
 ];
 const startup = [
  ["mvrPhase","0","0=IDLE 1=PRIME 2=HEAT 3=RUN","Startup state machine."],
@@ -198,6 +200,7 @@ const doc = new Document({
       // ---------- CONTROL LAWS ----------
       H1("2.  Control Laws"),
       P("These run regardless of sim vs real. Heater outputs are PWM duty 0..1; temps degC; pressures psia."),
+      P([new TextRun("TIMING: the server stamps the system monotonic clock (ms) into "), code("static.sysMs"), new TextRun(" every tick before the expressions evaluate. Setpoints differences it into "), code("static.dtReal"), new TextRun(" = (sysMs - lastTickMs)/1000 -- the REAL elapsed time, which every timer/integral/window uses instead of the nominal tick period. In sim it is accelerated as "), code("dtReal * simSpeed"), new TextRun("; in measure mode it is the true elapsed seconds. timeIncSec is only the fallback (first ticks / hiccups).")]),
 
       H2("2.1  Startup state machine (MVR System)"),
       P("IDLE -> PRIME -> HEAT -> RUN. heatOK and the blower are gated on phase>=HEAT so the makeup element never dry-fires."),
