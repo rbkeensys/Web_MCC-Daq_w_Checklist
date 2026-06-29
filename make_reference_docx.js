@@ -207,7 +207,7 @@ const doc = new Document({
 
       H2("2.1  Startup state machine (MVR System)"),
       P("IDLE -> PURGE -> PRIME -> HEAT -> RUN. heatOK and the blower are gated on phase>=HEAT so the makeup element never dry-fires."),
-      BUL([b("PURGE: "), new TextRun("ALWAYS first -- reverse the feed pump ("), code("vel = -purgeRevRpm"), new TextRun(") to empty the feed/evaporator side to a KNOWN baseline, so an interrupted run (stop / power loss) restarts from a known state instead of trusting leftover inventory. Advance when the input level detector reads empty ("), code("yFeedEmpty"), new TextRun(") or the dead-reckon backstop "), code("purgeOutML >= purgeMaxML"), new TextRun(" is reached; then feedInvEst is zeroed.")]),
+      BUL([b("PURGE: "), new TextRun("ALWAYS first -- reverse the feed pump ("), code("vel = -purgeRevRpm"), new TextRun(") to empty the feed/evaporator side to a KNOWN baseline, so an interrupted run (stop / power loss) restarts from a known state instead of trusting leftover inventory. It ALWAYS pumps the full dead-reckon volume ("), code("purgeOutML >= purgeMaxML"), new TextRun(", ~2 L) to guarantee empty without trusting the sensor, AND requires the input level detector empty ("), code("yFeedEmpty"), new TextRun("); a 2x hard cap stops a runaway if the sensor never trips. Then feedInvEst is zeroed.")]),
       BUL([b("PRIME: "), code("feedCmd = feedPrimeRpm"), new TextRun("; advance when "), code("feedInvEst >= feedPrimeML"), new TextRun(" (dead-reckon fill from the purged-empty baseline).")]),
       BUL([b("HEAT: "), new TextRun("makeup heater on; advance when "), code("yEvapTemp > evapTempSet - 3"), new TextRun(" (seed prodMeas = prodSetSafe so the blower doesn't spike).")]),
       BUL([b("RUN: "), new TextRun("closed-loop production + feed.")]),
@@ -231,7 +231,7 @@ const doc = new Document({
       EQ("duty = clamp( kpMakeup * err + I , 0 , 1 )      ->  DO:MakeupHtr  (makeupDuty)"),
 
       H2("2.5  Superheat heater PI (SuperheatControl)"),
-      P("Holds vapor superheat. Gated by heatOK AND yEvapTemp > evapTempSet-5 (so the cartridge never dry-fires with no steam flow)."),
+      P("Holds vapor superheat. Gated by heatOK AND phase >= RUN -- superheat is only meaningful once vapor is actually flowing, so the cartridge never dry-fires during warm-up. Both heater PI integrators reset to 0 whenever their heater is off, so no stale windup carries across a stop. The wet-compression (low-superheat) trip likewise arms/fires only in RUN."),
       EQ("err  = superheatSetSafe - superheatIn"),
       EQ("duty = clamp( kpSuper * err + I , 0 , 1 )       ->  DO:SuperHtr  (superDuty)"),
 
