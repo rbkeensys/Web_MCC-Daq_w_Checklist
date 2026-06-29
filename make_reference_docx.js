@@ -82,14 +82,16 @@ const ctrl = [
  ["timeIncSec","0.00625","s","Nominal tick period -- now only the FALLBACK for dtReal on the first ticks / a scheduling hiccup."],
 ];
 const startup = [
- ["mvrPhase","0","0=IDLE 1=PRIME 2=HEAT 3=RUN","Startup state machine."],
+ ["mvrPhase","0","0=IDLE 1=PURGE 2=PRIME 3=HEAT 4=RUN","Startup state machine."],
  ["feedLPerStep","8.96861e-8","L/step","FEED PUMP CAL: L per motor step (200mL/223rev/10000steps)."],
  ["feedStepsPerRev","10000","steps/rev","Match driver microstep Pr0.00. L/min = rpm x steps x LPerStep."],
  ["feedPrimeML","1500","ml","Volume PRIME dead-reckons before heat (~half a ~3L HX side)."],
  ["feedPrimeRpm","120","rpm","Feed rpm during the PRIME fill."],
  ["purgeRevRpm","120","rpm","STARTUP PURGE: feed-pump REVERSE rpm that empties the feed/evap side to a known baseline before priming."],
- ["purgeMaxML","2000","ml","PURGE dead-reckon backstop: reverse-pump up to this if the empty sensor (yFeedEmpty) never trips (~1.5L primed + margin)."],
- ["yFeedEmpty / purgeEmptyML","sensor / 50","- / ml","Input level detector = empty (real sensor; sim: evaporator inventory below purgeEmptyML)."],
+ ["purgeMaxML","2000","ml","PURGE: ALWAYS reverse-pump this full volume at startup, BLIND. Evaporator contents are unknown at startup -- never trust a level reading here."],
+ ["yFeedEmpty / purgeEmptyML","sensor / 50","- / ml","Input level detector = empty (real sensor; sim: evaporator inventory below purgeEmptyML). Monitoring only -- does NOT shorten the purge."],
+ ["EvapLevel (AI6) / evapLevelTripML","wet-dry / 100","0-5V / ml","Evaporator level sensor (high=wet, like demister/flood). Sim reads wet above evapLevelTripML inventory; real: AI:EvapLevel > 2.5V."],
+ ["evapLevelCheckML","1500","ml","PRIME verify: by this dead-reckoned fill the EvapLevel sensor MUST read wet, else evapLevelErr fault (feed-pump or sensor failure). Certainly wet by 1.5L."],
  ["feedInvEst","0 (->~1500)","ml","Feed-side inventory dead-reckon: feed in - distillate out. Watch for 'getting low'."],
  ["condTubeTripML","130","ml","Volume in the HX bottom tube at the ~3/4 sensor (1.16in ID x 7.5in). The nominal distillate batch."],
  ["condTubeFullML","173","ml","Full HX bottom tube volume (1.16in ID x 10in deep)."],
@@ -210,8 +212,8 @@ const doc = new Document({
 
       H2("2.1  Startup state machine (MVR System)"),
       P("IDLE -> PURGE -> PRIME -> HEAT -> RUN. heatOK and the blower are gated on phase>=HEAT so the makeup element never dry-fires."),
-      BUL([b("PURGE: "), new TextRun("ALWAYS first -- reverse the feed pump ("), code("vel = -purgeRevRpm"), new TextRun(") to empty the feed/evaporator side to a KNOWN baseline, so an interrupted run (stop / power loss) restarts from a known state instead of trusting leftover inventory. It ALWAYS pumps the full dead-reckon volume ("), code("purgeOutML >= purgeMaxML"), new TextRun(", ~2 L) to guarantee empty without trusting the sensor, AND requires the input level detector empty ("), code("yFeedEmpty"), new TextRun("); a 2x hard cap stops a runaway if the sensor never trips. Then feedInvEst is zeroed.")]),
-      BUL([b("PRIME: "), code("feedCmd = feedPrimeRpm"), new TextRun("; advance when "), code("feedInvEst >= feedPrimeML"), new TextRun(" (dead-reckon fill from the purged-empty baseline).")]),
+      BUL([b("PURGE: "), new TextRun("ALWAYS first -- reverse the feed pump ("), code("vel = -purgeRevRpm"), new TextRun(") to empty the feed/evaporator side to a KNOWN baseline, so an interrupted run (stop / power loss) restarts from a known state instead of trusting leftover inventory. It ALWAYS pumps the full dead-reckon volume "), code("purgeOutML >= purgeMaxML"), new TextRun(" (~2 L), BLIND -- the evaporator contents are unknown at startup so no level reading is trusted here. Then feedInvEst is zeroed.")]),
+      BUL([b("PRIME: "), code("feedCmd = feedPrimeRpm"), new TextRun("; advance to HEAT when "), code("feedInvEst >= feedPrimeML AND yEvapLevel"), new TextRun(" -- i.e. the dead-reckon fill is reached AND the EvapLevel sensor confirms the evaporator is actually WET, so the heater never fires dry. If primed but still dry by "), code("evapLevelCheckML"), new TextRun(", Interlocks latches "), code("evapLevelErr"), new TextRun(" (feed-pump or level-sensor failure) -> trip + UI popup; clears on Stop.")]),
       BUL([b("HEAT: "), new TextRun("makeup heater on; advance when "), code("yEvapTemp > evapTempSet - 3"), new TextRun(" (seed prodMeas = prodSetSafe so the blower doesn't spike).")]),
       BUL([b("RUN: "), new TextRun("closed-loop production + feed.")]),
 
@@ -222,7 +224,7 @@ const doc = new Document({
       P([new TextRun("Guarded: productionSet [0,prodSetMax], superheatSet [0,superheatSetMax], evapTempSet [min,max], blowerRpmSet [0,blowerMaxRpm], feedRpmSet [0,feedRpmMax].")]),
 
       H2("2.3  Interlocks & trips (Interlocks)"),
-      P("trip = any of: evap/steam over-pressure, vapor-out over-temp, demister flood, low-superheat (wet compression, latched-arm), makeup-cartridge over-temp, superheat-cartridge over-temp. The two cartridge trips and the wet-compression trip LATCH until runSystem is cycled."),
+      P("trip = any of: evap/steam over-pressure, vapor-out over-temp, demister flood, low-superheat (wet compression, latched-arm), makeup-cartridge over-temp, superheat-cartridge over-temp, evaporator-level prime-verify (evapLevelErr). The cartridge trips, wet-compression, and evapLevelErr LATCH until runSystem is cycled. evapLevelErr also fires a UI popup."),
       EQ("heatOK = runSystem AND (trip == 0) AND (mvrPhase >= HEAT)"),
       EQ("makeupHtrTrip latches if  yMakeupHtrTemp > makeupHtrMax   (uncovered / feed overheat)"),
       EQ("superHtrTrip  latches if  ySuperHtrTemp  > superHtrMax"),
