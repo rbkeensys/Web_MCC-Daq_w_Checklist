@@ -143,7 +143,7 @@ class CPPExpressionBackend:
             raise FileNotFoundError(f"DLL not found: {self.dll_path}")
         
         print(f"[CPP-EXPR] cpp_expr_backend.py VERSION: {__version__} (updated {__updated__})")
-        print(f"[CPP-EXPR] DLL Signature: 16 parameters (NEW -- adds scale[])")
+        print(f"[CPP-EXPR] DLL Signature: 19 parameters (adds ctr[] -- hardware counters)")
         
         self.dll = ctypes.CDLL(str(self.dll_path))
         

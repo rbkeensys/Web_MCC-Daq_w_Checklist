@@ -13,7 +13,7 @@ NEW STRUCTURE:
 This allows multiple E-1608 and E-TC boards, each with their own channels.
 """
 
-__version__ = "2.3.0"  # COUNTER (CTR) is now a first-class signal type: new CounterCfg model + boards1608[].counters[], get_all_counters(), and migrate_counters_to_ctr() which auto-moves legacy AnalogCfg.counter_num channels into board.counters. The E-1608 32-bit event counter (CTR0) is addressed as "CTR:Name" in expressions, separate from AI. AnalogCfg.counter_* fields kept ONLY for that migration read. Prev 2.2.0: AnalogCfg.counter_mode; 2.1.0: counter-sourced AI fields
+__version__ = "2.3.1"  # FIX: migrate_counters_to_ctr keeps the counter's AI slot as a spare (include=False) instead of deleting it -- deleting shrank the AI read/LPF below the 8 physical E-1608 pins and crashed the acq loop (CTR0 is a separate terminal, not an AI pin). Prev 2.3.0: COUNTER (CTR) is now a first-class signal type: new CounterCfg model + boards1608[].counters[], get_all_counters(), and migrate_counters_to_ctr() which auto-moves legacy AnalogCfg.counter_num channels into board.counters. The E-1608 32-bit event counter (CTR0) is addressed as "CTR:Name" in expressions, separate from AI. AnalogCfg.counter_* fields kept ONLY for that migration read. Prev 2.2.0: AnalogCfg.counter_mode; 2.1.0: counter-sourced AI fields
 
 from pydantic import BaseModel
 from typing import List, Optional
@@ -184,8 +184,11 @@ def get_all_counters(cfg: AppConfig) -> List["CounterCfg"]:
 
 def migrate_counters_to_ctr(cfg: AppConfig) -> AppConfig:
     """Move legacy counter-sourced AI channels (AnalogCfg.counter_num set) into the
-    first-class board.counters[] list, and drop them from analogs. Idempotent and
-    safe on already-migrated configs. Run AFTER migrate_config_to_board_centric."""
+    first-class board.counters[] list. The counter lives on the E-1608's SEPARATE
+    CTR0 terminal -- NOT an AI pin -- so the AI slot it used to occupy is converted
+    to a spare (include=False) analog rather than deleted. Removing it would shrink
+    the AI read / LPF below the 8 physical pins and crash the acquisition loop.
+    Idempotent. Run AFTER migrate_config_to_board_centric."""
     if not cfg.boards1608:
         return cfg
     for board in cfg.boards1608:
@@ -208,10 +211,17 @@ def migrate_counters_to_ctr(cfg: AppConfig) -> AppConfig:
                     mode=str(getattr(a, "counter_mode", "rate") or "rate"),
                     units=getattr(a, "units", "") or "",
                 ))
-            # do NOT keep it as an analog (frees the AI slot)
+            # keep the physical AI pin as a spare so the AI count stays at 8
+            kept.append(AnalogCfg(
+                name=f"AI{len(kept)}", slope=float(getattr(a, "slope", 1.0) or 1.0),
+                offset=float(getattr(a, "offset", 0.0) or 0.0),
+                cutoffHz=float(getattr(a, "cutoffHz", 0.0) or 0.0),
+                units="", include=False,
+            ))
         board.counters = moved
         board.analogs = kept
-        print(f"[CONFIG] Migrated {len(moved)} counter channel(s) AI->CTR on board #{board.boardNum}")
+        print(f"[CONFIG] Migrated {len(moved)} counter channel(s) AI->CTR on board #{board.boardNum} "
+              f"({len(kept)} AI pins kept)")
     return cfg
 
 def migrate_config_to_board_centric(cfg: AppConfig) -> AppConfig:
