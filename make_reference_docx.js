@@ -74,6 +74,8 @@ const ctrl = [
  ["condBatchMaxML","450","ml","Stop the pump if a single metered batch exceeds this (backstop for a meter that keeps counting on air)."],
  ["condPumpMinRun / condPumpMaxRun","1 / 120","s","Min run before dry-detect is armed / hard time cap (sets condPumpFault) if it never goes dry."],
  ["condLiquidTemp","98","C","Vent only now: condensate outlet below this = liquid -> close the steam vent (DO:VentValve)."],
+ ["demisterTripML / demisterResetML","80 / 5","cc","Demister DRAIN peristaltic pump hysteresis: ON at the trip (measured ~80cc), OFF pumped down to reset. Prevents the old single-threshold ~10Hz chatter."],
+ ["demisterPumpMlMin / demisterFloodML","500 / 150","ml/min / cc","Drain pump rate / flood-trip overflow level. Calibrate AI:DemisterWater to read cc."],
  ["sysMs","(server)","ms","System monotonic clock, stamped by the server each tick BEFORE evaluate. Read it for any interval math (now - startMs)."],
  ["dtReal","~timeIncSec","s","REAL elapsed time since the last tick = (sysMs - lastTickMs)/1000, guarded. ALL expression timing (PI integrals, condensate timers, sim dt) uses this, not timeIncSec."],
  ["timeIncSec","0.00625","s","Nominal tick period -- now only the FALLBACK for dtReal on the first ticks / a scheduling hiccup."],
