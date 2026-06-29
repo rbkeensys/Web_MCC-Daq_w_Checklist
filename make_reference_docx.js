@@ -84,6 +84,9 @@ const startup = [
  ["feedStepsPerRev","10000","steps/rev","Match driver microstep Pr0.00. L/min = rpm x steps x LPerStep."],
  ["feedPrimeML","1500","ml","Volume PRIME dead-reckons before heat (~half a ~3L HX side)."],
  ["feedPrimeRpm","120","rpm","Feed rpm during the PRIME fill."],
+ ["purgeRevRpm","120","rpm","STARTUP PURGE: feed-pump REVERSE rpm that empties the feed/evap side to a known baseline before priming."],
+ ["purgeMaxML","2000","ml","PURGE dead-reckon backstop: reverse-pump up to this if the empty sensor (yFeedEmpty) never trips (~1.5L primed + margin)."],
+ ["yFeedEmpty / purgeEmptyML","sensor / 50","- / ml","Input level detector = empty (real sensor; sim: evaporator inventory below purgeEmptyML)."],
  ["feedInvEst","0 (->~1500)","ml","Feed-side inventory dead-reckon: feed in - distillate out. Watch for 'getting low'."],
  ["condTubeTripML","130","ml","Volume in the HX bottom tube at the ~3/4 sensor (1.16in ID x 7.5in). The nominal distillate batch."],
  ["condTubeFullML","173","ml","Full HX bottom tube volume (1.16in ID x 10in deep)."],
@@ -203,8 +206,9 @@ const doc = new Document({
       P([new TextRun("TIMING: the server stamps the system monotonic clock (ms) into "), code("static.sysMs"), new TextRun(" every tick before the expressions evaluate. Setpoints differences it into "), code("static.dtReal"), new TextRun(" = (sysMs - lastTickMs)/1000 -- the REAL elapsed time, which every timer/integral/window uses instead of the nominal tick period. In sim it is accelerated as "), code("dtReal * simSpeed"), new TextRun("; in measure mode it is the true elapsed seconds. timeIncSec is only the fallback (first ticks / hiccups).")]),
 
       H2("2.1  Startup state machine (MVR System)"),
-      P("IDLE -> PRIME -> HEAT -> RUN. heatOK and the blower are gated on phase>=HEAT so the makeup element never dry-fires."),
-      BUL([b("PRIME: "), code("feedCmd = feedPrimeRpm"), new TextRun("; advance when "), code("feedInvEst >= feedPrimeML"), new TextRun(" (dead-reckon fill; a restart with a charged HX skips it).")]),
+      P("IDLE -> PURGE -> PRIME -> HEAT -> RUN. heatOK and the blower are gated on phase>=HEAT so the makeup element never dry-fires."),
+      BUL([b("PURGE: "), new TextRun("ALWAYS first -- reverse the feed pump ("), code("vel = -purgeRevRpm"), new TextRun(") to empty the feed/evaporator side to a KNOWN baseline, so an interrupted run (stop / power loss) restarts from a known state instead of trusting leftover inventory. Advance when the input level detector reads empty ("), code("yFeedEmpty"), new TextRun(") or the dead-reckon backstop "), code("purgeOutML >= purgeMaxML"), new TextRun(" is reached; then feedInvEst is zeroed.")]),
+      BUL([b("PRIME: "), code("feedCmd = feedPrimeRpm"), new TextRun("; advance when "), code("feedInvEst >= feedPrimeML"), new TextRun(" (dead-reckon fill from the purged-empty baseline).")]),
       BUL([b("HEAT: "), new TextRun("makeup heater on; advance when "), code("yEvapTemp > evapTempSet - 3"), new TextRun(" (seed prodMeas = prodSetSafe so the blower doesn't spike).")]),
       BUL([b("RUN: "), new TextRun("closed-loop production + feed.")]),
 
