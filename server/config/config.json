@@ -80,7 +80,7 @@
           "counter_mode": "rate"
         },
         {
-          "name": "EvapLevel",
+          "name": "EvapLowLevel",
           "slope": 1.0,
           "offset": 0.0,
           "cutoffHz": 5.0,
@@ -92,12 +92,12 @@
           "counter_mode": "rate"
         },
         {
-          "name": "AI7",
+          "name": "EvapMidLevel",
           "slope": 1.0,
           "offset": 0.0,
-          "cutoffHz": 0.0,
-          "units": "",
-          "include": false,
+          "cutoffHz": 5.0,
+          "units": "V",
+          "include": true,
           "counter_num": null,
           "pulses_per_unit": 1.0,
           "counter_window_s": 1.0,
