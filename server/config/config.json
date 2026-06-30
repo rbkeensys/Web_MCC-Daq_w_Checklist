@@ -146,16 +146,6 @@
           "pwmPeriodMs": 1000.0
         },
         {
-          "name": "BlowdownValve",
-          "normallyOpen": false,
-          "momentary": false,
-          "actuationTime": 0.0,
-          "include": true,
-          "logicElement": null,
-          "mode": "toggle",
-          "pwmPeriodMs": 1000.0
-        },
-        {
           "name": "VentValve",
           "normallyOpen": false,
           "momentary": false,
@@ -195,7 +185,7 @@
           "include": true,
           "enable_gate": false,
           "enable_kind": "do",
-          "enable_index": 6
+          "enable_index": 5
         },
         {
           "name": "BlowerRPM",
@@ -205,7 +195,7 @@
           "include": true,
           "enable_gate": false,
           "enable_kind": "do",
-          "enable_index": 6
+          "enable_index": 5
         }
       ],
       "counters": [
