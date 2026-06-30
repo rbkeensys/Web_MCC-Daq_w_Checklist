@@ -64,7 +64,7 @@ const ctrl = [
  ["kpSuper / kiSuper","0.05 / 0.01","-","Superheat-heater PI gains."],
  ["kProd","40","rpm/(L/min.s)","Blower production-control gain."],
  ["kFeedLevel","0.003","(L/min)/ml","Feed level-control gain (0 = feed-forward only)."],
- ["blowdownFrac","0.05","-","Feed excess over distillate (blowdown / concentrate purge)."],
+ ["blowdownFrac","0 (disabled)","-","Concentrate blowdown DISABLED -- no blowdown valve fitted, so feed exactly matches distillate. Dissolved solids concentrate over a run; drain/flush the evaporator periodically (manual blowdown). Set >0 only with a real bleed/drain."],
  ["prodPerRpm","0.00007","(L/min)/rpm","Blower->production estimate (feedInvEst while venting). Calibrate."],
  ["surgeThresh / surgeGain","1.0 / 5.0","C / (V/C)","Anti-surge bypass: opens below this dT, this many V/C."],
  ["condLevelThresh","2.5","V/units","AI:CondLevel above this = tube ~3/4 full -> start the condensate pump (the point sensor trip)."],
@@ -255,10 +255,10 @@ const doc = new Document({
       P([new TextRun("Blower estimate (used while venting and for feedInvEst): "), code("blowerProdEst = prodPerRpm * blowerRpmSafe * clamp((eT-95)/5,0,1)"), new TextRun(".")]),
 
       H2("2.7  Feed level control (FeedFollow + FeedwaterControl)"),
-      P("Feed = evaporator LEVEL control (real MVR behaviour): hold evapLevelSet using the actual level, with a production feed-forward. Active in HEAT + RUN so feed replaces boil-off immediately."),
-      EQ("feedLpm  = prodMeas*(1+blowdownFrac) + kFeedLevel*(evapLevelSet - yEvapLevel)"),
+      P([new TextRun("Two wet/dry sight-glass sensors + the calibrated feed pump (see 2.2a). Far below the operating mark the feed FILLS; near it, a slow EvapMid wet/dry integral holds the level. blowdownFrac = 0 (no blowdown valve), so the feed-forward is just the production rate:")]),
+      EQ("feedLpm  = prodMeas*(1+blowdownFrac) + feedLevelTrim   ; feedLevelTrim += kFeedLevelI * (EvapMid dry ? +1 : -1) * dt"),
       EQ("feedRpmSet = clamp( feedLpm / (stepsPerRev*LPerStep) , 0 , feedRpmMax )   -> STEP:Feed.VELOCITY"),
-      P([new TextRun("Velocity is driven as a LEVEL (0 = stop) so every run/stop transition re-triggers the stepper move. With no evaporator level sensor, swap "), code("yEvapLevel -> feedInvEst"), new TextRun(" (the dead-reckon).")]),
+      P([new TextRun("Velocity is driven as a LEVEL (0 = stop) so every run/stop transition re-triggers the stepper move. The level integral -- not the dead-reckon -- closes the loop, so a mis-calibrated flow meter can never run the level away ('wet' always pulls feed below boil-off).")]),
 
       H2("2.8  Feed-side inventory dead-reckon (feedInvEst)"),
       P("Positive-displacement feed pumped IN minus calibrated distillate OUT -- a level estimate that needs no sensor. While venting (meter ~0) it subtracts the blower estimate instead, so it tracks through the steamy startup."),
