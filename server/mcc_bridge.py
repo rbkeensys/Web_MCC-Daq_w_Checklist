@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.3.0"  # CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
+__version__ = "2.4.0"  # E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -21,6 +21,12 @@ except Exception as e:
     ul = None  # type: ignore
     HAVE_MCCULW = False
     print(f"[MCCBridge] mcculw import failed: {e}")
+
+# Digital-input direction enum (mcculw) -- optional so a missing enum can't disable AI/TC
+try:
+    from mcculw.enums import DigitalIODirection as MCCDigitalDir
+except Exception:
+    MCCDigitalDir = None
 
 # ---------- Try ULDAQ (E-TC preferred path) ----------
 HAVE_ULDAQ = False
@@ -48,6 +54,12 @@ except Exception as e:
     # Define a stub so _TC_MAP_ULDAQ construction doesn't crash
     ThermocoupleType = None  # type: ignore
     print(f"[MCCBridge] uldaq import failed: {e}")
+
+# Digital direction enum (uldaq) -- optional
+try:
+    from uldaq import DigitalDirection as UlDigitalDir
+except Exception:
+    UlDigitalDir = None
 
 # Optional MCC thermocouple enum (not on all installs)
 MCCTcType = None
@@ -96,6 +108,7 @@ class MCCBridge:
         self._boards_1608 = []  # List of E-1608 board numbers
         self._boards_etc_uldaq = []  # List of (board_num, dev, tdev) tuples for ULDAQ
         self._boards_etc_mcc = []  # List of E-TC board numbers for mcculw
+        self._etc_dins = []  # E-TC digital-input read specs (dicts): static_var, lib, ...
 
         # AO/DO soft mirrors - sized dynamically based on board count
         self._do_bits = []  # num_1608_boards * 8
@@ -123,7 +136,8 @@ class MCCBridge:
         self._boards_1608 = []
         self._boards_etc_uldaq = []
         self._boards_etc_mcc = []
-        
+        self._etc_dins = []
+
         # === Configure ALL E-1608 boards ===
         if cfg.boards1608:
             for board_cfg in cfg.boards1608:
@@ -248,6 +262,69 @@ class MCCBridge:
         
         total_etc = len(self._boards_etc_uldaq) + len(self._boards_etc_mcc)
         print(f"[MCCBridge] Configured {total_etc} E-TC board(s)")
+
+        # === Configure E-TC DIGITAL INPUTS (DIO bits as input; e.g. High-Level switch) ===
+        # mcculw is the Windows path; uldaq is the Linux path. Each read bit is stamped
+        # into its named static var each tick (see server.py) so an expression reads it.
+        for board_cfg in (cfg.boardsetc or []):
+            if not board_cfg.enabled:
+                continue
+            board_num = board_cfg.boardNum
+            for din in (getattr(board_cfg, "digitalInputs", None) or []):
+                if not getattr(din, "include", True):
+                    continue
+                bit = int(getattr(din, "bit", 0))
+                sv = getattr(din, "static_var", None)
+                inv = bool(getattr(din, "invert", False))
+                if not sv:
+                    continue
+                uldev = next((d for (bn, d, td) in self._boards_etc_uldaq if bn == board_num), None)
+                if uldev is not None:
+                    try:
+                        dio = uldev.get_dio_device()
+                        if dio is None:
+                            print(f"[MCCBridge] E-TC #{board_num}: no DIO subsystem (DIN '{din.name}' skipped)")
+                            continue
+                        port = dio.get_info().get_port_types()[0]
+                        if UlDigitalDir is not None:
+                            dio.d_config_bit(port, bit, UlDigitalDir.INPUT)
+                        self._etc_dins.append({"static_var": sv, "lib": "uldaq", "dio": dio,
+                                               "port": port, "bit": bit, "invert": inv, "name": din.name})
+                        print(f"[MCCBridge] E-TC #{board_num}: DIN '{din.name}' bit{bit} -> static.{sv} (uldaq)")
+                    except Exception as e:
+                        print(f"[MCCBridge] E-TC #{board_num}: DIN '{din.name}' uldaq config failed: {e}")
+                elif board_num in self._boards_etc_mcc:
+                    try:
+                        if MCCDigitalDir is not None:
+                            ul.d_config_bit(board_num, DigitalPortType.AUXPORT, bit, MCCDigitalDir.IN)
+                        self._etc_dins.append({"static_var": sv, "lib": "mcculw", "board": board_num,
+                                               "bit": bit, "invert": inv, "name": din.name})
+                        print(f"[MCCBridge] E-TC #{board_num}: DIN '{din.name}' bit{bit} -> static.{sv} (mcculw)")
+                    except Exception as e:
+                        print(f"[MCCBridge] E-TC #{board_num}: DIN '{din.name}' mcculw config failed: {e}")
+                else:
+                    print(f"[MCCBridge] E-TC #{board_num}: DIN '{din.name}' -- board not open, skipped")
+        if self._etc_dins:
+            print(f"[MCCBridge] Configured {len(self._etc_dins)} E-TC digital input(s)")
+
+    def read_etc_dins(self):
+        """Read the configured E-TC digital inputs. Returns {static_var: 0.0/1.0}.
+        mcculw (Windows) primary; uldaq (Linux) if that opened the board. On any read
+        error the bit reads 0. `invert` flips active-low switches to 1=wet."""
+        out = {}
+        for spec in (self._etc_dins or []):
+            v = 0
+            try:
+                if spec["lib"] == "uldaq":
+                    v = int(spec["dio"].d_bit_in(spec["port"], spec["bit"]))
+                elif spec["lib"] == "mcculw":
+                    v = int(ul.d_bit_in(spec["board"], DigitalPortType.AUXPORT, spec["bit"]))
+            except Exception:
+                v = 0
+            if spec.get("invert"):
+                v = 0 if v else 1
+            out[spec["static_var"]] = float(v)
+        return out
 
     def read_counters(self, ctr_out, now):
         """Fill the CTR signal array from the E-1608 hardware counters. Each slot is

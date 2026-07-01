@@ -13,7 +13,7 @@ NEW STRUCTURE:
 This allows multiple E-1608 and E-TC boards, each with their own channels.
 """
 
-__version__ = "2.3.1"  # FIX: migrate_counters_to_ctr keeps the counter's AI slot as a spare (include=False) instead of deleting it -- deleting shrank the AI read/LPF below the 8 physical E-1608 pins and crashed the acq loop (CTR0 is a separate terminal, not an AI pin). Prev 2.3.0: COUNTER (CTR) is now a first-class signal type: new CounterCfg model + boards1608[].counters[], get_all_counters(), and migrate_counters_to_ctr() which auto-moves legacy AnalogCfg.counter_num channels into board.counters. The E-1608 32-bit event counter (CTR0) is addressed as "CTR:Name" in expressions, separate from AI. AnalogCfg.counter_* fields kept ONLY for that migration read. Prev 2.2.0: AnalogCfg.counter_mode; 2.1.0: counter-sourced AI fields
+__version__ = "2.4.0"  # E-TC DIGITAL INPUTS: DigitalInCfg (name/bit/static_var/invert) + BoardEtcCfg.digitalInputs + get_all_etc_dins() -> (board_num, din) tuples. Read via mcc_bridge.read_etc_dins() (mcculw d_bit_in primary / uldaq dio.d_bit_in), stamped into the named static var each tick for a High-Level float switch (yEvapHigh). Prev 2.3.1: FIX migrate_counters_to_ctr keeps the counter's AI slot as a spare (include=False) instead of deleting it -- deleting shrank the AI read/LPF below the 8 physical E-1608 pins and crashed the acq loop (CTR0 is a separate terminal, not an AI pin). Prev 2.3.0: COUNTER (CTR) is now a first-class signal type: new CounterCfg model + boards1608[].counters[], get_all_counters(), and migrate_counters_to_ctr() which auto-moves legacy AnalogCfg.counter_num channels into board.counters. The E-1608 32-bit event counter (CTR0) is addressed as "CTR:Name" in expressions, separate from AI. AnalogCfg.counter_* fields kept ONLY for that migration read. Prev 2.2.0: AnalogCfg.counter_mode; 2.1.0: counter-sourced AI fields
 
 from pydantic import BaseModel
 from typing import List, Optional
@@ -78,6 +78,16 @@ class ThermocoupleCfg(BaseModel):
     offset: float = 0.0
     cutoffHz: float = 0.0  # Low-pass filter cutoff frequency (0 = disabled)
 
+class DigitalInCfg(BaseModel):
+    """E-TC digital input (DIO bit configured as INPUT). Wet/dry-style 0/5V sensors
+    (e.g. a High-Level float switch). Each read bit (0/1) is stamped into the named
+    static var before eval, so expressions read it as static.<static_var>."""
+    include: bool = True
+    name: str = "DIN"
+    bit: int = 0                       # DIO bit number on the board's AUXPORT (0..7)
+    static_var: str = "dinEvapHigh"    # expression static var to receive the 0/1 read
+    invert: bool = False               # True if the switch is active-low (0V=wet)
+
 # ==================== BOARD CONFIGS ====================
 
 class Board1608Cfg(BaseModel):
@@ -99,8 +109,9 @@ class BoardEtcCfg(BaseModel):
     sampleRateHz: float = 10.0
     blockSize: int = 1
     enabled: bool = True
-    # Each board owns its channels (8 TC per E-TC)
+    # Each board owns its channels (8 TC per E-TC, plus 8 DIO lines)
     thermocouples: List[ThermocoupleCfg] = []
+    digitalInputs: List[DigitalInCfg] = []
 
 # ==================== APP CONFIG ====================
 
@@ -171,6 +182,17 @@ def get_all_thermocouples(cfg: AppConfig) -> List[ThermocoupleCfg]:
     elif cfg.boardetc and cfg.thermocouples:
         # Old format fallback
         channels = cfg.thermocouples
+    return channels
+
+def get_all_etc_dins(cfg: AppConfig):
+    """Get all E-TC digital-input channels (DIO-as-input) from all enabled E-TC boards
+    as (board_num, DigitalInCfg) tuples so the bridge knows which board each is on."""
+    channels = []
+    if cfg.boardsetc:
+        for board in cfg.boardsetc:
+            if board.enabled:
+                for din in (getattr(board, "digitalInputs", None) or []):
+                    channels.append((board.boardNum, din))
     return channels
 
 def get_all_counters(cfg: AppConfig) -> List["CounterCfg"]:
