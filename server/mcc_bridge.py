@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.4.0"  # E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
+__version__ = "2.5.0"  # DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -203,6 +203,20 @@ class MCCBridge:
         self._do_bits = [0] * (num_1608 * 8)
         self._ao_vals = [0.0] * (num_1608 * 2)
         self._do_active_high = [True] * (num_1608 * 8)
+        # Per-DO INVERT (config `invert`): physical pin = logical XOR invert. Flatten
+        # order matches get_all_digital_outputs() == the set_do index.
+        self._do_invert = [False] * (num_1608 * 8)
+        _gi = 0
+        if cfg.boards1608:
+            for board_cfg in cfg.boards1608:
+                if not board_cfg.enabled:
+                    continue
+                for d in board_cfg.digitalOutputs:
+                    if _gi < len(self._do_invert):
+                        self._do_invert[_gi] = bool(getattr(d, "invert", False))
+                        if self._do_invert[_gi]:
+                            print(f"[MCCBridge] DO[{_gi}] '{d.name}' INVERTED (logical 1 -> pin 0)")
+                    _gi += 1
         
         # === PWM digital outputs (mode 'pwm' -> tick-rate software PWM) ===
         # Global DO index matches get_all_digital_outputs() flatten order (== set_do index).
@@ -218,6 +232,16 @@ class MCCBridge:
                         self._pwm[gidx] = {"period_s": max(1e-3, per), "duty": 0.0}
                         print(f"[MCCBridge] DO[{gidx}] '{d.name}' PWM period={per*1000:.0f}ms")
                     gidx += 1
+
+        # Drive every DO to its LOGICAL OFF state now that polarity is known: an
+        # inverted channel's off = physical 1, and the pins power up 0 -- without this
+        # an inverted load would sit energized from board power-up until the first write.
+        if HAVE_MCCULW:
+            for _i in range(len(self._do_bits)):
+                try:
+                    self.set_do(_i, False)
+                except Exception:
+                    pass
 
         # === Configure ALL E-TC boards ===
         if cfg.boardsetc:
@@ -384,11 +408,13 @@ class MCCBridge:
         p["duty"] = 0.0 if d < 0.0 else (1.0 if d > 1.0 else d)
 
     def pwm_step(self, now):
-        """Drive PWM-mode DOs from their duty at the tick rate. `now` = monotonic seconds."""
+        """Drive PWM-mode DOs from their duty at the tick rate. `now` = monotonic seconds.
+        set_do applies the channel's configured invert (was hardcoded active_high=True,
+        which made the config polarity flag dead for PWM channels)."""
         for ch, p in self._pwm.items():
             per = p["period_s"]
             on = ((now % per) / per) < p["duty"]
-            self.set_do(ch, on, active_high=True)
+            self.set_do(ch, on)
 
     def close(self):
         # Ensure DOs off if you want a safe state (optional):
@@ -542,8 +568,14 @@ class MCCBridge:
         # Returns [board0_ch0-7, board1_ch0-7, ...]
         return all_values
 
-    def set_do(self, index: int, state: bool, active_high=True):
-        """Set DO channel - routes to correct board based on index"""
+    def set_do(self, index: int, state: bool, active_high=None):
+        """Set DO channel - routes to correct board based on index.
+        active_high=None (the default) applies the channel's configured `invert`
+        (physical = logical XOR invert) -- what expression/PWM writes use. Manual
+        endpoints (DO buttons / buzz) may still pass an explicit active_high."""
+        if active_high is None:
+            inv = self._do_invert[index] if index < len(getattr(self, "_do_invert", [])) else False
+            active_high = not inv
         # Safety check
         if self.cfg is None:
             return
