@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.5.0"  # DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
+__version__ = "2.5.1"  # start_buzz(active_high=None) derives the channel Invert. Prev 2.5.0: DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -607,8 +607,11 @@ class MCCBridge:
             except Exception as e:
                 print(f"[MCCBridge] DO{index} (board #{board_num}, ch{channel}) write failed: {e}")
 
-    async def start_buzz(self, index: int, hz: float, active_high: bool = True):
-        self._do_active_high[index] = bool(active_high)
+    async def start_buzz(self, index: int, hz: float, active_high=None):
+        # active_high=None -> the channel's configured invert applies (set_do derives it)
+        if active_high is not None:
+            self._do_active_high[index] = bool(active_high)
+        _ah = active_high
         await self.stop_buzz(index)  # cancel any prior
         period = 1.0 / max(0.1, float(hz))
 
@@ -617,7 +620,7 @@ class MCCBridge:
             try:
                 while True:
                     on = not on
-                    self.set_do(index, on, active_high=self._do_active_high[index])
+                    self.set_do(index, on, active_high=_ah)
                     await asyncio.sleep(period / 2.0)
             except asyncio.CancelledError:
                 # guarantee OFF on cancel
