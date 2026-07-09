@@ -14,8 +14,8 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 - NUMBER, PLUS, MINUS, MULT, DIV, MOD, POWER
 """
 
-__version__ = "3.7.1"
-__updated__ = "2026-06-30"  # 3.7.1: AI + TC signal maps now include ALL channels indexed by PHYSICAL POSITION (matching the positional ai[]/tc[] value arrays), regardless of the include flag -- completes what 3.3.1 did for AO (DO was always positional). The include filter COMPACTED indices: with the bench E-TC auto-detect saving 6 unplugged TCs include=false, "TC:MakeupHtr" mapped to tc[0] = FeedTemp's slot, so the makeup over-temp trip watched the wrong sensor in real mode (and the 6 excluded TCs fell to "Unknown -> index 0"). Same latent shift for any excluded middle AI. Prev 3.7.0: CTR (hardware counter) is a first-class signal type -- "CTR:Name" emits ctr[idx]; ctr_map in SignalMap (from boards1608[].counters), CTR in get_signal_index + _KNOWN_SIG_TYPES, a double* ctr param threaded through per-expr + batch C++ signatures and the call site (after scale), ctr_map written to metadata. DLL signature 18 -> 19 params (delete any stale expressions.dll). Prev 3.6.0: rand()/randn()/sign() map to xorshift32 runtime helpers (expr_rand/expr_randn/expr_sign) added to the C++ preamble; floor/ceil/round pass through <cmath>. Pairs with expr_engine 2.6.0. 3.5.0: DO_ASSIGN emits the RAW value (server thresholds normal DOs / uses it as 0..1 PWM duty). 3.4.0: STEP: stepper-drive refs (reads/status/commands) reuse the vfd_in[]/vfd_out[] machinery tagged manager='stepper'; VFD refs + DLL signature unchanged. 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
+__version__ = "3.8.0"
+__updated__ = "2026-06-30"  # 3.8.0: PID reads WORK in the DLL -- pid_map filled from pid.json (loaded next to config.json), 'PID' branch in get_signal_index, and the pid[] input is STRIDE 4 per loop [out,err,pv,sp]: plain "PID:Name" = OUT, "PID:Name".OUT/.ERR/.PV/.SP (aliases OUTPUT/U/ERROR/MEAS/SET/SETPOINT) hit the slots. SIGNAL_PROP previously emitted literal 0.0 for anything non-VFD/STEP, and pid_map was never filled. Pairs with server 2.13.3 (builds the stride-4 array from telemetry with the CORRECT keys -- it passed tel.get('output') but the telemetry key is 'out', so every PID value entering expressions was 0). Prev 3.7.1: AI + TC signal maps now include ALL channels indexed by PHYSICAL POSITION (matching the positional ai[]/tc[] value arrays), regardless of the include flag -- completes what 3.3.1 did for AO (DO was always positional). The include filter COMPACTED indices: with the bench E-TC auto-detect saving 6 unplugged TCs include=false, "TC:MakeupHtr" mapped to tc[0] = FeedTemp's slot, so the makeup over-temp trip watched the wrong sensor in real mode (and the 6 excluded TCs fell to "Unknown -> index 0"). Same latent shift for any excluded middle AI. Prev 3.7.0: CTR (hardware counter) is a first-class signal type -- "CTR:Name" emits ctr[idx]; ctr_map in SignalMap (from boards1608[].counters), CTR in get_signal_index + _KNOWN_SIG_TYPES, a double* ctr param threaded through per-expr + batch C++ signatures and the call site (after scale), ctr_map written to metadata. DLL signature 18 -> 19 params (delete any stale expressions.dll). Prev 3.6.0: rand()/randn()/sign() map to xorshift32 runtime helpers (expr_rand/expr_randn/expr_sign) added to the C++ preamble; floor/ceil/round pass through <cmath>. Pairs with expr_engine 2.6.0. 3.5.0: DO_ASSIGN emits the RAW value (server thresholds normal DOs / uses it as 0..1 PWM duty). 3.4.0: STEP: stepper-drive refs (reads/status/commands) reuse the vfd_in[]/vfd_out[] machinery tagged manager='stepper'; VFD refs + DLL signature unchanged. 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
 
 import json
 import os
@@ -35,7 +35,8 @@ _STEP_CMD_TOKENS = {"ENABLE","DISABLE","RUN","STOP","VELOCITY","VEL","RPM","MOVE
 class SignalMap:
     """Maps signal names to array indices"""
     
-    def __init__(self, config: Dict, scales_cfg: Optional[List[Dict]] = None):
+    def __init__(self, config: Dict, scales_cfg: Optional[List[Dict]] = None,
+                 pids_cfg: Optional[List[Dict]] = None):
         self.ai_map = {}
         self.ao_map = {}
         self.do_map = {}
@@ -105,6 +106,12 @@ class SignalMap:
             for i, sc in enumerate(scales_cfg):
                 name = sc.get('name', f'Scale{i}')
                 self.scale_map[name] = i
+
+        # PID loops from pid.json ('loops'), by position. The pid[] input array is
+        # STRIDE 4 per loop: [out, err, pv, sp] (server builds it from telemetry).
+        if pids_cfg:
+            for i, lp in enumerate(pids_cfg):
+                self.pid_map[lp.get('name', f'PID{i}')] = i
     
     def get_signal_index(self, sig_type: str, sig_name: str) -> int:
         """Get array index for a signal"""
@@ -153,6 +160,15 @@ class SignalMap:
             else:
                 print(f"[CPP-WARN] Unknown CTR signal '{sig_name}' not in config, using index 0")
                 print(f"[CPP-WARN] Available CTRs: {list(self.ctr_map.keys())}")
+                return 0
+        elif sig_type == 'PID':
+            if sig_name in self.pid_map:
+                return self.pid_map[sig_name]
+            elif sig_name.isdigit():
+                return int(sig_name)
+            else:
+                print(f"[CPP-WARN] Unknown PID loop '{sig_name}' not in pid.json, using index 0")
+                print(f"[CPP-WARN] Available PIDs: {list(self.pid_map.keys())}")
                 return 0
         elif sig_type == 'SCALE':
             if sig_name in self.scale_map:
@@ -488,6 +504,9 @@ class CPPCodeGenerator:
             sig_type, sig_name = node.value.split(':', 1)
             sig_type_u = sig_type.strip().upper()
             idx = self.signal_map.get_signal_index(sig_type_u, sig_name)
+            if sig_type_u == 'PID':
+                # pid[] is stride-4 per loop [out, err, pv, sp]; plain ref = OUT
+                return f"pid[{idx * 4}]"
             array_name = sig_type_u.lower()
             if sig_type_u == 'DO':
                 array_name = 'do_state'
@@ -543,8 +562,18 @@ class CPPCodeGenerator:
             return f"result = ao_out[{idx}] = {expr};"
 
         elif node_type == 'SIGNAL_PROP':
-            # "VFD:Name".RPM etc. -> live status read via vfd_in[]; others -> 0.0
+            # "VFD:Name".RPM etc. -> live status read via vfd_in[]; "PID:Name".OUT/ERR/PV/SP
+            # -> the stride-4 pid[] slots; others -> 0.0
             ref, prop = node.value if isinstance(node.value, (tuple, list)) else (node.value, '')
+            if isinstance(ref, str) and ref[:4].upper() == 'PID:':
+                _nm = ref.split(':', 1)[1].strip()
+                _idx = self.signal_map.get_signal_index('PID', _nm)
+                _off = {'OUT': 0, 'OUTPUT': 0, 'U': 0, 'ERR': 1, 'ERROR': 1,
+                        'PV': 2, 'MEAS': 2, 'SP': 3, 'SET': 3, 'SETPOINT': 3}.get(str(prop).upper())
+                if _off is None:
+                    print(f"[CPP-WARN] Unknown PID prop '.{prop}' on {ref} (OUT/ERR/PV/SP), using OUT")
+                    _off = 0
+                return f"pid[{_idx * 4 + _off}]"
             if isinstance(ref, str) and ref[:4].upper() == 'VFD:':
                 drive = ref.split(':', 1)[1].strip()
                 return f"vfd_in[{self._vfd_read_idx(drive, str(prop).upper(), 'status')}]"
@@ -791,7 +820,17 @@ def compile_all_expressions(expressions_file: str, config_file: str, output_dir:
     except (FileNotFoundError, ValueError):
         scales_cfg = []
 
-    signal_map = SignalMap(config, scales_cfg)
+    pids_cfg = []
+    try:
+        _pid_path = _os.path.join(_os.path.dirname(_os.path.abspath(config_file)), 'pid.json')
+        if _os.path.exists(_pid_path):
+            with open(_pid_path) as f:
+                pids_cfg = json.load(f).get('loops', [])
+    except Exception as e:
+        print(f"[CPP-WARN] pid.json load failed (PID refs will not resolve by name): {e}")
+        pids_cfg = []
+
+    signal_map = SignalMap(config, scales_cfg, pids_cfg)
     print(f"[CPP] Signal map: {len(signal_map.ai_map)} AI, {len(signal_map.do_map)} DO, "
           f"{len(signal_map.ao_map)} AO, {len(signal_map.tc_map)} TC, "
           f"{len(signal_map.scale_map)} Scale")
