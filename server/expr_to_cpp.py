@@ -14,8 +14,8 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 - NUMBER, PLUS, MINUS, MULT, DIV, MOD, POWER
 """
 
-__version__ = "3.6.0"
-__updated__ = "2026-06-27"  # 3.7.0: CTR (hardware counter) is a first-class signal type -- "CTR:Name" emits ctr[idx]; ctr_map in SignalMap (from boards1608[].counters), CTR in get_signal_index + _KNOWN_SIG_TYPES, a double* ctr param threaded through per-expr + batch C++ signatures and the call site (after scale), ctr_map written to metadata. DLL signature 18 -> 19 params (delete any stale expressions.dll). Prev 3.6.0: rand()/randn()/sign() map to xorshift32 runtime helpers (expr_rand/expr_randn/expr_sign) added to the C++ preamble; floor/ceil/round pass through <cmath>. Pairs with expr_engine 2.6.0. 3.5.0: DO_ASSIGN emits the RAW value (server thresholds normal DOs / uses it as 0..1 PWM duty). 3.4.0: STEP: stepper-drive refs (reads/status/commands) reuse the vfd_in[]/vfd_out[] machinery tagged manager='stepper'; VFD refs + DLL signature unchanged. 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
+__version__ = "3.7.1"
+__updated__ = "2026-06-30"  # 3.7.1: AI + TC signal maps now include ALL channels indexed by PHYSICAL POSITION (matching the positional ai[]/tc[] value arrays), regardless of the include flag -- completes what 3.3.1 did for AO (DO was always positional). The include filter COMPACTED indices: with the bench E-TC auto-detect saving 6 unplugged TCs include=false, "TC:MakeupHtr" mapped to tc[0] = FeedTemp's slot, so the makeup over-temp trip watched the wrong sensor in real mode (and the 6 excluded TCs fell to "Unknown -> index 0"). Same latent shift for any excluded middle AI. Prev 3.7.0: CTR (hardware counter) is a first-class signal type -- "CTR:Name" emits ctr[idx]; ctr_map in SignalMap (from boards1608[].counters), CTR in get_signal_index + _KNOWN_SIG_TYPES, a double* ctr param threaded through per-expr + batch C++ signatures and the call site (after scale), ctr_map written to metadata. DLL signature 18 -> 19 params (delete any stale expressions.dll). Prev 3.6.0: rand()/randn()/sign() map to xorshift32 runtime helpers (expr_rand/expr_randn/expr_sign) added to the C++ preamble; floor/ceil/round pass through <cmath>. Pairs with expr_engine 2.6.0. 3.5.0: DO_ASSIGN emits the RAW value (server thresholds normal DOs / uses it as 0..1 PWM duty). 3.4.0: STEP: stepper-drive refs (reads/status/commands) reuse the vfd_in[]/vfd_out[] machinery tagged manager='stepper'; VFD refs + DLL signature unchanged. 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
 
 import json
 import os
@@ -53,10 +53,13 @@ class SignalMap:
             if not board.get('enabled', True):
                 continue
             
+            # Include ALL AIs regardless of include flag, indexed by PHYSICAL POSITION:
+            # the ai[] value array (read_ai_all -> ai_scaled) is positional over every
+            # entry, so filtering by include here COMPACTED the indices -- an excluded
+            # middle channel silently shifted every later "AI:Name" onto the wrong pin.
             for ch in board.get('analogs', []):
-                if ch.get('include', True):
-                    self.ai_map[ch['name']] = ai_index
-                    ai_index += 1
+                self.ai_map[ch['name']] = ai_index
+                ai_index += 1
             
             # Include ALL DOs regardless of include flag (expressions may reference them)
             for ch in board.get('digitalOutputs', []):
@@ -82,16 +85,19 @@ class SignalMap:
                     self.ctr_map[ch['name']] = ctr_index
                     ctr_index += 1
 
-        # TC channels
+        # TC channels -- ALL entries, indexed by PHYSICAL POSITION (the tc[] value array
+        # from read_tc_all/get_all_thermocouples is positional over every entry). The old
+        # include filter compacted indices: with the bench's 6 unplugged TCs saved as
+        # include=false, "TC:MakeupHtr" mapped to tc[0] -- which is FeedTemp's slot -- so
+        # the makeup over-temp trip would have watched the WRONG sensor in real mode.
         tc_index = 0
         for board in config.get('boardsetc', []):
             if not board.get('enabled', True):
                 continue
-            
+
             for ch in board.get('thermocouples', []):
-                if ch.get('include', True):
-                    self.tc_map[ch['name']] = tc_index
-                    tc_index += 1
+                self.tc_map[ch['name']] = tc_index
+                tc_index += 1
 
         # Serial scales come from scales.json (separate from board config).
         # Index i corresponds to the value SerialScaleManager.get_values()[i].

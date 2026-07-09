@@ -2183,8 +2183,8 @@ function feedTick(msg){
    Driven by the control's Interlocks fault flags, so sim and real behave the same. */
 const FAULT_MSGS = {
   evapLevelErr: 'Evaporator Level Error\n\n'
-    + 'The low sight-glass sensor (EvapLowLevel) did not go wet after priming.\n'
-    + 'Possible level-sensor or feed peristaltic-pump failure.\n\n'
+    + 'The level sender (EvapLevel) did not reach the low mark after priming.\n'
+    + 'Possible sender/wiring or feed peristaltic-pump failure.\n\n'
     + 'Check and try again.',
   evapHighWarn: 'High Level Warning\n\n'
     + 'The evaporator High-Level switch (EvapHighLevel) tripped.\n'

@@ -80,7 +80,7 @@
           "counter_mode": "rate"
         },
         {
-          "name": "EvapLowLevel",
+          "name": "EvapLevel",
           "slope": 1.0,
           "offset": 0.0,
           "cutoffHz": 5.0,
@@ -92,12 +92,12 @@
           "counter_mode": "rate"
         },
         {
-          "name": "EvapMidLevel",
+          "name": "AI7",
           "slope": 1.0,
           "offset": 0.0,
-          "cutoffHz": 5.0,
-          "units": "V",
-          "include": true,
+          "cutoffHz": 0.0,
+          "units": "",
+          "include": false,
           "counter_num": null,
           "pulses_per_unit": 1.0,
           "counter_window_s": 1.0,
@@ -107,27 +107,30 @@
       "digitalOutputs": [
         {
           "name": "MakeupHtr",
-          "normallyOpen": false,
+          "invert": true,
+          "normallyOpen": true,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "pwm",
+          "mode": "toggle",
           "pwmPeriodMs": 1000.0
         },
         {
           "name": "SuperHtr",
-          "normallyOpen": false,
+          "invert": true,
+          "normallyOpen": true,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "pwm",
+          "mode": "toggle",
           "pwmPeriodMs": 1000.0
         },
         {
           "name": "CondPump",
-          "normallyOpen": false,
+          "invert": true,
+          "normallyOpen": true,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
@@ -137,7 +140,8 @@
         },
         {
           "name": "DemisterDrain",
-          "normallyOpen": false,
+          "invert": true,
+          "normallyOpen": true,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
@@ -147,7 +151,8 @@
         },
         {
           "name": "VentValve",
-          "normallyOpen": false,
+          "invert": true,
+          "normallyOpen": true,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
@@ -157,7 +162,8 @@
         },
         {
           "name": "HeaterEnable",
-          "normallyOpen": false,
+          "invert": true,
+          "normallyOpen": true,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
@@ -167,10 +173,22 @@
         },
         {
           "name": "Alarm",
-          "normallyOpen": false,
+          "invert": true,
+          "normallyOpen": true,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
+          "logicElement": null,
+          "mode": "toggle",
+          "pwmPeriodMs": 1000.0
+        },
+        {
+          "name": "DO7",
+          "invert": false,
+          "normallyOpen": true,
+          "momentary": false,
+          "actuationTime": 0.0,
+          "include": false,
           "logicElement": null,
           "mode": "toggle",
           "pwmPeriodMs": 1000.0
@@ -219,7 +237,7 @@
       "enabled": true,
       "thermocouples": [
         {
-          "include": true,
+          "include": false,
           "ch": 0,
           "name": "FeedTemp",
           "type": "K",
@@ -227,7 +245,7 @@
           "cutoffHz": 0.2
         },
         {
-          "include": true,
+          "include": false,
           "ch": 1,
           "name": "EvapTemp",
           "type": "K",
@@ -235,7 +253,7 @@
           "cutoffHz": 0.2
         },
         {
-          "include": true,
+          "include": false,
           "ch": 2,
           "name": "VaporIn",
           "type": "K",
@@ -243,7 +261,7 @@
           "cutoffHz": 0.2
         },
         {
-          "include": true,
+          "include": false,
           "ch": 3,
           "name": "VaporOut",
           "type": "K",
@@ -251,7 +269,7 @@
           "cutoffHz": 0.2
         },
         {
-          "include": true,
+          "include": false,
           "ch": 4,
           "name": "CondTemp",
           "type": "K",
@@ -259,7 +277,7 @@
           "cutoffHz": 0.2
         },
         {
-          "include": true,
+          "include": false,
           "ch": 5,
           "name": "SteamChest",
           "type": "K",
@@ -282,7 +300,8 @@
           "offset": 0.0,
           "cutoffHz": 0.2
         }
-      ]
+      ],
+      "digitalInputs": []
     }
   ],
   "board1608": null,
