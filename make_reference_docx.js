@@ -82,7 +82,7 @@ const ctrl = [
  ["condBatchMaxML","450","ml","Stop the pump if a single metered batch exceeds this (backstop for a meter that keeps counting on air)."],
  ["condPumpMinRun / condPumpMaxRun","1 / 120","s","Min run before dry-detect is armed / hard time cap (sets condPumpFault) if it never goes dry."],
  ["condLiquidTemp","98","C","Condensate outlet below this = LIQUID (count meter, sim collects condensate). Not the vent anymore."],
- ["ventOpenTemp / ventCloseTemp","92 / 95","C","Startup air-purge vent: OPEN below / CLOSE above this blower-out vapor temp (yVaporOut). Hysteresis. Lowered from 98/101 -- the rig never reached 101 at the vent TC, so it sat open bleeding steam; 95 seals it as soon as real vapor shows."],
+ ["ventOpenTemp / ventCloseTemp","92 / 95","C","Startup air-purge vent: OPEN below / CLOSE above this blower-out vapor temp (yVaporOut). Lowered from 98/101 -- the rig never reached 101 at the vent TC, so it sat open bleeding steam. Once closed it LATCHES closed for the rest of the run (ventDone): the air purge is once-per-run; a mid-run upset cooling yVaporOut must not re-open it. ProductionControl does not integrate while the vent is open (production is being vented -- the meter can't see it)."],
  ["DemisterWater / DemisterFlood / CondLevel","wet-dry","0-5V","ALL WET/DRY point sensors (0=dry, 5V=wet), like the Evap sensors. Muxed to 0/1 (real: AI > 2.5V). Mist = water at the demister; Flood = overflow above it; CondLevel = condensate at the tube sensor (~3/4 up)."],
  ["demisterDrainRunS / demisterPumpMlMin","12 / 500","s / ml/min","Demister drain peristaltic pump: ON when DemisterWater wet, runs at least demisterDrainRunS to clear below the sensor (single wet/dry threshold + min-run = no chatter), then off when dry. (sim trip/flood levels demisterTripML 80 / demisterFloodML 150 cc set where the sim sensors go wet.)"],
  ["sysMs","(server)","ms","System monotonic clock, stamped by the server each tick BEFORE evaluate. Read it for any interval math (now - startMs)."],
@@ -107,7 +107,7 @@ const startup = [
  ["condCalFactor","1.0 (MANUAL)","x","Flow-meter cal -- set ONCE against the feed pump at steady level: distillate = feed/(1+blowdownFrac). Auto-cal removed (it looped through the blower production control)."],
  ["evapLevelCheckML","1000","ml","PRIME verify: if this much fill is dead-reckoned and EvapLow is still DRY -> evapLevelErr fault + popup (feed-pump or sensor failure)."],
  ["feedInvEst","0 (->~2475)","ml","Feed-side inventory estimate: dead-reckon fused with the sender (snaps + window). Seeded from the sender at run start and purge exit -- never fiat-zeroed."],
- ["blowerStartTemp / blowerRampRpm0 / blowerRampRpmS","90 / 200 / 10","C / rpm / rpm/s","Blower SOFT-START: OFF below blowerStartTemp (cold evaporator has no vapor -- it only pulls vacuum), then ramp from blowerRampRpm0 at blowerRampRpmS to the target. blowerCmdRpm is the ONLY rpm sent to the VFD."],
+ ["blowerStartTemp / blowerStopTemp / blowerRampRpm0 / blowerRampRpmS","90 / 80 / 200 / 10","C / C / rpm / rpm/s","Blower SOFT-START with HYSTERESIS: starts at blowerStartTemp (cold evaporator has no vapor -- it only pulls vacuum), ramps from blowerRampRpm0 at blowerRampRpmS to the target. Once RUNNING it stops only below blowerStopTemp -- the pipe TC hovers near 90 with flow, and a single 90C gate limit-cycled the blower on the rig. blowerCmdRpm is the ONLY rpm sent to the VFD."],
  ["condTubeTripML","300","ml","Condensate reservoir level at the wet/dry sensor (~3/4 up) = pump-START. The nominal distillate batch."],
  ["condTubeFullML","400","ml","Full condensate reservoir volume."],
 ];
@@ -278,6 +278,7 @@ const doc = new Document({
       EQ("feedLevelTrim += kFeedLevelI * (EvapMid dry ? +1 : -1) * dt      (INSIDE the deadband only)"),
       EQ("feedRpmSet = clamp( feedLpm / (stepsPerRev*LPerStep) , 0 , feedRpmMax )   -> STEP:Feed.VELOCITY"),
       P([new TextRun("Velocity is driven as a LEVEL (0 = stop) so every run/stop transition re-triggers the stepper move. The edge integral -- not the dead-reckon -- closes the tight loop, so a mis-calibrated flow meter can never run the level away ('wet' always pulls feed below boil-off).")]),
+      P([b("COLD-CRASH GUARD (RUN only): "), new TextRun("a max-feed level recovery dumps cold water faster than the heaters can carry (0.27 L/min of 18C feed ~ 2.6 kW > the 2 kW makeup) -- on the rig this crashed the evap temp under the blower gate and the run limit-cycled. The level-correction terms fold back to production-match as "), code("yEvapTemp"), new TextRun(" sags: full correction at set-3, production-match only by set-8. Level can wait; heat can't.")]),
 
       H2("2.8  Feed-side inventory dead-reckon (feedInvEst)"),
       P("Positive-displacement feed pumped IN minus calibrated distillate OUT -- a level estimate that needs no sensor. While venting (meter ~0) it subtracts the blower estimate instead, so it tracks through the steamy startup."),
