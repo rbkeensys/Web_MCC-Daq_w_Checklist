@@ -82,7 +82,7 @@ const ctrl = [
  ["condBatchMaxML","450","ml","Stop the pump if a single metered batch exceeds this (backstop for a meter that keeps counting on air)."],
  ["condPumpMinRun / condPumpMaxRun","1 / 120","s","Min run before dry-detect is armed / hard time cap (sets condPumpFault) if it never goes dry."],
  ["condLiquidTemp","98","C","Condensate outlet below this = LIQUID (count meter, sim collects condensate). Not the vent anymore."],
- ["ventOpenTemp / ventCloseTemp","98 / 101","C","Startup air-purge vent: OPEN below / CLOSE above this blower-out vapor temp (yVaporOut). Hysteresis."],
+ ["ventOpenTemp / ventCloseTemp","92 / 95","C","Startup air-purge vent: OPEN below / CLOSE above this blower-out vapor temp (yVaporOut). Hysteresis. Lowered from 98/101 -- the rig never reached 101 at the vent TC, so it sat open bleeding steam; 95 seals it as soon as real vapor shows."],
  ["DemisterWater / DemisterFlood / CondLevel","wet-dry","0-5V","ALL WET/DRY point sensors (0=dry, 5V=wet), like the Evap sensors. Muxed to 0/1 (real: AI > 2.5V). Mist = water at the demister; Flood = overflow above it; CondLevel = condensate at the tube sensor (~3/4 up)."],
  ["demisterDrainRunS / demisterPumpMlMin","12 / 500","s / ml/min","Demister drain peristaltic pump: ON when DemisterWater wet, runs at least demisterDrainRunS to clear below the sensor (single wet/dry threshold + min-run = no chatter), then off when dry. (sim trip/flood levels demisterTripML 80 / demisterFloodML 150 cc set where the sim sensors go wet.)"],
  ["sysMs","(server)","ms","System monotonic clock, stamped by the server each tick BEFORE evaluate. Read it for any interval math (now - startMs)."],
