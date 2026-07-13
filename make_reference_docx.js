@@ -59,7 +59,7 @@ const safety = [
  ["superHtrRegC / kpShElem","200 / 0.05","C / duty/C","SH ELEMENT-TEMP REGULATION: duty capped so the cartridge holds ~200C until real vapor flow carries the heat away (poor coupling into thin vapor); then the superheat PI takes over. Full duty 20C below target."],
  ["maxEvapPress / maxSteamPress","25 / 35","psia","Over-pressure trips."],
  ["maxVaporOut","140","C","Vapor-out over-temp trip."],
- ["minSuperheat / superHFaultS","0.5 / 20","C / s","Wet-compression (low-superheat) trip. Fires/arms only at REAL speed (target*0.9 AND >= blowerMinRpm) AND with the evaporator at temp (>= set-5); DISARMS whenever the blower leaves at-speed (restart ramps legitimately collapse superheat); superheat must sit below the floor for superHFaultS CONTINUOUSLY (swings dip briefly, wet compression persists). Latched."],
+ ["minSuperheat / superHFaultS","0.5 / 20","C / s","Wet-compression (low-superheat) trip. Fires/arms only at REAL speed (target*0.9 AND >= blowerMinRpm) AND with the evaporator at temp (>= set-5); DISARMS whenever the blower leaves at-speed (restart ramps legitimately collapse superheat); superheat must sit below the floor for superHFaultS CONTINUOUSLY (swings dip briefly, wet compression persists); and the sag does NOT count while the ELEMENT REGULATOR caps the duty (shElemLim: a 200C mesh can't be wet -- that sag is a capability limit; real wet comp cools the mesh, the cap releases, and the sag then counts). Latched."],
  ["evapHighMark","2750","ml","HIGH-LEVEL WARNING (2600|2900 plateau edge, trips on the 2900 plateau; E-TC DIN float ORed in): latched UI popup + FeedFollow cuts the feed. NOT during PURGE -- an overfull warm start reads HIGH while the purge is draining it. Not a hard trip."],
  ["senderFaultS / senderErr","2 / latch","s","Level-sender open/short (V outside -0.3..3.3) while running, debounced -> LATCHED trip + popup (a dead sender mid-run would read 'all dry' and slow-flood). Clears on stop."],
  ["purgeStallS / purgeErr","240 / latch","s","PURGE watchdog: level must keep dropping while purging with a good sender (disarmed once bottom is reached). Stall = pump/direction fault -> LATCHED trip + popup."],
@@ -67,7 +67,7 @@ const safety = [
 ];
 const ctrl = [
  ["kpMakeup / kiMakeup","0.05 / 0.01","-","Makeup-heater PI gains."],
- ["kpSuper / kiSuper","0.05 / 0.01","-","Superheat-heater PI gains."],
+ ["kpSuper / kiSuper","0.01 / 0.0005","-","Superheat-heater PI gains. Retuned for the THIN-FLOW end where plant gain is ~100C superheat per unit duty (operating duty ~0.05 holds ~5C) -- the original 0.05/0.01 slammed the duty 0..0.66 and bounced the element 173..209C on the rig."],
  ["kProd","20","rpm/(L/min.s)","Blower production-control gain. Anti-windup: the target is not raised while the soft-start/ramped command still lags it."],
  ["kFeedLevel / kFeedLevelI","0.015 / 0.0015","(L/min)/ml, (L/min)/s","Feed level P gain (active OUTSIDE the deadband: fill + upset recovery) / slow edge-ride integral (INSIDE the deadband; the tight hold)."],
  ["levelDeadML","100","ml","P deadband around the setpoint: P silent inside (the EvapMid edge integral rules), active outside."],
