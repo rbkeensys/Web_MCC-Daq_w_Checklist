@@ -59,7 +59,7 @@ const safety = [
  ["superHtrRegC / kpShElem","200 / 0.05","C / duty/C","SH ELEMENT-TEMP REGULATION: duty capped so the cartridge holds ~200C until real vapor flow carries the heat away (poor coupling into thin vapor); then the superheat PI takes over. Full duty 20C below target."],
  ["maxEvapPress / maxSteamPress","25 / 35","psia","Over-pressure trips."],
  ["maxVaporOut","140","C","Vapor-out over-temp trip."],
- ["minSuperheat","0.5","C","Wet-compression (low-superheat) trip; arms only once the blower has REACHED its target rpm (soft-start ramp legitimately collapses superheat). Latched-arm."],
+ ["minSuperheat / superHFaultS","0.5 / 20","C / s","Wet-compression (low-superheat) trip. Fires/arms only at REAL speed (target*0.9 AND >= blowerMinRpm) AND with the evaporator at temp (>= set-5); DISARMS whenever the blower leaves at-speed (restart ramps legitimately collapse superheat); superheat must sit below the floor for superHFaultS CONTINUOUSLY (swings dip briefly, wet compression persists). Latched."],
  ["evapHighMark","2750","ml","HIGH-LEVEL WARNING (2600|2900 plateau edge, trips on the 2900 plateau; E-TC DIN float ORed in): latched UI popup + FeedFollow cuts the feed. NOT during PURGE -- an overfull warm start reads HIGH while the purge is draining it. Not a hard trip."],
  ["senderFaultS / senderErr","2 / latch","s","Level-sender open/short (V outside -0.3..3.3) while running, debounced -> LATCHED trip + popup (a dead sender mid-run would read 'all dry' and slow-flood). Clears on stop."],
  ["purgeStallS / purgeErr","240 / latch","s","PURGE watchdog: level must keep dropping while purging with a good sender (disarmed once bottom is reached). Stall = pump/direction fault -> LATCHED trip + popup."],
