@@ -81,6 +81,7 @@ const ctrl = [
  ["condEmptyFlow","0.25","L/min","Pump-outlet flow below this = tube DRY. Set between the ~0 dry reading and the condensate-pump rate (0.5)."],
  ["condEmptyDebounce","2.5","s","Dry must persist this long before the pump stops. Keep >= 2x counter_window_s (the meter's rate window)."],
  ["condBatchMaxML","450","ml","Stop the pump if a single metered batch exceeds this (backstop for a meter that keeps counting on air)."],
+ ["condMeterFaultS","240","s","MEASUREMENT-DEAD warning: cumulative pump-ON time since the last real batch above this with ~no metered volume -> condMeterErr popup (pump airlocked, meter dead, or CondLevel stuck wet micro-cycling the pump). Production control is BLIND while this persists (blower holds at the seek cap). Warning, not a trip; clears on a real batch or Stop."],
  ["condRateMinML / condRateMaxLpm","50 / 0.5","ml / L/min","Production-rate SANITY (rig 7/13): batches under condRateMinML are noise (pump-prime lag trips the dry-detect at ~1ml) -- no rate is computed and the fill timer KEEPS RUNNING (micro-batches resetting it made a real 458ml batch read an impossible 0.75 L/min and the blower turned down 3400->800 chasing it). Computed rates above condRateMaxLpm (~28kW-equivalent) are discarded; the last good rate is kept."],
  ["condPumpMinRun / condPumpMaxRun","1 / 120","s","Min run before dry-detect is armed / hard time cap (sets condPumpFault) if it never goes dry."],
  ["condLiquidTemp","98","C","Condensate outlet below this = LIQUID (count meter, sim collects condensate). Not the vent anymore."],
