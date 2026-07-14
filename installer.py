@@ -317,7 +317,23 @@ class InstallerGUI:
                 for json_file in config_src.glob("*.json"):
                     shutil.copy2(json_file, install_dir / "config" / json_file.name)
                 break
-        
+
+        # Copy the PREBUILT expression DLL: target machines have no MSVC compiler,
+        # so without this the app falls back to the slow python expression engine.
+        self.update_progress("Copying compiled expression DLL...")
+        for comp_src in [self.source_dir / "compiled", self.installer_dir / "compiled"]:
+            if comp_src.exists():
+                copied = False
+                for f in comp_src.glob("*"):
+                    if f.is_file():
+                        try:
+                            shutil.copy2(f, install_dir / "compiled" / f.name)
+                            copied = True
+                        except Exception as e:
+                            print(f"Warning: Could not copy {f.name}: {e}")
+                if copied:
+                    break
+
         # Copy all .json and .txt files from root (layout, checklist, etc.)
         self.update_progress("Copying root JSON and text files...")
         for pattern in ['*.json', '*.txt']:

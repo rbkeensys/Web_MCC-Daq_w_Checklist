@@ -16,6 +16,8 @@ a = Analysis(
         # Include web and config files
         ('installer_bundle/web/', 'web'),
         ('installer_bundle/server/config/', 'server/config'),
+        # Prebuilt expression DLL (target machines have no MSVC compiler)
+        ('installer_bundle/compiled/', 'compiled'),
         # Include root .json and .txt files
         ('installer_bundle/*.json', '.'),
         ('installer_bundle/*.txt', '.'),

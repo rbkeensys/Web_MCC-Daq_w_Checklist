@@ -102,6 +102,15 @@ REM Copy web and config to staging (installer will bundle these)
 xcopy /E /I /Y "web" "installer_bundle\web\" >nul
 xcopy /E /I /Y "server\config" "installer_bundle\server\config\" >nul
 
+REM Copy the PREBUILT expression DLL: the target machine has no MSVC compiler,
+REM so without this the app falls back to the slow python expression engine.
+REM (Editing+saving expressions ON the target still needs VS Build Tools there;
+REM run-only targets are fully served by this prebuilt DLL.)
+if not exist "installer_bundle\compiled" mkdir "installer_bundle\compiled"
+copy /Y "compiled\expressions.dll" "installer_bundle\compiled\" >nul 2>&1
+copy /Y "compiled\expressions.cpp" "installer_bundle\compiled\" >nul 2>&1
+copy /Y "compiled\expr_metadata.json" "installer_bundle\compiled\" >nul 2>&1
+
 REM Copy all root .json and .txt files to staging
 for %%F in (*.json) do copy /Y "%%F" "installer_bundle\" >nul 2>&1
 for %%F in (*.txt) do copy /Y "%%F" "installer_bundle\" >nul 2>&1
