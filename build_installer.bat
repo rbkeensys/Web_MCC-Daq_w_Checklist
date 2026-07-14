@@ -107,7 +107,18 @@ REM so without this the app falls back to the slow python expression engine.
 REM (Editing+saving expressions ON the target still needs VS Build Tools there;
 REM run-only targets are fully served by this prebuilt DLL.)
 if not exist "installer_bundle\compiled" mkdir "installer_bundle\compiled"
-copy /Y "compiled\expressions.dll" "installer_bundle\compiled\" >nul 2>&1
+REM Ship the NEWEST expressions DLL as the base name: the app's hot-recompiles
+REM write versioned expressions_vN.dll files and the plain expressions.dll can
+REM be stale -- a stale base on the target triggers a recompile that fails
+REM (no MSVC) and drops to the python engine.
+set NEWEST_DLL=
+for /f "delims=" %%F in ('dir /b /od "compiled\expressions*.dll" 2^>nul') do set NEWEST_DLL=%%F
+if defined NEWEST_DLL (
+    copy /Y "compiled\%NEWEST_DLL%" "installer_bundle\compiled\expressions.dll" >nul
+    echo            Bundled expression DLL: %NEWEST_DLL%
+) else (
+    echo            WARNING: no compiled expressions DLL found -- target will use the slow python engine!
+)
 copy /Y "compiled\expressions.cpp" "installer_bundle\compiled\" >nul 2>&1
 copy /Y "compiled\expr_metadata.json" "installer_bundle\compiled\" >nul 2>&1
 
