@@ -1,7 +1,21 @@
 # server/logger.py
 """
 Buffered CSV logger for session data
-Version: 2.1.6 (2026-06-12)
+Version: 2.2.0 (2026-07-14)
+
+CHANGES from 2.1.6:
+- THREAD SAFETY + non-blocking schema growth: an RLock serializes the
+  acquisition/control thread (write) against the HTTP save thread
+  (add_columns). New gvar_/bvar_ columns now collect in a pending set and
+  are added in ONE batched full-file rewrite (was: one multi-GB rewrite
+  PER column, racing from BOTH threads -> doubled rewrites, _col_idx
+  growing under _row_from_frame (IndexError: list assignment index out of
+  range), the control loop stalled on file IO, and the post-compile hang).
+  The batched rewrite runs on a background thread when triggered from
+  write(); meanwhile write() buffers frames in memory (capped ~6min) and
+  drains them in order afterwards -- the control loop NEVER blocks on the
+  rewrite. add_columns() rewrites inline on the caller (HTTP) thread.
+  close() takes the lock and drains before the check-event embed.
 
 CHANGES from 2.1.5:
 - remove_check_event(item_num): unchecking in the UI now removes the
@@ -58,6 +72,7 @@ COLUMNS LOGGED:
 import csv
 import io
 import math
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -236,6 +251,22 @@ class SessionLogger:
         # once, during close().
         self._check_events_accum: list = []
 
+        # 2.2.0 THREAD SAFETY + non-blocking schema growth. Two threads touch
+        # this object: the acquisition/CONTROL loop (write() every tick) and
+        # the HTTP save thread (add_columns() after an expression recompile).
+        # Unsynchronized, both used to detect the same new gvar_ column and
+        # each ran a full multi-GB CSV rewrite concurrently: doubled rewrites,
+        # _col_idx growing under _row_from_frame's feet (the IndexError), the
+        # control loop stalled for the whole file IO, and the client "hang on
+        # compile". Now: one RLock; new columns collect in _pending_new_cols
+        # and are added in ONE batched rewrite on a BACKGROUND thread; while
+        # the rewrite runs, write() buffers frames in memory (never blocks the
+        # control loop) and drains them afterwards.
+        self._lock = threading.RLock()
+        self._pending_new_cols: set = set()
+        self._side_buf: list = []          # frames buffered during a rewrite
+        self._rewrite_thread: Optional[threading.Thread] = None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -272,12 +303,19 @@ class SessionLogger:
         self._pending_frames = []
         self._settled = True
 
-    def _rewrite_with_new_col(self, new_col: str):
+    def _rewrite_pending_cols(self):
         """
-        A bvar_ / gvar_ column appeared after the header was already written.
-        Rewrite the entire CSV to add the column (rare slow path).
+        Add ALL pending new columns in ONE full-file rewrite (slow path --
+        multi-GB sessions take seconds). MUST be called with self._lock held.
+        The old per-column version ran once per new column from two racing
+        threads; a recompile adding 4 statics meant 8 concurrent multi-GB
+        rewrites and a corrupted column index.
         """
-        print(f"[Logger] WARNING: new column '{new_col}' appeared after header – rewriting CSV")
+        new_cols = sorted(c for c in self._pending_new_cols if c not in self._col_idx)
+        self._pending_new_cols.clear()
+        if not new_cols:
+            return
+        print(f"[Logger] adding {len(new_cols)} new column(s) in one rewrite: {', '.join(new_cols)}")
 
         # Flush pending writes before reading back the file
         self.f.flush()
@@ -286,20 +324,49 @@ class SessionLogger:
         with open(self.path, newline="") as rf:
             existing_rows = list(csv.reader(rf))
 
-        # Extend schema
-        self._cols.append(new_col)
-        self._col_idx[new_col] = len(self._cols) - 1
+        # Extend schema (all at once)
+        for c in new_cols:
+            self._cols.append(c)
+            self._col_idx[c] = len(self._cols) - 1
 
         # Close current handle, reopen for full rewrite, restore 1 MB buffer
         self.f.close()
         self.f = open(self.path, "w", newline="", buffering=1024 * 1024)
         self.w = csv.writer(self.f)
 
+        pad = [""] * len(new_cols)
         self.w.writerow(self._cols)
         if len(existing_rows) > 1:
             for row in existing_rows[1:]:
-                row.append("")
-                self.w.writerow(row)
+                self.w.writerow(row + pad)
+        print(f"[Logger] rewrite complete ({len(existing_rows)-1 if existing_rows else 0} rows)")
+
+    def _drain_side_buf(self):
+        """Write out frames buffered while a rewrite held the lock.
+        MUST be called with self._lock held (after the schema is current)."""
+        if not self._side_buf:
+            return
+        buf, self._side_buf = self._side_buf, []
+        for fr in buf:
+            self.w.writerow(_row_from_frame(fr, self._col_idx, self._name_for))
+
+    def _kick_bg_rewrite(self):
+        """Run the batched rewrite on a background thread so the CONTROL loop
+        (which calls write()) never blocks on multi-GB file IO."""
+        if self._rewrite_thread is not None and self._rewrite_thread.is_alive():
+            return
+
+        def _run():
+            with self._lock:
+                try:
+                    self._rewrite_pending_cols()
+                    self._drain_side_buf()
+                except Exception as e:
+                    print(f"[Logger] background rewrite failed: {e}")
+
+        self._rewrite_thread = threading.Thread(target=_run, daemon=True,
+                                                name="logger-col-rewrite")
+        self._rewrite_thread.start()
 
     # ------------------------------------------------------------------
     # Public API
@@ -307,37 +374,60 @@ class SessionLogger:
 
     def add_columns(self, cols):
         """Pre-register columns introduced after the header settled (e.g. new
-        gvar_/bvar_ columns from an expression recompile) so they don't each
-        trigger a separate slow-path rewrite as frames arrive. Already-known
+        gvar_/bvar_ columns from an expression recompile). All new columns are
+        added in ONE batched rewrite, executed here on the CALLER's thread
+        (the HTTP save thread -- fine to block) under the lock. Already-known
         columns are skipped. Before the header is written this is a no-op --
         _finalise_header() (and write()'s auto-add) will pick the columns up."""
         if not getattr(self, "_settled", False):
             return
-        for c in (cols or []):
-            if c not in self._col_idx:
-                self._rewrite_with_new_col(c)
+        with self._lock:
+            fresh = [c for c in (cols or []) if c not in self._col_idx]
+            if fresh:
+                self._pending_new_cols.update(fresh)
+                self._rewrite_pending_cols()
+                self._drain_side_buf()
 
 
     def write(self, frame: dict):
         if not self._settled:
-            self._pending_frames.append(frame)
-            if len(self._pending_frames) >= HEADER_SETTLE_FRAMES:
-                self._finalise_header()
+            with self._lock:
+                self._pending_frames.append(frame)
+                if len(self._pending_frames) >= HEADER_SETTLE_FRAMES:
+                    self._finalise_header()
             return
 
         # --- Normal path: header already written ---
-        # Check for new bvar_ / gvar_ columns that appeared after settle time
-        for name in frame.get("button_vars", {}).keys():
-            col = f"bvar_{name}"
-            if col not in self._col_idx:
-                self._rewrite_with_new_col(col)
-
-        for name in _gvars(frame).keys():
-            col = f"gvar_{name}"
-            if col not in self._col_idx:
-                self._rewrite_with_new_col(col)
-
-        self.w.writerow(_row_from_frame(frame, self._col_idx, self._name_for))
+        # NEVER block the control loop on the multi-GB rewrite: if another
+        # thread holds the lock (a rewrite is running), buffer the frame in
+        # memory; it drains -- in order -- when the rewrite finishes.
+        if not self._lock.acquire(blocking=False):
+            self._side_buf.append(frame)
+            if len(self._side_buf) > 60000:      # ~6min at 160Hz -- hard cap
+                self._side_buf.pop(0)
+            return
+        try:
+            # Check for new bvar_ / gvar_ columns that appeared after settle
+            # time. They go to the pending set and a BACKGROUND thread does one
+            # batched rewrite -- this (control) thread just buffers the frame.
+            fresh = set()
+            for name in frame.get("button_vars", {}).keys():
+                col = f"bvar_{name}"
+                if col not in self._col_idx:
+                    fresh.add(col)
+            for name in _gvars(frame).keys():
+                col = f"gvar_{name}"
+                if col not in self._col_idx:
+                    fresh.add(col)
+            if fresh or self._pending_new_cols:
+                self._pending_new_cols.update(fresh)
+                self._side_buf.append(frame)
+                self._kick_bg_rewrite()
+                return
+            self._drain_side_buf()
+            self.w.writerow(_row_from_frame(frame, self._col_idx, self._name_for))
+        finally:
+            self._lock.release()
 
     def write_check_events(self, events: list):
         """
@@ -427,17 +517,27 @@ class SessionLogger:
         self.f.flush()
 
     def close(self):
-        # Short session that never hit HEADER_SETTLE_FRAMES - flush now
-        if not self._settled and self._pending_frames:
-            self._finalise_header()
-        # Embed all accumulated checklist check events as the chk_events
-        # column. This is the slow file-rewrite operation that USED to
-        # run on every X/Backspace key press — moved here so it happens
-        # exactly once per session.
-        try:
-            self._embed_check_events_in_csv()
-        except Exception as e:
-            # Don't fail close() if the embed has trouble — the CSV data
-            # rows are still intact, just without the chk_events column.
-            print(f"[Logger] check-event embed on close failed: {e}")
-        self.f.close()
+        # Take the lock: a background column-rewrite may be mid-flight; also
+        # flush any frames buffered while it ran.
+        with self._lock:
+            # Short session that never hit HEADER_SETTLE_FRAMES - flush now
+            if not self._settled and self._pending_frames:
+                self._finalise_header()
+            if getattr(self, "_settled", False):
+                try:
+                    self._rewrite_pending_cols()
+                    self._drain_side_buf()
+                except Exception as e:
+                    print(f"[Logger] close-time drain failed: {e}")
+            # Embed all accumulated checklist check events as the chk_events
+            # column. This is the slow file-rewrite operation that USED to
+            # run on every X/Backspace key press — moved here so it happens
+            # exactly once per session. Under the lock so a late write()/
+            # rewrite can't interleave with the embed's file swap.
+            try:
+                self._embed_check_events_in_csv()
+            except Exception as e:
+                # Don't fail close() if the embed has trouble — the CSV data
+                # rows are still intact, just without the chk_events column.
+                print(f"[Logger] check-event embed on close failed: {e}")
+            self.f.close()
