@@ -5,6 +5,10 @@ const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
         TableOfContents, PageNumber, Header, Footer, PageBreak } = require(G);
 
 const CW = 9360; // content width, US Letter, 1" margins
+// Doc version = generation timestamp (regenerate -> new version)
+const _now = new Date();
+const _p2 = (n)=> String(n).padStart(2,"0");
+const DOCVER = `${_now.getFullYear()}-${_p2(_now.getMonth()+1)}-${_p2(_now.getDate())} ${_p2(_now.getHours())}:${_p2(_now.getMinutes())}`;
 const mono = (t) => new TextRun({ text: t, font: "Consolas", size: 19 });
 const P = (t, o={}) => new Paragraph({ spacing:{after:120}, children: Array.isArray(t)?t:[new TextRun({text:t})], ...o });
 const H1 = (t) => new Paragraph({ heading: HeadingLevel.HEADING_1, children:[new TextRun(t)] });
@@ -207,7 +211,7 @@ const doc = new Document({
   sections: [{
     properties:{ page:{ size:{width:12240,height:15840}, margin:{top:1440,right:1440,bottom:1440,left:1440} } },
     footers:{ default: new Footer({ children:[ new Paragraph({ alignment:AlignmentType.CENTER,
-       children:[ new TextRun({text:"MVR Model & Control Reference  -  ",size:16,color:"888888"}),
+       children:[ new TextRun({text:`MVR Model & Control Reference  -  v${DOCVER}  -  `,size:16,color:"888888"}),
                   new TextRun({text:"Page ",size:16,color:"888888"}),
                   new TextRun({children:[PageNumber.CURRENT],size:16,color:"888888"}) ] }) ] }) },
     children: [
@@ -219,6 +223,8 @@ const doc = new Document({
         children:[ new TextRun({text:"MCC DAQ expression-engine control + plant simulator", size:22, italics:true, color:"555555"}) ]}),
       new Paragraph({ alignment:AlignmentType.CENTER, spacing:{before:600},
         children:[ new TextRun({text:"Generated from server/config/expressions_MVR.json", size:18, color:"888888"}) ]}),
+      new Paragraph({ alignment:AlignmentType.CENTER, spacing:{before:80},
+        children:[ new TextRun({text:`Version ${DOCVER}  (generated)`, size:18, bold:true, color:"555555"}) ]}),
       new Paragraph({ children:[new PageBreak()] }),
 
       new Paragraph({ heading: HeadingLevel.HEADING_1, children:[new TextRun("Contents")] }),
@@ -282,6 +288,14 @@ const doc = new Document({
       EQ("pi   = clamp( kpSuper*(superheatSetSafe - superheatIn) + I , 0 , 1 )"),
       EQ("elem = clamp( kpShElem * (superHtrRegC - ySuperHtrTemp) , 0 , 1 )"),
       EQ("duty = min( pi , elem )       ->  DO:SuperHtr  (superDuty)"),
+
+      H2("2.5a  Wet-compression margin (what superheat is really for)"),
+      P([b("The hazard: "), new TextRun("the blower is a vapor compressor, and it must ingest DRY vapor. Water droplets at 100 C are ~1600x denser than the steam around them; the impeller tips are moving fast, so every droplet strike is a tiny hammer blow -- sustained wet ingestion erodes and pits the blades, unbalances the wheel, spikes the shaft torque, and a big enough liquid slug can hydraulic-lock the machine outright. This is the single fastest way to destroy the most expensive component in the system.")]),
+      P([b("Where the liquid comes from: "), new TextRun("vapor leaving a boiling pool is at best exactly SATURATED -- sitting on the dew line -- and in practice always carries entrained mist from bursting bubbles (the demister catches most, not all). Any heat loss along the suction path pulls the vapor below its dew point and condenses MORE liquid on the pipe walls and as fog. Saturated vapor has zero tolerance: remove any heat at all and liquid appears.")]),
+      P([b("The margin: "), new TextRun("superheat is temperature ABOVE the dew point at the local pressure: "), code("superheatIn = yVaporIn - Tsat(evapPress)"), new TextRun(". Positive superheat means the vapor thermodynamically CANNOT hold liquid at equilibrium -- entrained droplets evaporate in transit instead of surviving to the impeller, and modest pipe heat-loss just eats margin instead of making fog. The superheat cartridge exists solely to buy this margin ahead of the blower inlet; the margin IS the droplet insurance.")]),
+      P([b("Why the INLET is the guarded point: "), new TextRun("compressing dry steam pushes it FURTHER into superheat (compression heats the vapor faster than its dew point rises), so if the inlet is dry the outlet is drier. That is also why SH-Out running BELOW SH-In is normal and even desirable: the discharge path sheds its superheat to the condensing surfaces (desuperheating), delivering near-saturated vapor to the condenser, which condenses best. Low superheat at the OUTLET is efficiency; low superheat at the INLET is blade erosion.")]),
+      P([b("Sizing the margin -- why set 3 C when the trip is 0.5 C: "), new TextRun("the DISPLAYED superheat is a computed difference between a TC reading and a pressure-derived saturation temperature, so every sensor error lands in it at full strength: TC offset + PT offset + Antoine/trim error easily stack to +/-1-2 C. In particular "), code("tsatTrimC"), new TextRun(" shifts computed Tsat directly -- change the trim 1 C and the displayed superheat moves 1 C with the true margin unchanged. The 3 C setpoint keeps the TRUE margin comfortably positive even when the DISPLAYED number is optimistic; the "), code("minSuperheat"), new TextRun(" (0.5 C, "), code("superHFaultS"), new TextRun(" persistence) trip is the last-ditch floor, not the operating target. This is why the sensor calibrations (TC zero, PT zero, tsatTrimC at a vented boil) matter: they shrink the uncertainty that the margin has to cover.")]),
+      P([b("Arming: "), new TextRun("the wet-compression trip arms only once superheat is first established with the blower at real speed and the evaporator at temp, then stays armed until stop -- during cold start there is no meaningful vapor flow, the pipe TC reads transient garbage, and tripping on it would deadlock the startup (the very condition the trip watches for is the normal state of a machine that has not boiled yet).")]),
 
       H2("2.6  Blower production control (ProductionControl)"),
       P("Trims the blower (the compressor / vapor pump) to hold the target distillate rate. Measured production now comes from the condensate BATCHES (see 2.9): each pump-to-dry cycle meters a known distillate volume, and volume / fill-time is the average production rate -- the only rate a single point-level sensor can give. Updated once per empty cycle (condRateLpm) and held between; before the first batch the blower holds nominal rpm. cdt accelerates the integral in sim so it converges at the same wall-clock feel."),
