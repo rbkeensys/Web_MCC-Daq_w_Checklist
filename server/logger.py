@@ -1,7 +1,12 @@
 # server/logger.py
 """
 Buffered CSV logger for session data
-Version: 2.2.0 (2026-07-14)
+Version: 2.2.1 (2026-07-15)
+
+CHANGES from 2.2.0:
+- Optional t_zero: the t column logs RELATIVE time (frame t - t_zero) so a
+  session can begin at T0 (Start New Log 'reset clocks' option). Check
+  events embedded at close are shifted into the same frame.
 
 CHANGES from 2.1.6:
 - THREAD SAFETY + non-blocking schema growth: an RLock serializes the
@@ -156,9 +161,11 @@ def _extract_cols(frame: dict, name_for: dict = None) -> list:
     return cols
 
 
-def _row_from_frame(frame: dict, col_idx: dict, name_for: dict = None) -> list:
+def _row_from_frame(frame: dict, col_idx: dict, name_for: dict = None, t_zero: float = 0.0) -> list:
     """Serialise one frame into a CSV row using the given column index.
-    name_for must match the one used to build the header (generic id -> name)."""
+    name_for must match the one used to build the header (generic id -> name).
+    t_zero (2.2.1): subtracted from the t column so a session can log
+    relative time starting at ~0 (the Start New Log 'reset clocks' option)."""
     row = [""] * len(col_idx)
     name_for = name_for or {}
     def nm(g): return name_for.get(g, g)
@@ -168,7 +175,10 @@ def _row_from_frame(frame: dict, col_idx: dict, name_for: dict = None) -> list:
         if idx is not None:
             row[idx] = _safe(val)
 
-    put("t", frame.get("t"))
+    tv = frame.get("t")
+    if t_zero and isinstance(tv, (int, float)):
+        tv = tv - t_zero
+    put("t", tv)
 
     for i, v in enumerate(frame.get("ai", [])):
         put(nm(f"ai{i}"), v)
@@ -213,10 +223,12 @@ def _row_from_frame(frame: dict, col_idx: dict, name_for: dict = None) -> list:
 
 class SessionLogger:
     def __init__(self, folder: Path, known_columns: Optional[list] = None,
-                 col_names: Optional[dict] = None):
+                 col_names: Optional[dict] = None, t_zero: Optional[float] = None):
         # col_names: {'ai':[names], 'ao':[...], 'do':[...], 'tc':[...], 'expr':[...]}
         # -> friendly CSV headers instead of ai0/ao0/do0/tc0/expr0.
         self._name_for = _build_name_for(col_names or {})
+        # 2.2.1: optional relative-time logging -- t column = frame t - t_zero
+        self._t_zero = float(t_zero) if t_zero else 0.0
         self.path = folder / "session.csv"
         # CRITICAL: 1 MB buffer prevents synchronous disk flushes (Windows 80 ms+ spikes)
         self.f = open(self.path, "w", newline="", buffering=1024 * 1024)
@@ -298,7 +310,7 @@ class SessionLogger:
         # Write header then flush buffered rows
         self.w.writerow(self._cols)
         for frame in self._pending_frames:
-            self.w.writerow(_row_from_frame(frame, self._col_idx, self._name_for))
+            self.w.writerow(_row_from_frame(frame, self._col_idx, self._name_for, self._t_zero))
 
         self._pending_frames = []
         self._settled = True
@@ -348,7 +360,7 @@ class SessionLogger:
             return
         buf, self._side_buf = self._side_buf, []
         for fr in buf:
-            self.w.writerow(_row_from_frame(fr, self._col_idx, self._name_for))
+            self.w.writerow(_row_from_frame(fr, self._col_idx, self._name_for, self._t_zero))
 
     def _kick_bg_rewrite(self):
         """Run the batched rewrite on a background thread so the CONTROL loop
@@ -425,7 +437,7 @@ class SessionLogger:
                 self._kick_bg_rewrite()
                 return
             self._drain_side_buf()
-            self.w.writerow(_row_from_frame(frame, self._col_idx, self._name_for))
+            self.w.writerow(_row_from_frame(frame, self._col_idx, self._name_for, self._t_zero))
         finally:
             self._lock.release()
 
@@ -470,6 +482,18 @@ class SessionLogger:
         events = self._check_events_accum
         if not events:
             return
+
+        # 2.2.1: with relative-time logging, shift event timestamps into the
+        # same frame so replay marks align with the CSV's t column.
+        if self._t_zero:
+            shifted = []
+            for e in events:
+                e = dict(e)
+                for k in ("t", "tServer"):
+                    if isinstance(e.get(k), (int, float)):
+                        e[k] = e[k] - self._t_zero
+                shifted.append(e)
+            events = shifted
 
         import json
         col = "chk_events"
