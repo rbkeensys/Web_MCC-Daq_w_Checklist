@@ -51,7 +51,7 @@ Both use the standard Modbus CRC-16 (poly 0xA001, init 0xFFFF, low byte first).
 """
 from __future__ import annotations
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"  # power_scale fixed to yield true WATTS in output_power_w (was emitting kW)
 __updated__ = "2026-06-15"
 # 1.1.0: parameter read/write-by-register. param_to_register() per-profile (GK3000
 #   P<g>.<r>->0xF0gr, verified vs manual P0.03/P6.10/PB.16; H100 F<nnn>->hex(nnn); raw
@@ -285,7 +285,7 @@ GK3000 = VFDProfile(
     reg_out_current=0x5004, reg_out_power=0x5005, reg_out_torque=0x5006,
     reg_fault=0x8000,
     freq_read_scale=0.01, current_scale=0.01, voltage_scale=1.0,
-    bus_voltage_scale=1.0, power_scale=0.1,
+    bus_voltage_scale=1.0, power_scale=100,   # reg 0x5005 reports 0.1kW units -> x100 = WATTS (rig 7/22: 0.1 made output_power_w read kW -- blower 600W showed 0.6, and the PowerMeter expression missed it)
     decode_runstate=_gk3000_decode_runstate,
     baud_param="PC.00",
     baud_code_map={300:0, 600:1, 1200:2, 2400:3, 4800:4, 9600:5, 19200:6, 38400:7, 57600:8, 115200:9},
@@ -313,7 +313,7 @@ H100 = VFDProfile(
     reg_temperature=0x0006, reg_run_hours=0x000B, reg_out_power=0x000C,
     reg_fault=0x000A, reg_runstate=0x0210,
     freq_read_scale=0.1, current_scale=0.1, voltage_scale=1.0,
-    bus_voltage_scale=1.0, power_scale=0.1, speed_scale=1.0, temp_scale=1.0,
+    bus_voltage_scale=1.0, power_scale=100, speed_scale=1.0, temp_scale=1.0,   # 0.1kW units assumed like GK3000 -> WATTS (H100 datasheet-unverified)
     decode_runstate=_h100_decode_runstate,
     baud_param="F164",
     baud_code_map={4800:0, 9600:1, 19200:2, 38400:3},
