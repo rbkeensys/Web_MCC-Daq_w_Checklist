@@ -352,6 +352,14 @@ const doc = new Document({
       EQ("bypassV = clamp( (surgeThresh - deltaT) * surgeGain , 0 , 10 )   ->  AO:BypassValve"),
 
       // ---------- PLANT MODEL ----------
+      H2("2.11  Power meter (PowerMeter)"),
+      P([new TextRun("Instantaneous electrical power and a running energy totalizer. Heater draw = rated watts x PWM duty (the duty IS the power fraction); blower draw = the VFD's own output-power report ("), code("vfdOutPwr"), new TextRun(", watts, via monitorMotor .POWER; 0 in sim); small loads are flat ratings gated by their run states. Ratings are setpoints: "), code("pwrMakeupW"), new TextRun(" 2000, "), code("pwrSuperW"), new TextRun(" 300, "), code("pwrCondW"), new TextRun("/"), code("pwrMistW"), new TextRun(" 20 (while pumping/draining), "), code("pwrFeedW"), new TextRun(" 30 (while commanded), "), code("pwrBaseW"), new TextRun(" 30 (always). Zero "), code("energyKWh"), new TextRun(" from a Static Var widget to start a measurement window; it accumulates on sim-scaled time like every other integrator.")]),
+      EQ("powerW    = base + mkDuty*2000 + shDuty*300 + vfdOutPwr + pumps"),
+      EQ("energyKWh += powerW * dt / 3.6e6"),
+
+      H2("2.12  Wet-compression AUTO-RESTART"),
+      P([new TextRun("Rig 7/22: a wet-comp trip cuts the blower and heat, flow stops, the sag clears -- and a warm resume is gentle. So the trip recovers AUTOMATICALLY: after "), code("shAutoRstS"), new TextRun(" (45s) cooldown the latch clears and the run resumes IN PLACE (soft-restart, no purge). "), code("shArmed"), new TextRun(" resets too, so the trip cannot re-fire until superheat is genuinely re-established at speed. Bounded: "), code("shAutoRstMax"), new TextRun(" (3) attempts per run, then it stays tripped for the operator; "), code("shAutoRstEn"), new TextRun("=0 disables. The 7/22 trip itself: RUN with the startup air vent still open (vapor-out plateaued 98-99C, under the 100C close threshold, BECAUSE the vent was bleeding the steam that would heat it) -- blower at 2938 venting steam, makeup losing ground, superheat collapsed with the cartridge at full duty, and the SH rescue is vent-gated so it stood by.")]),
+
       H1("3.  Plant Model Equations (MVRSim)"),
       P("The lumped first-order simulator. Active only when simEnable=1. cp ~ 4186 J/kg.C; 1 L ~ 1 kg of water."),
 
