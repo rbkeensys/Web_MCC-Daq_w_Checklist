@@ -1,4 +1,4 @@
-const UI_VERSION = "2.1.84";  // Versions strip (top bar) now shows "Expr N" -- the expressions compile counter (server DLL_VERSION, seeded from the highest expressions_vN.dll at boot, +1 on every successful Save/compile); refreshed via showVersions() after each expression Save. Pairs with server 2.13.10 (/api/diag expr_dll). Prev 2.1.83: Start New Log gains a RESET-CLOCKS-TO-T0 option: log t column starts ~0 (server t_zero) and charts clear + rebase their x-axis to 0 (_chartT0). Prev 2.1.82: Start New Log prompts for a session NAME (default = the usual timestamp); posts {name} to /api/logs/close. Prev 2.1.81: fault popups are non-blocking TOASTS (window.alert froze the JS thread -> chart data-popup readings stalled and stayed stale); stacked top-right, dismiss per-fault. Prev 2.1.80: Zero dialog gains THERMOCOUPLES (include:true only, live readings, positional indices) -> /api/zero_tc; AI + TC selections submit together with the shared balance-to value (run separate passes for different targets). Prev 2.1.79: evapLevelErr popup broadened for the FEED-STALL guard (fill-rate feed, sender frozen -> pump not delivering). Prev 2.1.78: condSensErr popup (CondLevel lying but meter counting -> TIMED pumping engaged). Prev 2.1.77: chart data-popup Follow/Current radios get a PER-WIDGET group name (radio groups are document-global -- a shared name:'mode' made all open popups one group, so selecting Current on one blanked the rest). All open data viewers now hold their own mode. Prev 2.1.76: Static Var WIDGET add-dialog + settings dropdowns sorted too (they fetch /api/static_vars separately from the createSignalSelector picker sorted in 2.1.75). Prev 2.1.75: static-var pickers + globals table sorted ALPHABETICALLY (case-insensitive) -- 280+ vars in definition order were unfindable. Prev 2.1.74: condMeterErr popup (condensate pump running, meter counts nothing -> production control blind; warn, not trip). Prev 2.1.73: purgeErr popup (purge not lowering the level -> check pump direction). Prev 2.1.72:  // 2026-07-01: senderErr fault popup -- level-sender open/short (raw 0V/10V) latched trip, pairs with the Interlocks senderErr debounce. evapLevelErr popup reworded for the sender. Prev 2.1.71: DO buttons are purely LOGICAL -- widget 'Active High' checkbox removed (settings shows read-only 'Polarity: from config'); clicks/buzz/boot-off send logical state with NO active_high so the server applies the config Invert once (the widget was a second inversion layer: it converted logical->'physical' itself AND sent active_high=true, so inverted relays showed green-ON at boot and needed double toggles to sync). updateDOButtons colors from the logical do[] directly. Pairs with server 2.13.2 (DOReq/Buzz active_high Optional->None = derive from config) + app_models 2.4.2 pad_board_channels (config editor now always shows all 8 DO / 8 AI / 2 AO / 8 TC pins, include=False spares appended -- the editor only showed the 7 DOs present in config.json). Prev 2.1.70: DO config 'normallyOpen' checkbox -> 'Invert' (binds DigitalOutCfg.invert): drive the physical pin 1 when the expression commands logical 0. The old checkbox never reached the hardware (expression + PWM writes hardcoded active_high=True in server/mcc_bridge); pairs with mcc_bridge 2.5.0 + server 2.13.1 where it now actually works. Manual DO button widgets keep their own NO/NC radios (unchanged). Prev 2.1.69: E-TC DIGITAL INPUTS -- each E-TC board card gets a "Digital Inputs (DIO -> static var)" editor (name/bit/static_var/invert/include, +Add/delete), so a High-Level float switch on the E-TC DIO can be added in-UI (writes boardsetc[].digitalInputs). New evapHighWarn fault popup ("High Level Warning -- feed paused"). Pairs with app_models/mcc_bridge 2.4.0 + server 2.13.0 (read_etc_dins stamps the bit into static.dinEvapHigh -> yEvapHigh). Prev 2.1.68: Two evaporator sight-glass level sensors -- EvapLowLevel (AI6, ~0.75L heater-covered floor) + EvapMidLevel (AI7, ~2.0L operating). Feed holds the level at EvapMid via a slow wet/dry integral (robust to flow-meter bias); prime fills to EvapLow + confirms, heat ramps to EvapMid. evapLevelErr popup reworded to EvapLowLevel. Pairs with the level-rework expressions + config AI6/AI7. Prev 2.1.67: Evaporator level fault popup -- a latched control fault static going 0->1 in the live frame fires a one-shot alert() (FAULT_MSGS/checkFaultPopups); first entry is evapLevelErr "Evaporator Level Error -- possible level-sensor or feed-pump failure". Pairs with expressions: AI:EvapLevel (AI6) wet/dry sensor read as boolean in SensorMux, PRIME won't start heat until the evaporator reads wet, and Interlocks latches evapLevelErr if primed-but-dry. Prev 2.1.66: Counters (CTR) editor enforces one counter per board (E-1608 has a single HW counter CTR0) -- "+ Add CTR" alerts + refuses past the limit (button dimmed), with a hint line. Prev 2.1.65: FIX Counters (CTR) config editor -- "+ Add CTR" now re-renders in place (own ctrBody container + local renderCtr; it was built outside renderBoards() so Add never redrew the row -> looked dead, easy to add dupes), and each counter row gets a delete (X) button. Pairs with /api/config now migrating legacy counter-on-AI -> board.counters so the UI shows the first-class structure. Prev 2.1.64: CTR first-class signal type in the UI -- getAllCounters(), a "Counters (CTR)" config editor section (name/ctr#/K/mode/win/units) with + Add CTR, 'ctr' added to every signal-selection picker (createSignalSelector/labelFor/kind lists/numericKinds), readSelection('ctr') reads state.ctr for live charts, and msg.ctr ingested into state. Counter fields removed from the analog editor (counters are no longer AI). Pairs with the 19-arg CTR DLL (app_models 2.3.0 / mcc_bridge 2.3.0 / expr_to_cpp 3.7.0 / cpp_expr_backend 3.4.0 / expr_engine 2.7.0 / server CTR frame). Prev 2.1.63: analog counter 'mode' selector (rate | total) next to K/win -- exposes AnalogCfg.counter_mode so a counter channel can report a rollover-safe cumulative TOTAL (condensate totalizer / AI:CondTotal) without editing config.json. Pairs with mcc_bridge 2.2.0 + app_models 2.2.0. Prev 2.1.62: LOG REPLAY FIX -- makeTickFromRow now strips the gvar_ prefix on static-var columns (like sv_) so replayed static-var charts get data; previously gvar_simEvapTemp was stored under that literal key while charts look up the bare name (simEvapTemp) -> every static-var chart was empty on log read-back ("almost no data", since the MVR dashboard is mostly sim* statics). Prev 2.1.61: Sim panel gains a "Reset sim to ambient" button -- POSTs static.simReset=1; the MVR System expression snaps the plant + control state back to cold/ambient startup and self-clears (instant cool-down). Prev 2.1.60: PWM DO indicators -- readSelection('do') now returns the RAW value (was boolean'd to 0/1), and the indicator BLINKS when a watched DO holds a partial PWM duty (0<v<1): lit for `duty` of each ~0.8s cycle, solid at full duty, off at 0. Pairs with cpp_expr_backend fix (do_writes carried the raw duty, was thresholded to bool>=1 -> partial duties read as off). Prev 2.1.59: top bar -- removed Logic + Math buttons (handlers kept as harmless no-ops; editor code intact), added a "Sim" button opening a Simulator panel with two checkboxes (Simulate inputs=simEnable, Hardware enabled/HIL=simDriveHW) backed by static vars + a live mode status line so suppressed outputs are never a mystery. Prev 2.1.58: stepper holding-current "Hold Pr" default corrected to Pr5.03 (0x0197, confirmed DM556RS standstill current reg) from the Pr5.01 guess. Prev 2.1.57: drive widget Reset now also zeroes the stepper step count (POST .../zero_position) alongside alarm reset; stepper library editor gains "Hold %" (standstill/holding current as % of peak when idle, blank=drive default) + editable "Hold Pr" register (default Pr5.01, datasheet-unverified). Pairs with stepper_driver 1.7.0 + server.py 2.11.6. Prev 2.1.56: Stepper Units editor gains a "Log IO" checkbox (per-instance inst.io_log -> ctrl.log_io; Modbus TX/RX logging now OFF by default). Pairs with stepper_driver 1.6.2 + server.py 2.11.4 (undelivered-command warning + stepper on-change cache cleared on rebuild). Prev 2.1.55: NEW unified "MOD Drv" widget (type 'drive') -- pick VFD or stepper in settings then the instance; live status + manual controls (VFD: RPM/Fwd/Rev/Stop/Reset; stepper: velocity/Enable/Fwd/Rev/Stop/Disable/Reset) via /api/{vfd,stepper}/{name}/*. Palette "VFD" button -> "MOD Drv" (old 'vfd' widgets still render). Stepper Units editor gains per-instance Modbus reliability fields (Retries/Gap ms/Reply ms). Pairs with server.py 2.11.3 + stepper_driver 1.6.1. Prev 2.1.54: expression help cheatsheet now lists the SWITCH/CASE/DEFAULT/ENDSWITCH block (pairs with expr_engine.py 2.5.0). Note: the live expr-debug branch colorizer doesn't yet tint SWITCH case bodies (cosmetic only; SWITCH works in both backends). Prev 2.1.53: MOD Drv Save is now SCOPED to the active domain -- VFD tabs save only VFD libs+instances, Stepper tabs save only stepper config+instances (button relabels "Save VFD"/"Save Steppers"). Previously one Save PUT both vfd/instances AND stepper/instances every time, so saving steppers rebuilt + re-commanded the running VFD and surfaced VFD connect results (the "VFD isn't there" flakiness came from that needless rebuild probe). Pair with server.py 2.11.2 (stepper PUT result normalization). Prev 2.1.52: FIX stepper-unit Port column showed "[object Object]" -- the editor appended the portSelectControl() return object (psc) into the cell instead of psc.wrap (the VFD editor already did .wrap correctly). Now el('td',{},psc.wrap). Prev 2.1.51: VFD instance editor gains a "Poll ms" column (per-instance poll_rate_ms; blank/unset shows 250 = 4/sec default, 0 = continuous) -- sets how fast the worker reads the drive over Modbus; saved to vfd_instances.json and applied on rebuild. Prev 2.1.50: chart "Keep×" spinner (1-100, default 4) sets how much history to retain in multiples of the span -- live keeps keep*span of scrollback, paused keeps ~keep*span split around the freeze (so memory is user-bounded; 100 ~= 100 spans). Filter[Hz] box narrowed to make room. Prev 2.1.49: paused charts stay filled -- the live-buffer trim now also honors the Pause-button flag (w.opts.paused), not only the zoom/pan freeze (w.view.paused); a button-paused chart previously kept doing buf.shift() each tick and wiped its left edge as new samples arrived. Span-change trim is skipped while paused too. Pairs with vfd_driver.py worker carry-forward (holds the last-good VFD reading instead of emitting 0 on a missed Modbus read, so .RPM etc. no longer drop to 0 during AO-slider command bursts). Prev 2.1.48: startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
+const UI_VERSION = "2.1.85";  // NEW 'Status' widget (palette 🚦, type 'statustext'): conditional status text for one input signal -- ordered conditions (first match wins), each with its own display text, text color, and background ("All good" white-on-green / "Error Trip" black-on-red); default text/colors when nothing matches; optional outline; font size/bold; chromeless like indicator/label (right-click or double-click to edit) and AUTO-SIZES to the displayed text. Labels + indicators now AUTO-SIZE to their text at the chosen font too (fixed boxes forced abbreviations -- per russ). Prev 2.1.84: Versions strip (top bar) now shows "Expr N" -- the expressions compile counter (server DLL_VERSION, seeded from the highest expressions_vN.dll at boot, +1 on every successful Save/compile); refreshed via showVersions() after each expression Save. Pairs with server 2.13.10 (/api/diag expr_dll). Prev 2.1.83: Start New Log gains a RESET-CLOCKS-TO-T0 option: log t column starts ~0 (server t_zero) and charts clear + rebase their x-axis to 0 (_chartT0). Prev 2.1.82: Start New Log prompts for a session NAME (default = the usual timestamp); posts {name} to /api/logs/close. Prev 2.1.81: fault popups are non-blocking TOASTS (window.alert froze the JS thread -> chart data-popup readings stalled and stayed stale); stacked top-right, dismiss per-fault. Prev 2.1.80: Zero dialog gains THERMOCOUPLES (include:true only, live readings, positional indices) -> /api/zero_tc; AI + TC selections submit together with the shared balance-to value (run separate passes for different targets). Prev 2.1.79: evapLevelErr popup broadened for the FEED-STALL guard (fill-rate feed, sender frozen -> pump not delivering). Prev 2.1.78: condSensErr popup (CondLevel lying but meter counting -> TIMED pumping engaged). Prev 2.1.77: chart data-popup Follow/Current radios get a PER-WIDGET group name (radio groups are document-global -- a shared name:'mode' made all open popups one group, so selecting Current on one blanked the rest). All open data viewers now hold their own mode. Prev 2.1.76: Static Var WIDGET add-dialog + settings dropdowns sorted too (they fetch /api/static_vars separately from the createSignalSelector picker sorted in 2.1.75). Prev 2.1.75: static-var pickers + globals table sorted ALPHABETICALLY (case-insensitive) -- 280+ vars in definition order were unfindable. Prev 2.1.74: condMeterErr popup (condensate pump running, meter counts nothing -> production control blind; warn, not trip). Prev 2.1.73: purgeErr popup (purge not lowering the level -> check pump direction). Prev 2.1.72:  // 2026-07-01: senderErr fault popup -- level-sender open/short (raw 0V/10V) latched trip, pairs with the Interlocks senderErr debounce. evapLevelErr popup reworded for the sender. Prev 2.1.71: DO buttons are purely LOGICAL -- widget 'Active High' checkbox removed (settings shows read-only 'Polarity: from config'); clicks/buzz/boot-off send logical state with NO active_high so the server applies the config Invert once (the widget was a second inversion layer: it converted logical->'physical' itself AND sent active_high=true, so inverted relays showed green-ON at boot and needed double toggles to sync). updateDOButtons colors from the logical do[] directly. Pairs with server 2.13.2 (DOReq/Buzz active_high Optional->None = derive from config) + app_models 2.4.2 pad_board_channels (config editor now always shows all 8 DO / 8 AI / 2 AO / 8 TC pins, include=False spares appended -- the editor only showed the 7 DOs present in config.json). Prev 2.1.70: DO config 'normallyOpen' checkbox -> 'Invert' (binds DigitalOutCfg.invert): drive the physical pin 1 when the expression commands logical 0. The old checkbox never reached the hardware (expression + PWM writes hardcoded active_high=True in server/mcc_bridge); pairs with mcc_bridge 2.5.0 + server 2.13.1 where it now actually works. Manual DO button widgets keep their own NO/NC radios (unchanged). Prev 2.1.69: E-TC DIGITAL INPUTS -- each E-TC board card gets a "Digital Inputs (DIO -> static var)" editor (name/bit/static_var/invert/include, +Add/delete), so a High-Level float switch on the E-TC DIO can be added in-UI (writes boardsetc[].digitalInputs). New evapHighWarn fault popup ("High Level Warning -- feed paused"). Pairs with app_models/mcc_bridge 2.4.0 + server 2.13.0 (read_etc_dins stamps the bit into static.dinEvapHigh -> yEvapHigh). Prev 2.1.68: Two evaporator sight-glass level sensors -- EvapLowLevel (AI6, ~0.75L heater-covered floor) + EvapMidLevel (AI7, ~2.0L operating). Feed holds the level at EvapMid via a slow wet/dry integral (robust to flow-meter bias); prime fills to EvapLow + confirms, heat ramps to EvapMid. evapLevelErr popup reworded to EvapLowLevel. Pairs with the level-rework expressions + config AI6/AI7. Prev 2.1.67: Evaporator level fault popup -- a latched control fault static going 0->1 in the live frame fires a one-shot alert() (FAULT_MSGS/checkFaultPopups); first entry is evapLevelErr "Evaporator Level Error -- possible level-sensor or feed-pump failure". Pairs with expressions: AI:EvapLevel (AI6) wet/dry sensor read as boolean in SensorMux, PRIME won't start heat until the evaporator reads wet, and Interlocks latches evapLevelErr if primed-but-dry. Prev 2.1.66: Counters (CTR) editor enforces one counter per board (E-1608 has a single HW counter CTR0) -- "+ Add CTR" alerts + refuses past the limit (button dimmed), with a hint line. Prev 2.1.65: FIX Counters (CTR) config editor -- "+ Add CTR" now re-renders in place (own ctrBody container + local renderCtr; it was built outside renderBoards() so Add never redrew the row -> looked dead, easy to add dupes), and each counter row gets a delete (X) button. Pairs with /api/config now migrating legacy counter-on-AI -> board.counters so the UI shows the first-class structure. Prev 2.1.64: CTR first-class signal type in the UI -- getAllCounters(), a "Counters (CTR)" config editor section (name/ctr#/K/mode/win/units) with + Add CTR, 'ctr' added to every signal-selection picker (createSignalSelector/labelFor/kind lists/numericKinds), readSelection('ctr') reads state.ctr for live charts, and msg.ctr ingested into state. Counter fields removed from the analog editor (counters are no longer AI). Pairs with the 19-arg CTR DLL (app_models 2.3.0 / mcc_bridge 2.3.0 / expr_to_cpp 3.7.0 / cpp_expr_backend 3.4.0 / expr_engine 2.7.0 / server CTR frame). Prev 2.1.63: analog counter 'mode' selector (rate | total) next to K/win -- exposes AnalogCfg.counter_mode so a counter channel can report a rollover-safe cumulative TOTAL (condensate totalizer / AI:CondTotal) without editing config.json. Pairs with mcc_bridge 2.2.0 + app_models 2.2.0. Prev 2.1.62: LOG REPLAY FIX -- makeTickFromRow now strips the gvar_ prefix on static-var columns (like sv_) so replayed static-var charts get data; previously gvar_simEvapTemp was stored under that literal key while charts look up the bare name (simEvapTemp) -> every static-var chart was empty on log read-back ("almost no data", since the MVR dashboard is mostly sim* statics). Prev 2.1.61: Sim panel gains a "Reset sim to ambient" button -- POSTs static.simReset=1; the MVR System expression snaps the plant + control state back to cold/ambient startup and self-clears (instant cool-down). Prev 2.1.60: PWM DO indicators -- readSelection('do') now returns the RAW value (was boolean'd to 0/1), and the indicator BLINKS when a watched DO holds a partial PWM duty (0<v<1): lit for `duty` of each ~0.8s cycle, solid at full duty, off at 0. Pairs with cpp_expr_backend fix (do_writes carried the raw duty, was thresholded to bool>=1 -> partial duties read as off). Prev 2.1.59: top bar -- removed Logic + Math buttons (handlers kept as harmless no-ops; editor code intact), added a "Sim" button opening a Simulator panel with two checkboxes (Simulate inputs=simEnable, Hardware enabled/HIL=simDriveHW) backed by static vars + a live mode status line so suppressed outputs are never a mystery. Prev 2.1.58: stepper holding-current "Hold Pr" default corrected to Pr5.03 (0x0197, confirmed DM556RS standstill current reg) from the Pr5.01 guess. Prev 2.1.57: drive widget Reset now also zeroes the stepper step count (POST .../zero_position) alongside alarm reset; stepper library editor gains "Hold %" (standstill/holding current as % of peak when idle, blank=drive default) + editable "Hold Pr" register (default Pr5.01, datasheet-unverified). Pairs with stepper_driver 1.7.0 + server.py 2.11.6. Prev 2.1.56: Stepper Units editor gains a "Log IO" checkbox (per-instance inst.io_log -> ctrl.log_io; Modbus TX/RX logging now OFF by default). Pairs with stepper_driver 1.6.2 + server.py 2.11.4 (undelivered-command warning + stepper on-change cache cleared on rebuild). Prev 2.1.55: NEW unified "MOD Drv" widget (type 'drive') -- pick VFD or stepper in settings then the instance; live status + manual controls (VFD: RPM/Fwd/Rev/Stop/Reset; stepper: velocity/Enable/Fwd/Rev/Stop/Disable/Reset) via /api/{vfd,stepper}/{name}/*. Palette "VFD" button -> "MOD Drv" (old 'vfd' widgets still render). Stepper Units editor gains per-instance Modbus reliability fields (Retries/Gap ms/Reply ms). Pairs with server.py 2.11.3 + stepper_driver 1.6.1. Prev 2.1.54: expression help cheatsheet now lists the SWITCH/CASE/DEFAULT/ENDSWITCH block (pairs with expr_engine.py 2.5.0). Note: the live expr-debug branch colorizer doesn't yet tint SWITCH case bodies (cosmetic only; SWITCH works in both backends). Prev 2.1.53: MOD Drv Save is now SCOPED to the active domain -- VFD tabs save only VFD libs+instances, Stepper tabs save only stepper config+instances (button relabels "Save VFD"/"Save Steppers"). Previously one Save PUT both vfd/instances AND stepper/instances every time, so saving steppers rebuilt + re-commanded the running VFD and surfaced VFD connect results (the "VFD isn't there" flakiness came from that needless rebuild probe). Pair with server.py 2.11.2 (stepper PUT result normalization). Prev 2.1.52: FIX stepper-unit Port column showed "[object Object]" -- the editor appended the portSelectControl() return object (psc) into the cell instead of psc.wrap (the VFD editor already did .wrap correctly). Now el('td',{},psc.wrap). Prev 2.1.51: VFD instance editor gains a "Poll ms" column (per-instance poll_rate_ms; blank/unset shows 250 = 4/sec default, 0 = continuous) -- sets how fast the worker reads the drive over Modbus; saved to vfd_instances.json and applied on rebuild. Prev 2.1.50: chart "Keep×" spinner (1-100, default 4) sets how much history to retain in multiples of the span -- live keeps keep*span of scrollback, paused keeps ~keep*span split around the freeze (so memory is user-bounded; 100 ~= 100 spans). Filter[Hz] box narrowed to make room. Prev 2.1.49: paused charts stay filled -- the live-buffer trim now also honors the Pause-button flag (w.opts.paused), not only the zoom/pan freeze (w.view.paused); a button-paused chart previously kept doing buf.shift() each tick and wiped its left edge as new samples arrived. Span-change trim is skipped while paused too. Pairs with vfd_driver.py worker carry-forward (holds the last-good VFD reading instead of emitting 0 on a missed Modbus read, so .RPM etc. no longer drop to 0 during AO-slider command bursts). Prev 2.1.48: startup VFD comms-health popup (/api/vfd/health) — warns if a configured drive did not answer. Prev 2.1.47:  // 2026-06-15: VFD instance editor Baud column is now a speed dropdown with a →drive button that POSTs /api/vfd/{name}/baud to change the drive's Modbus baud (drive must be idle) and reopen the port. Prev: VFD widget (palette + settings pulldown of instances) showing live RPM/Hz/current/voltage/power/direction/state/fault and Set-RPM/Fwd/Rev/Stop/Reset buttons via /api/vfd/{name}/*; status arrives in the tick frame as state.vfd. COM-port dropdowns in the VFD & Motor editors got a 🔄 refresh button (portSelectControl/fetchSerialPorts) so newly-plugged adapters appear without F5. Prev: VFD config editor (VFDs menu) -- three tabs (Instances/Drives/Motors) backed by /api/vfd/{instances,drives,motors}; instances bind a drive+motor+port via pulldowns populated from the drive & motor libraries, so multiple motors/drives are supported. Pair with server.py 2.8.28 + vfd_driver.py. Prev: Checklist HOSTING support -- WS hello carries a client_id and cl_host messages route to the checklist widget (checklist_widget.js 1.19.0 + server.py 2.8.27). Prev: Checklists now mirror across computers -- relayed check/uncheck events also update a locally-hosted checklist widget (checkbox, times, cursor advance/retreat) via idempotent clApplyRemote hooks in checklist_widget.js 1.18.0. Prev: Layouts are now strictly per-browser -- boot restores THIS machine's last-saved layout from localStorage (or a starter page); Save Layout / Load Layout / color tweaks persist locally; nothing auto-loads or auto-uploads the server copy, so one machine's save can never appear on another. Sharing stays deliberate: layout file + Load Layout. Prev: Layout-sync made diagnosable and honest — Save Layout now alerts when the server mirror actually fails (fetch resolves on HTTP 500, so the old success log lied); server auto-load logs each decision and fetches with cache:no-store; defined the previously-missing saveLayout() as a debounced silent server mirror. Pair with server.py 2.8.24. Prev: FIX for remote computers (plain http origins): crypto.randomUUID only exists in secure contexts, so its use in ensureStarterPage crashed the whole boot on other machines (no auto-connect, no server layout) and broke every add-widget palette button. All id generation now goes through genId(), which falls back to an RFC-4122 v4 UUID built from crypto.getRandomValues. Prev: Multi-select & grouping editing aid — Ctrl+click or rubber-band-drag on empty canvas to select several widgets; dragging any selected widget moves them all with relative offsets preserved (only the grabbed one snaps). Ctrl+G makes the selection a persistent group (groupId, saved in layout) that always moves as one; Ctrl+Shift+G ungroups; also in the right-click menu. Group/multi drags skip bring-to-front so a background shape stays sent-to-back. Prev: hwReady now arrives via a WS hello message on every (re)connect, fixing remote machines whose DO buttons stayed in the un-connected color when the one-shot /api/diag fetch failed at boot. Prev: Multi-computer support — layouts now mirror to the server on Save and auto-load on empty browsers (second machine gets your widgets on open), and check events relay through the server WebSocket so a checklist run on one computer marks charts on every computer. Pair with server.py 2.8.22 + checklist_widget.js 1.17.1. Prev: Cross-window check-event sync via BroadcastChannel — popped-out charts now receive checkmarks from the main-page checklist and a popped-out checklist reaches all windows; new windows pull existing events on open (sync_request). Also fixed: unchecking now removes the live chart mark (the checklist-uncheck listener was missing). Pair with checklist_widget.js 1.17.0. Prev 2026-06-11: Viewer launch now also exports friendly signal names (from config/expr/pid/math caches) and the list of charted columns, so the standalone viewer shows real names and opens with exactly the chart's signals enabled. Plus chart display scales — every chart series' displayScale/displayOffset is collected across all pages, keyed by CSV column name (ai0, tc2, expr5, pid0, bvar_/gvar_ names), and sent with /api/log_viewer/launch so the standalone viewer can toggle between raw CSV values and the chart-style scaled view. Identity transforms (×1 +0) are skipped; first chart wins on duplicates. Pair with server.py 2.8.20 + log_viewer.py 1.1.0.
 
 /* ----------------------------- popout mode ------------------------------ */
 /* When app.js loads in /popout.html?popout=<widgetId>, we run a stripped-down
@@ -3499,6 +3499,10 @@ function addWidget(type){
     // Wide enough for a few words at default 16px font.
     defaultW = 120;
     defaultH = 36;
+  } else if (type === 'statustext') {
+    // Auto-sizes to its text on first paint; this is just the pre-mount box.
+    defaultW = 140;
+    defaultH = 44;
   } else if (type === 'shape') {
     // Reasonable visible default for a circle/polygon. Lines will look
     // proportionally good across this square bounding box too.
@@ -3895,6 +3899,26 @@ function defaultsFor(type){
       fgColor: '#e6e6e6',      // matches --fg
       bgColor: 'transparent',  // transparent = inherits main window color
       align: 'left'            // 'left' | 'center' | 'right'
+    };
+    case 'statustext': return {
+      title: 'Status',
+      // Signal whose value selects which condition's text/colors to display.
+      src: { mode: 'signal', sel: { kind: 'static', index: 'mvrPhase' } },
+      // First matching condition (top-down) wins. Each has its own text,
+      // text color (fg) and background (bg).
+      conds: [
+        { op: '=', value: 4, text: 'RUNNING', fg: '#ffffff', bg: '#2faa60' },
+        { op: '=', value: 3, text: 'HEATING', fg: '#111111', bg: '#e8b33a' }
+      ],
+      defText: '—',       // shown when no condition matches
+      defFg: '#cfd6f0',
+      defBg: '#3b425e',
+      fontFamily: 'system-ui',
+      fontSize: 18,
+      fontWeight: 'bold',
+      outline: true,
+      outlineColor: '#4c5170',
+      pad: 8                   // px padding around the text (auto-size adds it)
     };
     case 'shape': return {
       // Drawing primitive used as a layout visual aid. Three sub-kinds
@@ -5328,6 +5352,124 @@ function openWidgetSettings(w) {
     );
   }
 
+  if (w.type === 'statustext') {
+    // ===== Status Text settings =====
+    // One input signal; an ordered list of conditions (first match wins),
+    // each with its own display text, text color, and background; a default
+    // for when nothing matches; font + optional outline. Auto-sizes to text.
+    const TARGET_KINDS = ['static','expr','ai','tc','ao','do','ctr','pid','math','button','scale'];
+    if (!w.opts.src || typeof w.opts.src !== 'object') {
+      w.opts.src = { mode: 'signal', sel: { kind: 'static', index: 'mvrPhase' } };
+    }
+    w.opts.src.mode = 'signal';
+    if (!w.opts.src.sel) w.opts.src.sel = { kind: 'static', index: 'mvrPhase' };
+    if (!Array.isArray(w.opts.conds)) w.opts.conds = [];
+
+    const kindSel = selectEnum(TARGET_KINDS, w.opts.src.sel.kind || 'static', () => {});
+    let sigSel = el('select', {style: 'min-width:160px'}, [el('option', {}, 'Loading...')]);
+    const writeSig = () => {
+      const kind = kindSel.value;
+      const rawIdx = sigSel.value;
+      if (rawIdx === 'Loading...' || rawIdx == null) return;
+      const numericKinds = ['ai','ao','do','tc','ctr','pid','math','le','expr','scale'];
+      w.opts.src.sel = { kind, index: numericKinds.includes(kind) ? (parseInt(rawIdx, 10) || 0) : rawIdx };
+    };
+    const rebuildSig = async (kind, cur) => {
+      try {
+        const newSel = await createSignalSelector(kind, cur, () => writeSig());
+        newSel.style.minWidth = '160px';
+        sigSel.replaceWith(newSel);
+        sigSel = newSel;
+        writeSig();
+      } catch (e) { console.warn('[statustext] signal selector build failed:', e); }
+    };
+    rebuildSig(w.opts.src.sel.kind || 'static',
+               (w.opts.src.sel.index !== undefined) ? w.opts.src.sel.index : 0);
+    kindSel.onchange = async () => { await rebuildSig(kindSel.value, 0); };
+
+    // Small color swatch bound to obj[key]; empty string = keep default.
+    const swatchFor = (obj, key, def) => {
+      const sw = el('div', {
+        style: `width:24px;height:22px;border-radius:4px;border:1px solid var(--border);` +
+               `cursor:pointer;background:${obj[key] || def};flex-shrink:0;`,
+        title: 'Click to choose color'
+      });
+      sw.onclick = (e) => {
+        e.stopPropagation();
+        createColorPicker(obj[key] || def, (c) => { obj[key] = c; sw.style.background = c; });
+      };
+      return sw;
+    };
+
+    const condsWrap = el('div', {});
+    const renderConds = () => {
+      condsWrap.innerHTML = '';
+      w.opts.conds.forEach((c, i) => {
+        const opSel = el('select', {style: 'width:58px;text-align:center'});
+        ['=','!=','>','<','>=','<='].forEach(o => opSel.append(el('option', {value:o}, o)));
+        opSel.value = c.op || '=';
+        opSel.onchange = () => { c.op = opSel.value; };
+        const valInp = el('input', {type:'number', step:'any', value: (c.value ?? 0), style:'width:74px'});
+        valInp.oninput = () => { c.value = parseFloat(valInp.value) || 0; };
+        const txtInp = el('input', {type:'text', value: (c.text ?? ''), style:'flex:1;min-width:110px'});
+        txtInp.oninput = () => { c.text = txtInp.value; };
+        const upBtn  = el('button', {className:'btn', title:'Raise priority',
+          onclick: () => { if (i > 0) { const a = w.opts.conds; [a[i-1], a[i]] = [a[i], a[i-1]]; renderConds(); } }}, '↑');
+        const delBtn = el('button', {className:'btn', title:'Delete condition',
+          onclick: () => { w.opts.conds.splice(i, 1); renderConds(); }}, '✕');
+        condsWrap.append(el('div', {
+          style: 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0;' +
+                 'padding:6px;background:#1a1d2e;border-radius:6px'
+        }, [
+          el('span', {style:'color:#8b949e;font-size:12px'}, 'value'), opSel, valInp,
+          el('span', {style:'color:#8b949e;font-size:12px'}, 'show'), txtInp,
+          el('span', {style:'color:#8b949e;font-size:12px'}, 'text'), swatchFor(c, 'fg', '#ffffff'),
+          el('span', {style:'color:#8b949e;font-size:12px'}, 'bg'),   swatchFor(c, 'bg', '#3b425e'),
+          upBtn, delBtn
+        ]));
+      });
+    };
+    renderConds();
+    const addCondBtn = el('button', {className:'btn', style:'margin-top:4px',
+      onclick: () => { w.opts.conds.push({op:'=', value:0, text:'STATE', fg:'#ffffff', bg:'#3b425e'}); renderConds(); }},
+      '+ Add condition');
+
+    const defTextInp = el('input', {type:'text', value: (w.opts.defText ?? '—'), style:'width:140px'});
+    defTextInp.oninput = () => { w.opts.defText = defTextInp.value; };
+    const fontSizeInp = el('input', {type:'number', min:'6', max:'200', step:'1',
+      value: Number(w.opts.fontSize) || 18, style:'width:70px'});
+    fontSizeInp.oninput = () => {
+      const v = parseInt(fontSizeInp.value, 10);
+      if (Number.isFinite(v) && v >= 6) w.opts.fontSize = v;
+    };
+    const boldChk = el('input', {type:'checkbox'});
+    boldChk.checked = (w.opts.fontWeight === 'bold');
+    boldChk.onchange = () => { w.opts.fontWeight = boldChk.checked ? 'bold' : 'normal'; };
+    const outlineChk = el('input', {type:'checkbox'});
+    outlineChk.checked = (w.opts.outline !== false);
+    outlineChk.onchange = () => { w.opts.outline = outlineChk.checked; };
+
+    root.append(
+      tableForm([
+        ['Input kind',    kindSel],
+        ['Input signal',  sigSel],
+        ['Default text',  defTextInp],
+        ['Default text color', swatchFor(w.opts, 'defFg', '#cfd6f0')],
+        ['Default background', swatchFor(w.opts, 'defBg', '#3b425e')],
+        ['Font size (px)', fontSizeInp],
+        ['Bold',          boldChk],
+        ['Outline',       outlineChk],
+        ['Outline color', swatchFor(w.opts, 'outlineColor', '#4c5170')]
+      ]),
+      el('div', {style: 'margin-top:12px;color:#a8b3cf;font-size:12px'},
+        'Conditions — checked top-down against the input value; the FIRST match sets the text and colors. ↑ raises priority.'),
+      condsWrap,
+      addCondBtn,
+      el('div', {style: 'margin-top:8px;color:#7a7f8f;font-size:11px'},
+        'No match → the Default text/colors show. The widget auto-sizes to whatever text is displayed.')
+    );
+  }
+
   if (w.type === 'label') {
     // ===== Label settings =====
     // Text, font family (curated list), font size, bold/italic toggles,
@@ -5787,7 +5929,7 @@ function renderPage(){
     //   - indicator/label have no resize handle at all (size is a setting).
     //   - shape does have a corner-drag handle so the user can size the
     //     bounding box, since the rendered drawing fills it.
-    if (w.type === 'indicator' || w.type === 'label') {
+    if (w.type === 'indicator' || w.type === 'label' || w.type === 'statustext') {
       makeDragResize(node, w, node.querySelector('.body'), null);
     } else if (w.type === 'shape') {
       makeDragResize(node, w, node.querySelector('.body'), node.querySelector('.shape-resize'));
@@ -5810,19 +5952,21 @@ function renderWidget(w){
   if (w.type === 'staticvar') classList += ' staticvar-widget';
   if (w.type === 'indicator') classList += ' indicator-widget';
   if (w.type === 'label') classList += ' label-widget';
+  if (w.type === 'statustext') classList += ' statustext-widget';
   if (w.type === 'shape') classList += ' shape-widget';
   const box=el('div',{className:classList, id:'w_'+w.id});
 
-  // Indicators, labels, and shapes are intentionally chromeless: no header
-  // bar, no settings/close icons, no resize grabber. The whole body is
-  // the drag handle, and a right-click (or double-click) opens settings;
+  // Indicators, labels, status texts, and shapes are intentionally chromeless:
+  // no header bar, no settings/close icons, no resize grabber. The whole body
+  // is the drag handle, and a right-click (or double-click) opens settings;
   // a context menu lets you delete or reorder them without a visible ×.
-  if (w.type === 'indicator' || w.type === 'label' || w.type === 'shape') {
+  if (w.type === 'indicator' || w.type === 'label' || w.type === 'statustext' || w.type === 'shape') {
     const body = el('div', {className: 'body'});
     box.append(body);
-    if      (w.type === 'indicator') mountIndicator(w, body, box);
-    else if (w.type === 'label')     mountLabel(w, body, box);
-    else                             mountShape(w, body, box);
+    if      (w.type === 'indicator')  mountIndicator(w, body, box);
+    else if (w.type === 'label')      mountLabel(w, body, box);
+    else if (w.type === 'statustext') mountStatusText(w, body, box);
+    else                              mountShape(w, body, box);
     return box;
   }
   
@@ -9468,6 +9612,7 @@ function mountIndicator(w, body, box) {
   // unconditionally, then only stop scheduling once the dot HAS been in the
   // DOM and is no longer (i.e. the widget was actually removed).
   let _everConnected = false;
+  let _lastSizeKey = '';
   const update = () => {
     if (dot.isConnected) _everConnected = true;
     else if (_everConnected) return;  // widget was removed — stop the loop
@@ -9506,6 +9651,20 @@ function mountIndicator(w, body, box) {
     const desiredLabel = (w.opts.showLabel === false) ? '' : (w.opts.title || '');
     if (labelEl.textContent !== desiredLabel) labelEl.textContent = desiredLabel;
     labelEl.style.display = desiredLabel ? '' : 'none';
+
+    // AUTO-SIZE (rig 7/23, per russ): fit the box to dot + label text — the
+    // fixed 60px box forced abbreviated labels. Re-measured only when the
+    // label or dot size changes (cheap key check per frame).
+    const sizeKey = size + '|' + desiredLabel;
+    if (sizeKey !== _lastSizeKey) {
+      _lastSizeKey = sizeKey;
+      const m = desiredLabel ? _measureTextStyled(desiredLabel, {family: 'system-ui', size: 11}) : {w: 0, h: 0};
+      const W = Math.max(size, Math.ceil(m.w)) + 12;
+      const H = size + (desiredLabel ? Math.ceil(m.h) + 3 : 0) + 10;
+      box.style.width = W + 'px';
+      box.style.height = H + 'px';
+      w.w = W; w.h = H;
+    }
 
     requestAnimationFrame(update);
   };
@@ -9590,6 +9749,120 @@ function _showChromelessContextMenu(w, x, y) {
   setTimeout(() => document.addEventListener('mousedown', dismiss, true), 0);
 }
 
+/* ----------------------------- status text ------------------------------ */
+
+/** Measure text at explicit font settings (off-DOM probe). white-space:pre so
+ *  explicit newlines count; returns {w, h} in px. */
+function _measureTextStyled(text, f) {
+  const probe = document.createElement('span');
+  probe.style.cssText =
+    'position:absolute;visibility:hidden;left:-9999px;top:-9999px;' +
+    'white-space:pre;line-height:1.25;';
+  probe.style.fontFamily = (f && f.family) || 'system-ui';
+  probe.style.fontSize   = ((f && f.size) || 16) + 'px';
+  probe.style.fontWeight = (f && f.weight) || 'normal';
+  probe.style.fontStyle  = (f && f.style) || 'normal';
+  probe.textContent = text || ' ';
+  document.body.appendChild(probe);
+  const r = { w: probe.offsetWidth, h: probe.offsetHeight };
+  probe.remove();
+  return r;
+}
+
+/** value OP threshold, with float tolerance on equality. */
+function _statusCondTrue(v, c) {
+  if (!c || typeof c !== 'object' || !Number.isFinite(v)) return false;
+  const b = Number(c.value);
+  if (!Number.isFinite(b)) return false;
+  switch (c.op) {
+    case '=':  return Math.abs(v - b) < 1e-9;
+    case '!=': return Math.abs(v - b) >= 1e-9;
+    case '>':  return v >  b;
+    case '<':  return v <  b;
+    case '>=': return v >= b + -1e-9;
+    case '<=': return v <= b + 1e-9;
+  }
+  return false;
+}
+
+/**
+ * Status Text widget (rig 7/23, per russ) — displays per-condition text with
+ * its own text/background colors for one input signal ("All good" white on
+ * green, "Error Trip" black on red, ...). First matching condition top-down
+ * wins; a default shows when nothing matches. Optional outline. Chromeless
+ * like indicator/label; AUTO-SIZES to the currently displayed text.
+ */
+function mountStatusText(w, body, box) {
+  body.style.cssText =
+    'display:flex;align-items:center;justify-content:center;width:100%;height:100%;' +
+    'cursor:grab;user-select:none;overflow:hidden;';
+  box.style.boxShadow = 'none';
+
+  const span = el('div', {style: 'white-space:pre;line-height:1.25;'});
+  body.append(span);
+
+  box.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _showChromelessContextMenu(w, e.clientX, e.clientY);
+  });
+  body.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    openWidgetSettings(w);
+  });
+
+  // Same first-paint rule as mountIndicator: paint unconditionally, only stop
+  // once the node HAS been in the DOM and is no longer.
+  let _everConnected = false;
+  let _lastKey = '';
+  const update = () => {
+    if (span.isConnected) _everConnected = true;
+    else if (_everConnected) return;   // widget removed — stop the loop
+
+    const v = _indicatorReadOperand(w.opts.src);
+    let text = (w.opts.defText != null) ? w.opts.defText : '—';
+    let fg = w.opts.defFg || '#cfd6f0';
+    let bg = w.opts.defBg || '#3b425e';
+    const conds = Array.isArray(w.opts.conds) ? w.opts.conds : [];
+    for (const c of conds) {
+      if (_statusCondTrue(v, c)) {
+        text = (c.text != null) ? c.text : '';
+        if (c.fg) fg = c.fg;
+        if (c.bg) bg = c.bg;
+        break;
+      }
+    }
+
+    const fs = Math.max(6, Number(w.opts.fontSize) || 18);
+    const weight = (w.opts.fontWeight === 'bold') ? 'bold' : 'normal';
+    const fam = w.opts.fontFamily || 'system-ui';
+    const outline = (w.opts.outline !== false);
+    const oc = w.opts.outlineColor || '#4c5170';
+    const key = [text, fg, bg, fs, weight, fam, outline, oc, w.opts.pad].join('|');
+    if (key !== _lastKey) {
+      _lastKey = key;
+      span.textContent = text;
+      span.style.color = fg;
+      span.style.fontSize = fs + 'px';
+      span.style.fontWeight = weight;
+      span.style.fontFamily = fam;
+      box.style.background = bg;
+      box.style.border = outline ? `1.5px solid ${oc}` : 'none';
+      box.style.borderRadius = '6px';
+      // AUTO-SIZE the widget to the displayed text + padding.
+      const m = _measureTextStyled(text, {family: fam, size: fs, weight});
+      const pad = Number.isFinite(Number(w.opts.pad)) ? Number(w.opts.pad) : 8;
+      const W = Math.ceil(m.w) + pad * 2;
+      const H = Math.ceil(m.h) + pad * 2;
+      box.style.width = W + 'px';
+      box.style.height = H + 'px';
+      w.w = W; w.h = H;
+    }
+    requestAnimationFrame(update);
+  };
+  update();
+}
+
 /* -------------------------------- label --------------------------------- */
 
 /**
@@ -9631,6 +9904,23 @@ function mountLabel(w, body, box) {
   }, w.opts.text || '');
 
   body.append(span);
+
+  // AUTO-SIZE (rig 7/23, per russ): size the widget box to the text at the
+  // chosen font — the fixed box forced abbreviations. Measured off-DOM so it
+  // works before the box is appended; explicit newlines respected.
+  requestAnimationFrame(() => {
+    const m = _measureTextStyled(w.opts.text || ' ', {
+      family: w.opts.fontFamily || 'system-ui',
+      size: Math.max(6, Number(w.opts.fontSize) || 16),
+      weight: (w.opts.fontWeight === 'bold') ? 'bold' : 'normal',
+      style: (w.opts.fontStyle === 'italic') ? 'italic' : 'normal'
+    });
+    const W = Math.ceil(m.w) + 12;
+    const H = Math.ceil(m.h) + 8;
+    box.style.width = W + 'px';
+    box.style.height = H + 'px';
+    w.w = W; w.h = H;
+  });
 
   // Right-click → settings (and Delete). Double-click → settings.
   box.addEventListener('contextmenu', (e) => {
@@ -10471,6 +10761,7 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'staticvar') minW = 196;  // 70% of default 280
   else if (w.type === 'indicator') minW = 20;   // small dot+label allowance
   else if (w.type === 'label') minW = 24;       // narrow but not invisible
+  else if (w.type === 'statustext') minW = 24;   // auto-sizes to its text anyway
   else if (w.type === 'shape') minW = 16;        // enough room for a tiny shape
   else if (w.type === 'console') minW = 200;     // unreadable below this
   
@@ -10480,6 +10771,7 @@ function makeDragResize(node, w, header, handle){
   else if (w.type === 'staticvar') minH = 90;  // Half of default 180
   else if (w.type === 'indicator') minH = 16;  // dot only, no label
   else if (w.type === 'label') minH = 14;      // about one line at 12px
+  else if (w.type === 'statustext') minH = 16;
   else if (w.type === 'shape') minH = 16;
   else if (w.type === 'console') minH = 80;
   
@@ -10692,6 +10984,27 @@ function normalizeLayoutPages(pages){
         w.opts.showLabel= (w.opts.showLabel !== false);
         w.opts.condA    = fixCond(w.opts.condA, defOpA);
         w.opts.condB    = fixCond(w.opts.condB, defOpB);
+        break;
+      }
+      case 'statustext': {
+        // Conditional status text. Defensive normalize so hand-edited or
+        // older layouts don't crash the render loop.
+        if (!w.opts.src || typeof w.opts.src !== 'object') {
+          w.opts.src = { mode: 'signal', sel: { kind: 'static', index: 'mvrPhase' } };
+        }
+        w.opts.src.mode = 'signal';
+        if (!w.opts.src.sel || typeof w.opts.src.sel !== 'object') {
+          w.opts.src.sel = { kind: 'static', index: 'mvrPhase' };
+        }
+        if (!Array.isArray(w.opts.conds)) w.opts.conds = [];
+        w.opts.conds = w.opts.conds.filter(c => c && typeof c === 'object');
+        for (const c of w.opts.conds) {
+          if (!['=','!=','>','<','>=','<='].includes(c.op)) c.op = '=';
+          if (!Number.isFinite(Number(c.value))) c.value = 0;
+          if (typeof c.text !== 'string') c.text = '';
+        }
+        w.opts.defText  = (typeof w.opts.defText === 'string') ? w.opts.defText : '—';
+        w.opts.fontSize = (Number.isFinite(w.opts.fontSize) && w.opts.fontSize >= 6) ? w.opts.fontSize : 18;
         break;
       }
       case 'label': {
