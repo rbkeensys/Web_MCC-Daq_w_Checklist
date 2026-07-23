@@ -43,8 +43,11 @@ token-run tunnel.)*
 
 ## 2. Landing page (Cloudflare Pages)
 
-1. Dashboard → **Workers & Pages → Create → Pages → Upload assets**
-   ("Direct Upload").
+1. Main dashboard (dash.cloudflare.com) at ACCOUNT level — on this account
+   the sidebar entry is **Compute (Workers)** (older layouts: "Workers &
+   Pages"; the domain view only shows "Workers Routes"). Deep link:
+   https://dash.cloudflare.com/?to=/:account/workers-and-pages
+   Then **Create → Pages tab → Upload assets** ("Direct Upload").
 2. Project name: `keenmvr-landing` (anything). Drag the folder
    [cloudflare/landing/](landing/) (it contains just `index.html`) into the
    upload box. Deploy.
@@ -58,6 +61,11 @@ To add/rename machines later: edit the `MACHINES` array at the bottom of
 deployment). Takes a minute.
 
 ## 3. Lock the machines (Zero Trust Access, email OTP)
+
+> **See [AS_BUILT.md](AS_BUILT.md)** for this account's ACTUAL menu labels
+> (new Cloudflare One layout: Integrations → Identity providers; Access
+> controls → Applications), the verified end-state, and the gotchas hit
+> during the 2026-07-22 setup. The steps below are the generic shape.
 
 1. Dashboard → **Zero Trust** (one-time: pick the free plan + a team name —
    e.g. `keensys`; the team name is just your login page URL).
