@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keen Systems — MVR Fleet</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3;
+    --muted:#8b949e; --accent:#58a6ff; --good:#3fb950;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:"Segoe UI", system-ui, -apple-system, sans-serif;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+  }
+  header{ text-align:center; padding:64px 24px 32px }
+  header h1{ font-size:2rem; font-weight:600; letter-spacing:.02em }
+  header h1 .accent{ color:var(--accent) }
+  header p{ color:var(--muted); margin-top:8px; font-size:1.02rem }
+  main{
+    display:flex; flex-wrap:wrap; gap:20px; justify-content:center;
+    padding:16px 24px 48px; max-width:1100px; width:100%;
+  }
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:24px 28px; width:320px; text-decoration:none; color:inherit;
+    transition:border-color .15s, transform .15s;
+  }
+  .card:hover{ border-color:var(--accent); transform:translateY(-2px) }
+  .card .name{ font-size:1.25rem; font-weight:600; margin-bottom:4px }
+  .card .host{ color:var(--accent); font-size:.9rem; font-family:Consolas, monospace }
+  .card .desc{ color:var(--muted); font-size:.9rem; margin-top:10px; line-height:1.45 }
+  .card .badge{
+    display:inline-block; margin-top:14px; font-size:.75rem; color:var(--good);
+    border:1px solid var(--good); border-radius:999px; padding:2px 10px;
+  }
+  footer{ margin-top:auto; padding:24px; color:var(--muted); font-size:.8rem; text-align:center }
+  footer a{ color:var(--muted) }
+</style>
+</head>
+<body>
+<header>
+  <h1>Keen Systems <span class="accent">MVR</span> Fleet</h1>
+  <p>Mechanical vapor recompression — water distillation control &amp; monitoring</p>
+</header>
+
+<main id="fleet"></main>
+
+<footer>
+  Access requires sign-in (one-time PIN by email). &copy; Keen Systems &middot; keenmvr.com
+</footer>
+
+<script>
+/* ---- EDIT THIS LIST to add/rename machines. Each entry becomes a card. ---- */
+const MACHINES = [
+  {
+    name: "MVR 1 — Lab Rig",
+    host: "mvr1.keenmvr.com",
+    desc: "500 L-class counter-flow boiler, GK3000 blower drive. Live dashboard, charts, and logs.",
+    badge: "protected"
+  },
+  // {
+  //   name: "MVR 2 — (future)",
+  //   host: "mvr2.keenmvr.com",
+  //   desc: "Second machine placeholder.",
+  //   badge: "protected"
+  // },
+];
+
+const fleet = document.getElementById("fleet");
+for (const m of MACHINES) {
+  const a = document.createElement("a");
+  a.className = "card";
+  a.href = "https://" + m.host + "/";
+  a.innerHTML = `
+    <div class="name">${m.name}</div>
+    <div class="host">${m.host}</div>
+    <div class="desc">${m.desc}</div>
+    <span class="badge">${m.badge}</span>`;
+  fleet.appendChild(a);
+}
+</script>
+</body>
+</html>

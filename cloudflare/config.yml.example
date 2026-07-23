@@ -1,0 +1,24 @@
+# cloudflared tunnel config — MVR rig PC
+# Windows location (service): C:\Users\<you>\.cloudflared\config.yml
+# After editing: cloudflared service uninstall / install, or restart the
+# "Cloudflared agent" Windows service so it rereads this file.
+#
+# Replace <TUNNEL-ID> with your tunnel's UUID (see `cloudflared tunnel list`).
+
+tunnel: <TUNNEL-ID>
+credentials-file: C:\Users\russ\.cloudflared\<TUNNEL-ID>.json
+
+ingress:
+  # Named machine -> the local MCC DAQ server. WebSockets pass through
+  # automatically, so live charts work.
+  - hostname: mvr1.keenmvr.com
+    service: http://localhost:8000
+
+  # (Later) a second machine on ANOTHER PC gets its OWN tunnel + config with
+  # hostname mvr2.keenmvr.com. If a second server ever runs on THIS PC on a
+  # different port, add it here instead:
+  # - hostname: mvr2.keenmvr.com
+  #   service: http://localhost:8001
+
+  # Required catch-all: anything not matched above gets a 404.
+  - service: http_status:404
