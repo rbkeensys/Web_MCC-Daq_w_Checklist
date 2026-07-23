@@ -21,8 +21,13 @@ config.yml and nothing to edit on the PC; all routing lives in the dashboard:
 2. **Public Hostname** tab. You'll see the existing route for
    www.keenmvr.com → localhost:8000.
 3. **Add a public hostname**: subdomain `mvr1`, domain `keenmvr.com`,
-   service type `HTTP`, URL `localhost:8000`. Save. The proxied DNS record
-   is created automatically.
+   service type `HTTPS`, URL `localhost:8000`. The local server serves
+   HTTPS (mkcert certs in server/config/ssl/), and cloudflared does not
+   trust mkcert's private CA — so expand **Additional application
+   settings → TLS** and enable **No TLS Verify** (this is the "disable
+   SSL certificate check" from the first route; it's fine here — the
+   unverified hop never leaves the PC's loopback). Save; the proxied DNS
+   record is created automatically.
 4. **Edit/delete the old www route** on this tunnel — www is about to become
    the Pages landing page instead (step 2), and a tunnel route on www would
    shadow it.
