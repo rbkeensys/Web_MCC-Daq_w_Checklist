@@ -53,7 +53,22 @@ prefix silently drops when they bounce you — retype it.
    separates client vs cloud in one shot: `cloudflared access login` + curl
    the WS upgrade with `cf-access-token` -- a 101 proves edge+Access+tunnel+
    server all fine and points at the client browser.
-6. **"Connects once per browser session, then never again" = 0-RTT** (7/23):
+6. **THE connect-once-then-never bug — SOLVED (7/23 evening): zone SSL mode
+   was "Off" while "Always Use HTTPS" was ON.** Two edge redirect rules at
+   war: ssl:off 301s https->http, always_use_https 301s http->https -- a
+   per-connection race resolved differently by each edge server. Browsers
+   ride out the ping-pong on page loads; a WebSocket dies on its first
+   redirect (cannot follow them). Hence: some connects work (russ: "double
+   click sometimes connects"), most don't, and every earlier "fix" (Shields,
+   cookies, 0-RTT) merely coincided with winning the race. Diagnosis that
+   cracked it: authenticated curl WS handshake alternating 101 / 301 with
+   Location: http://... and a Cloudflare-signed 301 body -> read
+   settings/ssl -> "off". FIX: ssl=full (API PATCH). After: 8/8 handshakes
+   101, remote connects verified. (ssl:off probably dates to the first
+   night's "disable the SSL certificate check" flailing.) 0-RTT and HTTP/3
+   were also disabled during the hunt -- innocent, but left off (WS-safest).
+   Historical note kept below for the hunt's lesson:
+   ~~"Connects once per browser session = 0-RTT"~~ (7/23, disproven):
    zone setting 0-RTT (TLS early data) was ON -- it only activates on RESUMED
    TLS sessions, so the FIRST connection (full handshake) worked and every
    later reconnect (early data) broke the WS upgrade at the edge. Incognito
