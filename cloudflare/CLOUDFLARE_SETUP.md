@@ -11,28 +11,30 @@ Do step 3 before sharing any machine link.
 
 ---
 
-## 1. Name the machine (tunnel ingress + DNS)
+## 1. Name the machine (tunnel public hostname)
 
-On the rig PC (where `cloudflared` already runs):
+This rig's tunnel is **remotely managed** (the Windows service runs
+`cloudflared tunnel run --token …` — verified 2026-07-22). There is NO local
+config.yml and nothing to edit on the PC; all routing lives in the dashboard:
 
-1. Find your tunnel: `cloudflared tunnel list` → note the NAME and ID.
-2. Edit `C:\Users\russ\.cloudflared\config.yml` to match
-   [config.yml.example](config.yml.example) — hostname `mvr1.keenmvr.com`
-   → `http://localhost:8000`, plus the 404 catch-all.
-3. Create the DNS route (one command, no dashboard needed):
+1. Dashboard → **Zero Trust → Networks → Tunnels** → click your tunnel.
+2. **Public Hostname** tab. You'll see the existing route for
+   www.keenmvr.com → localhost:8000.
+3. **Add a public hostname**: subdomain `mvr1`, domain `keenmvr.com`,
+   service type `HTTP`, URL `localhost:8000`. Save. The proxied DNS record
+   is created automatically.
+4. **Edit/delete the old www route** on this tunnel — www is about to become
+   the Pages landing page instead (step 2), and a tunnel route on www would
+   shadow it.
+5. Test: `https://mvr1.keenmvr.com` shows the app (still unprotected — step 3
+   fixes that). Live charts confirm WebSockets pass through.
 
-       cloudflared tunnel route dns <TUNNEL-NAME> mvr1.keenmvr.com
+No service restart needed — remotely-managed tunnels pick up hostname changes
+from the dashboard within seconds.
 
-   This adds a proxied CNAME in the keenmvr.com zone pointing at the tunnel.
-4. Restart the Cloudflared Windows service (services.msc → "Cloudflared" →
-   Restart) so it rereads config.yml.
-5. Test: `https://mvr1.keenmvr.com` should show the app (still unprotected —
-   next step fixes that). Charts/live data confirm WebSockets pass through.
-
-If you originally created the tunnel with a quick one-liner pointing straight
-at localhost:8000, the dashboard equivalent lives at **Zero Trust →
-Networks → Tunnels → your tunnel → Public Hostname** — add
-`mvr1.keenmvr.com` → `http://localhost:8000` there instead; same result.
+*(The [config.yml.example](config.yml.example) in this folder is only for the
+LOCALLY-managed alternative — keep it as reference; you don't need it with a
+token-run tunnel.)*
 
 ## 2. Landing page (Cloudflare Pages)
 
