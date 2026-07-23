@@ -79,6 +79,12 @@ body.fullscreen #exitFullscreenBtn { display: block; }
 .widget.pidpanel-widget { min-width:168px; }
 .widget.bars-widget { min-width:100px; } /* Allow very narrow bars */
 .widget.staticvar-widget { min-width:120px; min-height:70px; } /* Compact static var display */
+/* Status text widget — chromeless conditional status pill. Auto-sizes to its
+   text; tiny fixed sizes allowed (min 10px). Background/border set inline by
+   mountStatusText per active condition, so no card chrome here. */
+.widget.statustext-widget { min-width:10px; min-height:10px; background:transparent; border:none; box-shadow:none; }
+.widget.statustext-widget .body { padding:0; }
+.widget.statustext-widget .shape-resize:hover { opacity:1 !important; }
 /* Indicator widget — chromeless small dot/rect with no header or resize.
    The body itself is the drag handle (cursor:grab set inline by mountIndicator).
    No border, no card background — just the dot/rect and (optionally) a label. */
