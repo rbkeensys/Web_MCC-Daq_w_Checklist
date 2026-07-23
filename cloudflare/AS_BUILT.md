@@ -43,7 +43,17 @@ prefix silently drops when they bounce you — retype it.
 4. Access login page demanding a Cloudflare account/password = the app
    isn't offering One-time PIN → add the IdP (Integrations) AND enable
    "Accept all available identity providers" on the application.
-5. "Service tokens" tab ≠ login methods (that's machine-to-machine auth —
+5. **Brave browser kills the WebSocket** (7/23, cost an hour): page loads,
+   versions show, but Connect fails with the server seeing NOTHING -- Brave's
+   "Trackers & ads blocking" blocks the wss:// upgrade client-side
+   (net::ERR_BLOCKED_BY_CLIENT; the blocked cloudflareinsights beacon in the
+   console is the tell). Incognito working while normal fails = this. Fix on
+   each Brave machine: disable Trackers & ads blocking (russ's build: GLOBAL
+   Shields settings -- per-site Advanced controls absent). Diagnostic that
+   separates client vs cloud in one shot: `cloudflared access login` + curl
+   the WS upgrade with `cf-access-token` -- a 101 proves edge+Access+tunnel+
+   server all fine and points at the client browser.
+6. "Service tokens" tab ≠ login methods (that's machine-to-machine auth —
    possibly useful later for scripted remote log pulls).
 
 ## Adding machine #2 (the ritual)
