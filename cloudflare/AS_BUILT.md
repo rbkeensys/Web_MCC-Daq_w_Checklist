@@ -53,7 +53,17 @@ prefix silently drops when they bounce you — retype it.
    separates client vs cloud in one shot: `cloudflared access login` + curl
    the WS upgrade with `cf-access-token` -- a 101 proves edge+Access+tunnel+
    server all fine and points at the client browser.
-6. "Service tokens" tab ≠ login methods (that's machine-to-machine auth —
+6. **"Connects once per browser session, then never again" = 0-RTT** (7/23):
+   zone setting 0-RTT (TLS early data) was ON -- it only activates on RESUMED
+   TLS sessions, so the FIRST connection (full handshake) worked and every
+   later reconnect (early data) broke the WS upgrade at the edge. Incognito
+   always worked (no session to resume) -- which also framed innocent
+   suspects (Shields, cookies) whose "fixes" merely coincided with fresh
+   sessions. Disabled via API (dashboard hides it well):
+   PATCH zones/{id}/settings/0rtt {"value":"off"} with a token scoped
+   Zone -> Zone Settings -> Edit (NOT "Zone" -- adjacent list item).
+   HTTP/3 was already off; WebSockets on. Zone id 4b0ecec9825a06b31c0693e0aa43b450.
+7. "Service tokens" tab ≠ login methods (that's machine-to-machine auth —
    possibly useful later for scripted remote log pulls).
 
 ## Adding machine #2 (the ritual)
