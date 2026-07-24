@@ -77,6 +77,7 @@ COLUMNS LOGGED:
 import csv
 import io
 import math
+import time
 import threading
 from pathlib import Path
 from typing import Optional
@@ -223,13 +224,29 @@ def _row_from_frame(frame: dict, col_idx: dict, name_for: dict = None, t_zero: f
 
 class SessionLogger:
     def __init__(self, folder: Path, known_columns: Optional[list] = None,
-                 col_names: Optional[dict] = None, t_zero: Optional[float] = None):
+                 col_names: Optional[dict] = None, t_zero: Optional[float] = None,
+                 min_interval: float = 0.0, rotate_daily: bool = False,
+                 retain_days: int = 0):
+        # ECO MODE (self-hosted rigs, e.g. Raspberry Pi on SD storage):
+        #   min_interval > 0  -> at most one data row per interval (e.g. 1.0 = 1 Hz)
+        #   rotate_daily      -> file rolls at local midnight (session_YYYYMMDD.csv)
+        #   retain_days > 0   -> rotated files older than this are pruned
+        # Defaults keep the full-rate single-file behavior (development mode).
+        self.min_interval = float(min_interval or 0.0)
+        self.rotate_daily = bool(rotate_daily)
+        self.retain_days = int(retain_days or 0)
+        self._last_row_t = 0.0
+        self._file_day = time.strftime("%Y%m%d")
+        self.folder = folder
         # col_names: {'ai':[names], 'ao':[...], 'do':[...], 'tc':[...], 'expr':[...]}
         # -> friendly CSV headers instead of ai0/ao0/do0/tc0/expr0.
         self._name_for = _build_name_for(col_names or {})
         # 2.2.1: optional relative-time logging -- t column = frame t - t_zero
         self._t_zero = float(t_zero) if t_zero else 0.0
-        self.path = folder / "session.csv"
+        self.path = (folder / f"session_{self._file_day}.csv") if self.rotate_daily \
+            else (folder / "session.csv")
+        if self.rotate_daily and self.retain_days > 0:
+            self._prune_old_files()
         # CRITICAL: 1 MB buffer prevents synchronous disk flushes (Windows 80 ms+ spikes)
         self.f = open(self.path, "w", newline="", buffering=1024 * 1024)
         self.w = csv.writer(self.f)
@@ -401,7 +418,61 @@ class SessionLogger:
                 self._drain_side_buf()
 
 
+    def _prune_old_files(self):
+        """Eco mode: delete rotated session_*.csv older than retain_days.
+        Only files matching the rotation pattern in THIS session folder --
+        never touches named/dev session directories."""
+        try:
+            cutoff = time.time() - self.retain_days * 86400
+            for f in self.folder.glob("session_*.csv"):
+                try:
+                    if f.stat().st_mtime < cutoff:
+                        f.unlink()
+                        print(f"[Logger] pruned old rotated log {f.name}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _rotate_daily_file(self):
+        """Roll to a new dated file at midnight (caller holds self._lock).
+        Pending column rewrites and side-buffered frames are flushed into the
+        OLD file first; the new file re-uses the settled header. Accumulated
+        check events stay in the accumulator and embed into whichever file is
+        current at close() -- acceptable for eco mode."""
+        try:
+            self._rewrite_pending_cols()
+            self._drain_side_buf()
+        except Exception:
+            pass
+        try:
+            self.f.close()
+        except Exception:
+            pass
+        self._file_day = time.strftime("%Y%m%d")
+        self.path = self.folder / f"session_{self._file_day}.csv"
+        self.f = open(self.path, "w", newline="", buffering=1024 * 1024)
+        self.w = csv.writer(self.f)
+        if self._settled and self._cols:
+            self.w.writerow(self._cols)
+        print(f"[Logger] daily rotation -> {self.path.name}")
+        if self.retain_days > 0:
+            self._prune_old_files()
+
     def write(self, frame: dict):
+        # ECO decimation: drop frames inside the interval. Cheap monotonic
+        # check on the control thread; header settling and check events are
+        # unaffected (events accumulate separately).
+        if self.min_interval > 0.0:
+            _now = time.monotonic()
+            if (_now - self._last_row_t) < self.min_interval:
+                return
+            self._last_row_t = _now
+        # Daily rotation check (eco mode): date stamp changed -> roll the file.
+        if self.rotate_daily and time.strftime("%Y%m%d") != self._file_day:
+            with self._lock:
+                if time.strftime("%Y%m%d") != self._file_day:   # re-check under lock
+                    self._rotate_daily_file()
         if not self._settled:
             with self._lock:
                 self._pending_frames.append(frame)
