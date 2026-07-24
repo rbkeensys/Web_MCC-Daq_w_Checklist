@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.6.0"  # RASPBERRY PI / LINUX PORT: full E-1608 uldaq parity -- open via product-name-filtered Ethernet discovery (boardNum = ordinal among E-1608s sorted by unique id), AI a_in (eng volts), AO a_out (volts, +/-10 clamp), DO d_bit_out (first port type, bits pre-configured OUT), CTR c_in/c_clear, DO safe-init. E-TC uldaq open prefers name-filtered ordinal (mixed inventory). close() disconnects everything, no longer references stale single-board attrs (latent AttributeError fixed). All guarded by HAVE_ULDAQ/_ul_1608 -- byte-identical behavior on Windows/mcculw. Prev 2.5.1:  # start_buzz(active_high=None) derives the channel Invert. Prev 2.5.0: DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
+__version__ = "2.6.1"  # LATE-HARDWARE RECOVERY: missing_hardware()/reopen_missing() -- absent-at-boot DAQs are re-discovered periodically (acq loop calls off-thread every ~10s) and picked up live: E-1608 gets DO safe-init + counter clears, E-TC gets its DINs configured. Linux/uldaq only. Prev 2.6.0  # RASPBERRY PI / LINUX PORT: full E-1608 uldaq parity -- open via product-name-filtered Ethernet discovery (boardNum = ordinal among E-1608s sorted by unique id), AI a_in (eng volts), AO a_out (volts, +/-10 clamp), DO d_bit_out (first port type, bits pre-configured OUT), CTR c_in/c_clear, DO safe-init. E-TC uldaq open prefers name-filtered ordinal (mixed inventory). close() disconnects everything, no longer references stale single-board attrs (latent AttributeError fixed). All guarded by HAVE_ULDAQ/_ul_1608 -- byte-identical behavior on Windows/mcculw. Prev 2.5.1:  # start_buzz(active_high=None) derives the channel Invert. Prev 2.5.0: DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -401,6 +401,129 @@ class MCCBridge:
                     print(f"[MCCBridge] E-TC #{board_num}: DIN '{din.name}' -- board not open, skipped")
         if self._etc_dins:
             print(f"[MCCBridge] Configured {len(self._etc_dins)} E-TC digital input(s)")
+
+    def missing_hardware(self):
+        """True when a configured+enabled DAQ failed to open (Linux/uldaq only --
+        Windows/InstaCal boards are static). Drives the late-arrival retry."""
+        if HAVE_MCCULW or not HAVE_ULDAQ or self.cfg is None:
+            return False
+        for b in (self.cfg.boards1608 or []):
+            if b.enabled and b.boardNum not in self._ul_1608:
+                return True
+        open_etc = {bn for (bn, _d, _t) in self._boards_etc_uldaq}
+        for b in (self.cfg.boardsetc or []):
+            if b.enabled and b.boardNum not in open_etc:
+                return True
+        return False
+
+    def reopen_missing(self):
+        """LATE-HARDWARE RECOVERY (rig/Pi): a DAQ that was absent at open()
+        (powered up later, cable moved, network blip) gets picked up here.
+        Called periodically OFF-THREAD by the acquisition loop; re-runs the
+        discovery broadcast fresh each attempt. Newly opened E-1608s get DO
+        safe-init + counter clears; newly opened E-TCs get their digital
+        inputs configured. Compact duplicates of the open() bodies -- keep in
+        sync with open() when it changes."""
+        if getattr(self, "_reopen_busy", False):
+            return False
+        self._reopen_busy = True
+        got = False
+        try:
+            if not self.missing_hardware():
+                return False
+            self._ul_inventory = None    # force a fresh discovery broadcast
+            cfg = self.cfg
+            # ---- E-1608s ----
+            for board_cfg in (cfg.boards1608 or []):
+                bn = board_cfg.boardNum
+                if not board_cfg.enabled or bn in self._ul_1608:
+                    continue
+                try:
+                    desc = self._ul_find_descriptor("E-1608", bn)
+                    if desc is None:
+                        continue
+                    dev = DaqDevice(desc)
+                    dev.connect()
+                    h = {"dev": dev, "ai": dev.get_ai_device(), "ao": dev.get_ao_device(),
+                         "dio": dev.get_dio_device(), "ctr": dev.get_ctr_device(),
+                         "port": None,
+                         "ai_mode": (UlAiInputMode.SINGLE_ENDED
+                                     if (UlAiInputMode and str(board_cfg.aiMode).upper().startswith("SE"))
+                                     else (UlAiInputMode.DIFFERENTIAL if UlAiInputMode else None))}
+                    if h["dio"] is not None:
+                        h["port"] = h["dio"].get_info().get_port_types()[0]
+                        if UlDigitalDir is not None:
+                            for _b in range(8):
+                                try:
+                                    h["dio"].d_config_bit(h["port"], _b, UlDigitalDir.OUTPUT)
+                                except Exception:
+                                    pass
+                    self._ul_1608[bn] = h
+                    got = True
+                    print(f"[MCCBridge] LATE ARRIVAL: E-1608 #{bn} now open via ULDAQ ({getattr(desc,'unique_id','')})")
+                    # DO safe-init for THIS board's 8 bits (respects invert)
+                    try:
+                        b_idx = self._boards_1608.index(bn)
+                        for _i in range(b_idx * 8, b_idx * 8 + 8):
+                            self.set_do(_i, False)
+                    except Exception:
+                        pass
+                    # counter clears for this board
+                    for c in (self._counters or []):
+                        if c["board"] == bn:
+                            try:
+                                _cd = h["ctr"]
+                                if _cd is not None:
+                                    _cd.c_clear(c["ctr"])
+                            except Exception:
+                                pass
+                except Exception as e:
+                    print(f"[MCCBridge] late E-1608 #{bn} open failed: {e}")
+            # ---- E-TCs ----
+            open_etc = {b2 for (b2, _d, _t) in self._boards_etc_uldaq}
+            for board_cfg in (cfg.boardsetc or []):
+                bn = board_cfg.boardNum
+                if not board_cfg.enabled or bn in open_etc:
+                    continue
+                try:
+                    desc = self._ul_find_descriptor("E-TC", bn)
+                    if desc is None:
+                        continue
+                    dev = DaqDevice(desc)
+                    dev.connect()
+                    tdev = dev.get_temp_device()
+                    if tdev is None:
+                        dev.disconnect()
+                        continue
+                    self._boards_etc_uldaq.append((bn, dev, tdev))
+                    got = True
+                    print(f"[MCCBridge] LATE ARRIVAL: E-TC #{bn} now open via ULDAQ")
+                    # configure this board's digital inputs (same as open())
+                    for din in (getattr(board_cfg, "digitalInputs", None) or []):
+                        if not getattr(din, "include", True):
+                            continue
+                        sv = getattr(din, "static_var", None)
+                        if not sv:
+                            continue
+                        try:
+                            dio = dev.get_dio_device()
+                            if dio is None:
+                                continue
+                            port = dio.get_info().get_port_types()[0]
+                            bit = int(getattr(din, "bit", 0))
+                            if UlDigitalDir is not None:
+                                dio.d_config_bit(port, bit, UlDigitalDir.INPUT)
+                            self._etc_dins.append({"static_var": sv, "lib": "uldaq", "dio": dio,
+                                                   "port": port, "bit": bit,
+                                                   "invert": bool(getattr(din, "invert", False)),
+                                                   "name": din.name})
+                        except Exception as e2:
+                            print(f"[MCCBridge] late E-TC DIN '{din.name}' config failed: {e2}")
+                except Exception as e:
+                    print(f"[MCCBridge] late E-TC #{bn} open failed: {e}")
+        finally:
+            self._reopen_busy = False
+        return got
 
     def _ul_find_descriptor(self, product_substr, ordinal):
         """uldaq device discovery for the Linux port: return the Nth descriptor
