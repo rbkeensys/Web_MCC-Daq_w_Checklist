@@ -2,7 +2,7 @@
   "boards1608": [
     {
       "boardNum": 0,
-      "sampleRateHz": 160.0,
+      "sampleRateHz": 25.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -10,7 +10,7 @@
         {
           "name": "EvapPress",
           "slope": 8.625,
-          "offset": -4.469099655151366,
+          "offset": -5.100229606628419,
           "cutoffHz": 0.1,
           "units": "psia",
           "include": true,
@@ -22,7 +22,7 @@
         {
           "name": "SteamPress",
           "slope": 8.625,
-          "offset": -4.447747726440429,
+          "offset": -4.891718406677246,
           "cutoffHz": 0.1,
           "units": "psia",
           "include": true,
@@ -32,7 +32,7 @@
           "counter_mode": "rate"
         },
         {
-          "name": "DemisterWater",
+          "name": "DemisterFlood",
           "slope": 1.0,
           "offset": 0.0,
           "cutoffHz": 5.0,
@@ -44,7 +44,7 @@
           "counter_mode": "rate"
         },
         {
-          "name": "DemisterFlood",
+          "name": "DemisterWater",
           "slope": 1.0,
           "offset": 0.0,
           "cutoffHz": 5.0,
@@ -128,7 +128,7 @@
           "pwmPeriodMs": 1000.0
         },
         {
-          "name": "DemisterDrain",
+          "name": "CondPump",
           "invert": true,
           "normallyOpen": true,
           "momentary": false,
@@ -139,7 +139,7 @@
           "pwmPeriodMs": 1000.0
         },
         {
-          "name": "CondPump",
+          "name": "DemisterDrain",
           "invert": true,
           "normallyOpen": true,
           "momentary": false,
@@ -242,7 +242,7 @@
           "name": "FeedTemp",
           "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.2
+          "cutoffHz": 0.02
         },
         {
           "include": false,
@@ -250,23 +250,23 @@
           "name": "EvapTemp",
           "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.2
+          "cutoffHz": 0.02
         },
         {
           "include": true,
           "ch": 2,
           "name": "VaporIn",
           "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
+          "offset": 1.7998354911804206,
+          "cutoffHz": 0.02
         },
         {
           "include": true,
           "ch": 3,
           "name": "VaporOut",
           "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
+          "offset": 0.18412510553995887,
+          "cutoffHz": 0.02
         },
         {
           "include": false,
@@ -274,22 +274,22 @@
           "name": "CondTemp",
           "type": "K",
           "offset": 0.0,
-          "cutoffHz": 0.2
+          "cutoffHz": 0.02
         },
         {
           "include": true,
           "ch": 5,
           "name": "SteamChest",
           "type": "K",
-          "offset": 0.0,
-          "cutoffHz": 0.2
+          "offset": 1.1831985155741407,
+          "cutoffHz": 0.02
         },
         {
           "include": true,
           "ch": 6,
           "name": "MakeupHtr",
           "type": "K",
-          "offset": -2.0,
+          "offset": -5.155642461776733,
           "cutoffHz": 0.2
         },
         {
@@ -297,7 +297,7 @@
           "ch": 7,
           "name": "SuperHtr",
           "type": "K",
-          "offset": 0.0,
+          "offset": -1.5478097915649442,
           "cutoffHz": 0.2
         }
       ],
