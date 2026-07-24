@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=MCC_SERVER
+Comment=Restart the MVR control server and follow its live log
+Exec=lxterminal -t "MVR Server" -e bash -c "sudo systemctl restart mcc-server && echo SERVER RESTARTED; journalctl -u mcc-server -f --no-pager"
+Icon=/home/mvr/Web_MCC-Daq_w_Checklist/web/favicon.ico
+Terminal=false
+Categories=System;
