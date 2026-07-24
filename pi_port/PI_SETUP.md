@@ -104,6 +104,19 @@ Verified END TO END with no DAQ hardware attached:
 - Gotcha found+fixed: uldaq python name drift (TInFlag/TcType vs the
   TInFlags/ThermocoupleType the bridge guessed blind pre-port)
 
+## Touchscreen kiosk (no keyboard)
+
+- **Soft keyboard**: squeekboard (preinstalled on Pi OS/labwc) pops up on
+  input focus ONLY if chromium speaks the wayland input-method protocol --
+  the launchers pass `--enable-wayland-ime` for exactly this. squeekboard
+  itself must be running in the session: install.sh-era setups add
+  `squeekboard &` to `~/.config/labwc/autostart` for the seat user.
+- **Fullscreen without a keyboard**: launch the NORMAL `MCC_UI` icon and use
+  the app's own on-screen fullscreen button -- JS-requested fullscreen can
+  be entered AND exited by tapping the same button. `MCC_UI_Fullscreen`
+  (browser-level, F11 to exit) is for setups WITH a keyboard; true
+  `--kiosk` is only for locked-down panels where escaping is undesirable.
+
 ## Known differences vs Windows
 
 - Loop rate lower (see tickHz) — harmless, everything integrates on dtReal.
