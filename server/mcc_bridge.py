@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.5.1"  # start_buzz(active_high=None) derives the channel Invert. Prev 2.5.0: DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
+__version__ = "2.6.0"  # RASPBERRY PI / LINUX PORT: full E-1608 uldaq parity -- open via product-name-filtered Ethernet discovery (boardNum = ordinal among E-1608s sorted by unique id), AI a_in (eng volts), AO a_out (volts, +/-10 clamp), DO d_bit_out (first port type, bits pre-configured OUT), CTR c_in/c_clear, DO safe-init. E-TC uldaq open prefers name-filtered ordinal (mixed inventory). close() disconnects everything, no longer references stale single-board attrs (latent AttributeError fixed). All guarded by HAVE_ULDAQ/_ul_1608 -- byte-identical behavior on Windows/mcculw. Prev 2.5.1:  # start_buzz(active_high=None) derives the channel Invert. Prev 2.5.0: DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -47,12 +47,20 @@ try:
         HAVE_ULDAQ_CFG = True
     except Exception:
         HAVE_ULDAQ_CFG = False
+    # E-1608 support via uldaq (Raspberry Pi / Linux port) -- each optional so a
+    # partial uldaq build cannot take down the TC path that already worked
+    try:
+        from uldaq import AiInputMode as UlAiInputMode, Range as UlRange, \
+            AInFlag as UlAInFlag, AOutFlag as UlAOutFlag
+    except Exception:
+        UlAiInputMode = UlRange = UlAInFlag = UlAOutFlag = None
 except Exception as e:
     # On Windows this usually fails because libuldaq.so/.dll isn't present
     HAVE_ULDAQ = False
     HAVE_ULDAQ_CFG = False
     # Define a stub so _TC_MAP_ULDAQ construction doesn't crash
     ThermocoupleType = None  # type: ignore
+    UlAiInputMode = UlRange = UlAInFlag = UlAOutFlag = None
     print(f"[MCCBridge] uldaq import failed: {e}")
 
 # Digital direction enum (uldaq) -- optional
@@ -118,6 +126,14 @@ class MCCBridge:
 
         # Counter-sourced AI channels (pulse flow meters on CTR<n>)
         self._counters = []  # list of dicts: index/board/ctr/K/window/prev_count/prev_t/rate
+        # uldaq-opened E-1608s (Raspberry Pi / Linux): boardNum -> subsystem handles
+        self._ul_1608 = {}
+        self._ul_inventory = None
+        # Legacy single-board attrs still referenced by close()/_set_tc_type guards
+        self._etc_uldaq_ok = False
+        self._etc_uldaq_dev = None
+        self._etc_uldaq_tdev = None
+        self._etc_mcc_board = None
         # PWM-mode digital outputs: global DO index -> {period_s, duty}
         self._pwm = {}
 
@@ -147,6 +163,38 @@ class MCCBridge:
                 board_num = board_cfg.boardNum
                 self._boards_1608.append(board_num)
                 
+                if not HAVE_MCCULW and HAVE_ULDAQ:
+                    # ---- Raspberry Pi / Linux: open the E-1608 via uldaq ----
+                    # boardNum = ordinal among E-1608s found (sorted by unique id
+                    # for stability), NOT an InstaCal number (no InstaCal on Linux).
+                    try:
+                        desc = self._ul_find_descriptor("E-1608", board_num)
+                        if desc is None:
+                            raise RuntimeError("no E-1608 descriptor at ordinal %d" % board_num)
+                        dev = DaqDevice(desc)
+                        dev.connect()
+                        h = {"dev": dev,
+                             "ai": dev.get_ai_device(),
+                             "ao": dev.get_ao_device(),
+                             "dio": dev.get_dio_device(),
+                             "ctr": dev.get_ctr_device(),
+                             "port": None,
+                             "ai_mode": (UlAiInputMode.SINGLE_ENDED
+                                         if (UlAiInputMode and str(board_cfg.aiMode).upper().startswith("SE"))
+                                         else (UlAiInputMode.DIFFERENTIAL if UlAiInputMode else None))}
+                        if h["dio"] is not None:
+                            h["port"] = h["dio"].get_info().get_port_types()[0]
+                            if UlDigitalDir is not None:
+                                for _b in range(8):
+                                    try:
+                                        h["dio"].d_config_bit(h["port"], _b, UlDigitalDir.OUTPUT)
+                                    except Exception:
+                                        pass
+                        self._ul_1608[board_num] = h
+                        print(f"[MCCBridge] E-1608 #{board_num}: opened via ULDAQ ({desc.product_name} {getattr(desc,'unique_id','')})")
+                    except Exception as e:
+                        print(f"[MCCBridge] E-1608 #{board_num}: ULDAQ open failed: {e}")
+
                 if HAVE_MCCULW:
                     try:
                         # DIO: AUXPORT -> OUT (8 bits)
@@ -190,6 +238,14 @@ class MCCBridge:
                         "mode": str(getattr(ch, "mode", "rate") or "rate"),
                         "prev_count": None, "prev_t": None, "rate": 0.0, "cum": 0,
                     })
+                    if board_cfg.boardNum in self._ul_1608:
+                        try:
+                            _cd = self._ul_1608[board_cfg.boardNum]["ctr"]
+                            if _cd is not None:
+                                _cd.c_clear(cnum)
+                                print(f"[MCCBridge] CTR[{cidx}] '{ch.name}' <- CTR{cnum} (uldaq) cleared")
+                        except Exception as e:
+                            print(f"[MCCBridge] CTR{cnum} uldaq clear warn: {e}")
                     if HAVE_MCCULW:
                         try:
                             ul.c_clear(board_cfg.boardNum, cnum)
@@ -236,7 +292,7 @@ class MCCBridge:
         # Drive every DO to its LOGICAL OFF state now that polarity is known: an
         # inverted channel's off = physical 1, and the pins power up 0 -- without this
         # an inverted load would sit energized from board power-up until the first write.
-        if HAVE_MCCULW:
+        if HAVE_MCCULW or self._ul_1608:
             for _i in range(len(self._do_bits)):
                 try:
                     self.set_do(_i, False)
@@ -255,11 +311,17 @@ class MCCBridge:
                 opened_uldaq = False
                 if HAVE_ULDAQ:
                     try:
-                        inv = get_daq_device_inventory(InterfaceType.ETHERNET)
-                        if not inv:
-                            inv = get_daq_device_inventory(InterfaceType.ANY)
-                        if inv and 0 <= board_num < len(inv):
-                            dev = DaqDevice(inv[board_num])
+                        # Prefer product-name-filtered ordinal (Linux: inventory mixes
+                        # E-1608s and E-TCs); fall back to the raw-index legacy behavior.
+                        desc = self._ul_find_descriptor("E-TC", board_num)
+                        if desc is None:
+                            inv = get_daq_device_inventory(InterfaceType.ETHERNET)
+                            if not inv:
+                                inv = get_daq_device_inventory(InterfaceType.ANY)
+                            if inv and 0 <= board_num < len(inv):
+                                desc = inv[board_num]
+                        if desc is not None:
+                            dev = DaqDevice(desc)
                             dev.connect()
                             tdev = dev.get_temp_device()
                             if tdev is not None:
@@ -331,6 +393,26 @@ class MCCBridge:
         if self._etc_dins:
             print(f"[MCCBridge] Configured {len(self._etc_dins)} E-TC digital input(s)")
 
+    def _ul_find_descriptor(self, product_substr, ordinal):
+        """uldaq device discovery for the Linux port: return the Nth descriptor
+        whose product name contains product_substr (e.g. E-1608 / E-TC), sorted by
+        unique id so ordinals are stable across boots. Inventory cached per open()."""
+        if not HAVE_ULDAQ:
+            return None
+        inv = getattr(self, "_ul_inventory", None)
+        if inv is None:
+            try:
+                inv = get_daq_device_inventory(InterfaceType.ETHERNET) or []
+                if not inv:
+                    inv = get_daq_device_inventory(InterfaceType.ANY) or []
+            except Exception as e:
+                print(f"[MCCBridge] uldaq inventory failed: {e}")
+                inv = []
+            self._ul_inventory = inv
+        matches = sorted((d for d in inv if product_substr.lower() in str(getattr(d, "product_name", "")).lower()),
+                         key=lambda d: str(getattr(d, "unique_id", "")))
+        return matches[ordinal] if 0 <= ordinal < len(matches) else None
+
     def read_etc_dins(self):
         """Read the configured E-TC digital inputs. Returns {static_var: 0.0/1.0}.
         mcculw (Windows) primary; uldaq (Linux) if that opened the board. On any read
@@ -362,7 +444,13 @@ class MCCBridge:
             count = None
             # Only touch the counter if its E-1608 actually opened -- a configured
             # counter on an absent board would otherwise stall/raise every tick.
-            if HAVE_MCCULW and c["board"] in self._boards_1608:
+            if c["board"] in self._ul_1608:
+                try:
+                    _cd = self._ul_1608[c["board"]]["ctr"]
+                    count = int(_cd.c_in(c["ctr"])) if _cd is not None else None
+                except Exception:
+                    count = None
+            elif HAVE_MCCULW and c["board"] in self._boards_1608:
                 try:
                     count = ul.c_in_32(c["board"], c["ctr"])
                 except Exception:
@@ -417,9 +505,20 @@ class MCCBridge:
             self.set_do(ch, on)
 
     def close(self):
-        # Ensure DOs off if you want a safe state (optional):
-        # for i in range(8): self.set_do(i, False, active_high=True)
-        if self._etc_uldaq_ok and self._etc_uldaq_dev:
+        # Disconnect every uldaq device we opened (E-TC list + E-1608 map).
+        for (_bn, _dev, _td) in (getattr(self, "_boards_etc_uldaq", None) or []):
+            try:
+                _dev.disconnect()
+            except Exception:
+                pass
+        for _bn, _h in (getattr(self, "_ul_1608", None) or {}).items():
+            try:
+                _h["dev"].disconnect()
+            except Exception:
+                pass
+        self._ul_1608 = {}
+        self._ul_inventory = None
+        if getattr(self, "_etc_uldaq_ok", False) and getattr(self, "_etc_uldaq_dev", None):
             try:
                 self._etc_uldaq_dev.disconnect()
             except Exception:
@@ -437,7 +536,16 @@ class MCCBridge:
         for board_num in self._boards_1608:
             board_values = [0.0] * 8  # Default if read fails
             
-            if HAVE_MCCULW:
+            if board_num in self._ul_1608:
+                # Raspberry Pi / Linux: uldaq a_in returns engineering volts directly
+                h = self._ul_1608[board_num]
+                try:
+                    for ch in range(8):
+                        board_values[ch] = float(h["ai"].a_in(ch, h["ai_mode"], UlRange.BIP10VOLTS,
+                                                              UlAInFlag.DEFAULT if UlAInFlag else 0))
+                except Exception as e:
+                    print(f"[MCCBridge] E-1608 #{board_num} uldaq AI read FAILED: {e}")
+            elif HAVE_MCCULW:
                 try:
                     # Read all 8 channels from this board
                     for ch in range(8):
@@ -601,7 +709,14 @@ class MCCBridge:
         logical = bool(state)
         phys = 1 if (logical == bool(active_high)) else 0
         
-        if HAVE_MCCULW:
+        if board_num in self._ul_1608:
+            h = self._ul_1608[board_num]
+            try:
+                if h["dio"] is not None and h["port"] is not None:
+                    h["dio"].d_bit_out(h["port"], channel, int(phys))
+            except Exception as e:
+                print(f"[MCCBridge] DO{index} (uldaq board #{board_num}, ch{channel}) write failed: {e}")
+        elif HAVE_MCCULW:
             try:
                 ul.d_bit_out(board_num, DigitalPortType.AUXPORT, channel, phys)
             except Exception as e:
@@ -709,6 +824,18 @@ class MCCBridge:
         if index < len(self._ao_vals):
             self._ao_vals[index] = voltage
         
+        if board_num in self._ul_1608:
+            # Raspberry Pi / Linux: uldaq a_out takes engineering volts directly
+            h = self._ul_1608[board_num]
+            try:
+                if h["ao"] is not None:
+                    v = max(-10.0, min(10.0, voltage))
+                    h["ao"].a_out(channel, UlRange.BIP10VOLTS,
+                                  UlAOutFlag.DEFAULT if UlAOutFlag else 0, v)
+            except Exception as e:
+                print(f"[MCCBridge] AO{index} (uldaq board #{board_num}, ch{channel}) write failed: {e}")
+            return
+
         # Convert to DAC counts
         code = self._dac_counts(voltage, board_num)
         

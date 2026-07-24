@@ -30,7 +30,10 @@ from typing import Dict, List, Optional
 import numpy as np
 
 class CPPExpressionBackend:
-    def __init__(self, dll_path: str = "compiled/expressions.dll"):
+    def __init__(self, dll_path: str = None):
+        if dll_path is None:
+            import os as _os
+            dll_path = "compiled/expressions.dll" if _os.name == "nt" else "compiled/expressions.so"
         self.dll_path = Path(dll_path)
         self.dll = None
         self.batch_func = None

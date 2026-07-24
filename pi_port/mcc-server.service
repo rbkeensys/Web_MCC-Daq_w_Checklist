@@ -1,0 +1,18 @@
+[Unit]
+Description=MCC DAQ / MVR control server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO__/server
+ExecStart=__REPO__/.venv/bin/python __REPO__/server/server.py
+Restart=on-failure
+RestartSec=5
+# Control process: keep it responsive
+Nice=-5
+# Logs go to journald (journalctl -u mcc-server -f)
+
+[Install]
+WantedBy=multi-user.target

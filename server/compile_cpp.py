@@ -281,8 +281,40 @@ def append_pid_code():
         return True  # Don't fail compilation, just skip PIDs
 
 
+def _compile_posix(lib_name):
+    """Linux/Raspberry Pi build: g++ -> shared .so. Same append_pid_code and
+    source file as the Windows path; the generated code's EXPORT macro handles
+    the visibility attribute. Returns True on success."""
+    import shutil, subprocess
+    append_pid_code()
+    cpp_file = Path("compiled/expressions.cpp")
+    if not cpp_file.exists():
+        print(f"ERROR: {cpp_file} not found (run expr_to_cpp first)")
+        return False
+    cxx = shutil.which("g++") or shutil.which("c++") or shutil.which("clang++")
+    if not cxx:
+        print("ERROR: no C++ compiler found (sudo apt install g++)")
+        return False
+    out = Path(lib_name)
+    if out.suffix.lower() != ".so":
+        out = out.with_suffix(".so")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [cxx, "-O2", "-ffast-math", "-shared", "-fPIC", "-std=c++14",
+           "-o", str(out), str(cpp_file), "-lm"]
+    print(f"[compile_cpp] {' '.join(cmd)}")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print("COMPILE FAILED:\n" + (r.stderr or r.stdout))
+        return False
+    print(f"[compile_cpp] OK -> {out} ({out.stat().st_size} bytes)")
+    return True
+
+
 def compile_expressions(dll_name="compiled/expressions.dll"):
-    """Compile expressions.cpp to DLL"""
+    """Compile expressions.cpp to a shared library (MSVC DLL on Windows,
+    g++ .so on Linux/Raspberry Pi)."""
+    if os.name != "nt":
+        return _compile_posix(dll_name)
     print("=" * 60)
     print("C++ Expression Compiler (Python)")
     print(f"compile_cpp.py VERSION: {__version__} (updated {__updated__})")
