@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.6.1"  # LATE-HARDWARE RECOVERY: missing_hardware()/reopen_missing() -- absent-at-boot DAQs are re-discovered periodically (acq loop calls off-thread every ~10s) and picked up live: E-1608 gets DO safe-init + counter clears, E-TC gets its DINs configured. Linux/uldaq only. Prev 2.6.0  # RASPBERRY PI / LINUX PORT: full E-1608 uldaq parity -- open via product-name-filtered Ethernet discovery (boardNum = ordinal among E-1608s sorted by unique id), AI a_in (eng volts), AO a_out (volts, +/-10 clamp), DO d_bit_out (first port type, bits pre-configured OUT), CTR c_in/c_clear, DO safe-init. E-TC uldaq open prefers name-filtered ordinal (mixed inventory). close() disconnects everything, no longer references stale single-board attrs (latent AttributeError fixed). All guarded by HAVE_ULDAQ/_ul_1608 -- byte-identical behavior on Windows/mcculw. Prev 2.5.1:  # start_buzz(active_high=None) derives the channel Invert. Prev 2.5.0: DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
+__version__ = "2.6.2"  # E-TC uldaq API FIX: no get_temp_device in uldaq -- TC reads via get_ai_device().t_in(ch, scale, TInFlag.DEFAULT); TC types pushed into AiConfig (set_chan_type/set_chan_tc_type) at open+reopen; per-channel read try so one open circuit no longer NaNs the whole board; dead TcType NameError removed. Prev 2.6.1: LATE-HARDWARE RECOVERY: missing_hardware()/reopen_missing() -- absent-at-boot DAQs are re-discovered periodically (acq loop calls off-thread every ~10s) and picked up live: E-1608 gets DO safe-init + counter clears, E-TC gets its DINs configured. Linux/uldaq only. Prev 2.6.0  # RASPBERRY PI / LINUX PORT: full E-1608 uldaq parity -- open via product-name-filtered Ethernet discovery (boardNum = ordinal among E-1608s sorted by unique id), AI a_in (eng volts), AO a_out (volts, +/-10 clamp), DO d_bit_out (first port type, bits pre-configured OUT), CTR c_in/c_clear, DO safe-init. E-TC uldaq open prefers name-filtered ordinal (mixed inventory). close() disconnects everything, no longer references stale single-board attrs (latent AttributeError fixed). All guarded by HAVE_ULDAQ/_ul_1608 -- byte-identical behavior on Windows/mcculw. Prev 2.5.1:  # start_buzz(active_high=None) derives the channel Invert. Prev 2.5.0: DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -63,6 +63,10 @@ try:
             AInFlag as UlAInFlag, AOutFlag as UlAOutFlag
     except Exception:
         UlAiInputMode = UlRange = UlAInFlag = UlAOutFlag = None
+    try:
+        from uldaq import AiChanType as UlAiChanType
+    except Exception:
+        UlAiChanType = None
 except Exception as e:
     # On Windows this usually fails because libuldaq.so/.dll isn't present
     HAVE_ULDAQ = False
@@ -332,7 +336,7 @@ class MCCBridge:
                         if desc is not None:
                             dev = DaqDevice(desc)
                             dev.connect()
-                            tdev = dev.get_temp_device()
+                            tdev = self._etc_config_tc_types(dev, board_cfg)
                             if tdev is not None:
                                 self._boards_etc_uldaq.append((board_num, dev, tdev))
                                 print(f"[MCCBridge] E-TC #{board_num}: opened via ULDAQ")
@@ -401,6 +405,36 @@ class MCCBridge:
                     print(f"[MCCBridge] E-TC #{board_num}: DIN '{din.name}' -- board not open, skipped")
         if self._etc_dins:
             print(f"[MCCBridge] Configured {len(self._etc_dins)} E-TC digital input(s)")
+
+    def _etc_config_tc_types(self, dev, board_cfg):
+        """uldaq E-TC: thermocouple reads go through the AI DEVICE (there is
+        no get_temp_device in uldaq -- that was a blind pre-port guess), and
+        t_in's third argument is a TInFlag, NOT the TC type. Per-channel TC
+        types are pushed into AiConfig here, once, at open/reopen. Returns
+        the AI device to use for t_in, or None."""
+        ai = dev.get_ai_device()
+        if ai is None:
+            return None
+        try:
+            acfg = ai.get_config()
+        except Exception:
+            return ai
+        for rec in (getattr(board_cfg, "thermocouples", None) or []):
+            if not getattr(rec, "include", True):
+                continue
+            ch = int(rec.ch)
+            try:
+                if UlAiChanType is not None:
+                    try:
+                        acfg.set_chan_type(ch, UlAiChanType.TC)
+                    except Exception:
+                        pass  # E-TC channels are TC-only on some builds
+                tt = getattr(ThermocoupleType, str(rec.type).upper(), None)
+                if tt is not None:
+                    acfg.set_chan_tc_type(ch, tt)
+            except Exception as e:
+                print(f"[MCCBridge] E-TC ch{ch} TC-type config failed: {e}")
+        return ai
 
     def missing_hardware(self):
         """True when a configured+enabled DAQ failed to open (Linux/uldaq only --
@@ -491,7 +525,7 @@ class MCCBridge:
                         continue
                     dev = DaqDevice(desc)
                     dev.connect()
-                    tdev = dev.get_temp_device()
+                    tdev = self._etc_config_tc_types(dev, board_cfg)
                     if tdev is None:
                         dev.disconnect()
                         continue
@@ -763,15 +797,16 @@ class MCCBridge:
                             board_tcs = b.thermocouples
                             break
                 
-                # Read each configured TC
+                # Read each configured TC (types were set in AiConfig at open;
+                # per-channel try: an open circuit leaves ONLY that channel NaN)
                 configured_channels = {int(rec.ch): rec for rec in board_tcs}
                 for ch in range(8):
                     if ch in configured_channels and configured_channels[ch].include:
-                        rec = configured_channels[ch]
-                        tc_type_str = rec.type.upper()
-                        tc_type_enum = getattr(TcType, tc_type_str, TcType.K)
-                        temp_val = tdev.t_in(ch, TempScale.CELSIUS, tc_type_enum)
-                        board_values[ch] = temp_val
+                        try:
+                            board_values[ch] = tdev.t_in(ch, TempScale.CELSIUS,
+                                                         TInFlags.DEFAULT)
+                        except Exception:
+                            pass  # open circuit etc. -- leave nan
             except Exception as e:
                 print(f"[MCCBridge] E-TC #{board_num} ULDAQ read failed: {e}")
             

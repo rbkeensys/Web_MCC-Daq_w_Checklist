@@ -85,7 +85,7 @@ def main():
 
     etc = open_first(inv, "E-TC")
     if etc and args.do is None and not args.ao and not args.ctr:
-        tdev = etc.get_temp_device()
+        tdev = etc.get_ai_device()  # uldaq: TC reads live on the AI device (no get_temp_device)
         temps = []
         for ch in range(8):
             try:
