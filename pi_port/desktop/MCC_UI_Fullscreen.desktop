@@ -2,7 +2,7 @@
 Type=Application
 Name=MCC_UI_Fullscreen
 Comment=MVR dashboard, TRUE KIOSK (chromeless, no exit) -- leave running as the rig display; exit via SSH: pkill chromium
-Exec=chromium --password-store=basic --enable-wayland-ime --kiosk --noerrdialogs --disable-session-crashed-bubble http://localhost:8000
+Exec=chromium --password-store=basic --enable-wayland-ime --wayland-text-input-version=3 --kiosk --noerrdialogs --disable-session-crashed-bubble http://localhost:8000
 Icon=/home/mvr/Web_MCC-Daq_w_Checklist/web/favicon.ico
 Terminal=false
 Categories=Network;
