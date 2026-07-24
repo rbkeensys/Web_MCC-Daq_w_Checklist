@@ -40,6 +40,7 @@
       <button id="viewerBtn" type="button" class="btn" title="Launch the standalone Python log viewer — handles huge files the browser can't">🖥 Viewer</button>
       <button id="mergeChkBtn" type="button" class="btn" title="Merge a session's chk.json check events into its CSV (recovery for sessions where the server was terminated)">🔗 Merge chk</button>
       <button id="closeLogBtn" type="button" class="btn">Start New Log</button>
+      <button id="closeUiBtn" type="button" class="btn" title="Close THIS browser on the server machine (the rig kiosk display)">Close UI</button>
     </div>
   </header>
 
@@ -77,8 +78,8 @@
     </label>
   </div>
 </div>
-<!-- Script Player Controls -->
-<div class="script-controls">
+<!-- Script Player Controls -- HIDDEN (russ 7/24: scripting moved to expressions; bar removed from all UIs, code intact) -->
+<div class="script-controls" style="display:none">
   <div class="script-left">
     <button id="scriptRewindBtn" class="btn" title="Rewind to Start" disabled>⏮ Rewind</button>
     <button id="scriptPlayBtn" class="btn" title="Play Script">▶ Play</button>
