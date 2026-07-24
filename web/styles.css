@@ -1,3 +1,4 @@
+/* styles.css v1.1.0 -- 2026-07-24: fullscreen keeps the topbar; exitFullscreenBtn retired (fullscreen = Pi kiosk mode, all functions stay reachable) */
 :root { --bg:#0f1115; --fg:#e6e6e6; --muted:#9094a1; --accent:#79c0ff; --card:#171923; --good:#2faa60; --bad:#d84a4a; --default:#636a7b; --grid:#2a2f44; --grid2:#1e2235; --cursor:#ff4d4d; }
 * { box-sizing: border-box; }
 body { margin:0; padding:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial; height:100vh; display:flex; flex-direction:column; }
@@ -9,8 +10,8 @@ body { margin:0; padding:0; background:var(--bg); color:var(--fg); font:14px/1.4
 .btn:hover { background:#262b44; }
 .btn.danger { border-color:#5b2626; background:#2b1e1e; color:#f0caca; }
 
-/* Fullscreen support - hide topbar and use full height */
-body.fullscreen .topbar { display: none; }
+/* Fullscreen keeps the topbar (russ 7/24: fullscreen IS the Pi kiosk mode --
+   it must keep all functions; the exit path is the same fullscreen button) */
 
 /* Fullscreen exit button - only visible in fullscreen */
 #exitFullscreenBtn {
@@ -24,7 +25,7 @@ body.fullscreen .topbar { display: none; }
   font-weight: bold;
   display: none;
 }
-body.fullscreen #exitFullscreenBtn { display: block; }
+/* exitFullscreenBtn retired: the topbar (with its fullscreen toggle) stays visible */
 #exitFullscreenBtn:hover { background: #ff4d4d; color: white; }
 
 .workspace { display:flex; flex:1; min-height:0; position:relative; }
