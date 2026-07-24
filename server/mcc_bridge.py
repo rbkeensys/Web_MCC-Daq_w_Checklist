@@ -38,9 +38,18 @@ try:
         DaqDevice,
         InterfaceType,
         TempScale,
-        TInFlags,
-        ThermocoupleType,
     )
+    # Name drift across uldaq python releases (never validated before the Pi
+    # port -- uldaq could not load on Windows): TInFlags/ThermocoupleType in
+    # some builds, TInFlag/TcType in the current pip package. Alias either.
+    try:
+        from uldaq import TInFlags
+    except ImportError:
+        from uldaq import TInFlag as TInFlags
+    try:
+        from uldaq import ThermocoupleType
+    except ImportError:
+        from uldaq import TcType as ThermocoupleType
     HAVE_ULDAQ = True
     try:
         from uldaq import ConfigItem  # some builds expose this

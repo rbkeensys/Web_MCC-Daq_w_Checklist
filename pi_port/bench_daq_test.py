@@ -14,7 +14,11 @@ import sys, time, argparse
 try:
     from uldaq import (get_daq_device_inventory, DaqDevice, InterfaceType,
                        AiInputMode, Range, AInFlag, AOutFlag, DigitalDirection,
-                       TempScale, TInFlags)
+                       TempScale)
+    try:
+        from uldaq import TInFlags
+    except ImportError:
+        from uldaq import TInFlag as TInFlags
 except Exception as e:
     sys.exit(f"uldaq import failed ({e}) -- run pi_port/install.sh first")
 
