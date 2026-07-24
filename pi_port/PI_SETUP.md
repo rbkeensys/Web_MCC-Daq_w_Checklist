@@ -87,6 +87,23 @@ Watch `static.tickHz` on the dashboard for the achieved loop rate (expect
 ~40–80 Hz; control math is dt-exact at any rate). Server logs:
 `journalctl -u mcc-server -f`.
 
+## Smoke-test results (borrowed Pi 4B, Debian 13, 2026-07-24)
+
+Verified END TO END with no DAQ hardware attached:
+- install.sh clean (libuldaq 1.2.1 built + installed, venv, unit)
+- uldaq python bindings load; bridge reports ULDAQ=True, MCCULW=False
+- **Server self-heals on ARM exactly like Windows**: detected stale engine,
+  transpiled, `g++ -> expressions_v1.so` (90 KB), hot-loaded it, Expr counter
+  seeded -- the whole versioned-lib machinery works unmodified
+- HTTP up (server 2.13.14), acquisition loop starts on first WS client
+  (by design -- a "dead" fresh boot just means nobody has connected yet)
+- E-1608/E-TC uldaq discovery attempted and failed GRACEFULLY (none on that
+  LAN); DO invert + PWM config applied; session logger wrote
+- **Achieved rate: 24.6 Hz at the configured 25 Hz** (dtReal 0.0406 s) at
+  ~25% of one core -- massive headroom for higher rates
+- Gotcha found+fixed: uldaq python name drift (TInFlag/TcType vs the
+  TInFlags/ThermocoupleType the bridge guessed blind pre-port)
+
 ## Known differences vs Windows
 
 - Loop rate lower (see tickHz) — harmless, everything integrates on dtReal.
