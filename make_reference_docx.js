@@ -92,6 +92,7 @@ const ctrl = [
  ["blowdownFrac","0 (disabled)","-","Concentrate blowdown DISABLED -- no blowdown valve fitted, so feed exactly matches distillate. Dissolved solids concentrate over a run; drain/flush the evaporator periodically (manual blowdown). Set >0 only with a real bleed/drain."],
  ["prodPerRpm","0.00007","(L/min)/rpm","Blower->production estimate (feedInvEst while venting). Calibrate."],
  ["surgeThresh / surgeGain","1.0 / 5.0","C / (V/C)","Anti-surge bypass: opens below this dT, this many V/C."],
+ ["floodSenseEn","0","0/1","FLOOD sensor fitted? 0 (7/24): the flood sensor was relocated to the demister-water position and the flood input is sensorless + PULLED HIGH -- unmasked it would read FLOODED forever. yDemisterFlood forced 0 while disabled (flood trip inert; demister drain unaffected -- it reads DemisterWater, the real sensor, now on AI3 after the config swap). Set 1 when a sensor returns."],
  ["condLevelThresh","2.5","V/units","AI:CondLevel above this = tube ~3/4 full -> start the condensate pump (the point sensor trip)."],
  ["condUseTotalizer","1","0/1","Distillate measurement: 1 = exact cumulative pulse totalizer (CTR:CondTotal, count/K); 0 = integrate the windowed rate."],
  ["condEmptyFlow","0.25","L/min","Pump-outlet flow below this = tube DRY. Set between the ~0 dry reading and the condensate-pump rate (0.5)."],
