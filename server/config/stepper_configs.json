@@ -9,7 +9,9 @@
       "reverse": false,
       "max_rpm": 600,
       "accel": 200,
-      "decel": 200
+      "decel": 200,
+      "standstill_current_pct": 0,
+      "standstill_current_reg": "Pr5.03"
     }
   ]
 }

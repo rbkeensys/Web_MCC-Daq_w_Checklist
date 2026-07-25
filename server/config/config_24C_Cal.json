@@ -2,7 +2,7 @@
   "boards1608": [
     {
       "boardNum": 0,
-      "sampleRateHz": 25.0,
+      "sampleRateHz": 160.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -10,7 +10,7 @@
         {
           "name": "EvapPress",
           "slope": 8.625,
-          "offset": -5.100229606628419,
+          "offset": -4.524714393615721,
           "cutoffHz": 0.1,
           "units": "psia",
           "include": true,
@@ -22,7 +22,7 @@
         {
           "name": "SteamPress",
           "slope": 8.625,
-          "offset": -4.891718406677246,
+          "offset": -4.5297444152832025,
           "cutoffHz": 0.1,
           "units": "psia",
           "include": true,
@@ -32,7 +32,7 @@
           "counter_mode": "rate"
         },
         {
-          "name": "DemisterFlood",
+          "name": "DemisterWater",
           "slope": 1.0,
           "offset": 0.0,
           "cutoffHz": 5.0,
@@ -44,7 +44,7 @@
           "counter_mode": "rate"
         },
         {
-          "name": "DemisterWater",
+          "name": "DemisterFlood",
           "slope": 1.0,
           "offset": 0.0,
           "cutoffHz": 5.0,
@@ -257,7 +257,7 @@
           "ch": 2,
           "name": "VaporIn",
           "type": "K",
-          "offset": 1.7998354911804206,
+          "offset": 1.087533092498777,
           "cutoffHz": 0.02
         },
         {
@@ -265,7 +265,7 @@
           "ch": 3,
           "name": "VaporOut",
           "type": "K",
-          "offset": 0.18412510553995887,
+          "offset": 1.6286384582519489,
           "cutoffHz": 0.02
         },
         {
@@ -281,7 +281,7 @@
           "ch": 5,
           "name": "SteamChest",
           "type": "K",
-          "offset": -1.1831985155741407,
+          "offset": 1.784334564208983,
           "cutoffHz": 0.02
         },
         {
@@ -289,7 +289,7 @@
           "ch": 6,
           "name": "MakeupHtr",
           "type": "K",
-          "offset": -5.155642461776733,
+          "offset": 0.771891752878826,
           "cutoffHz": 0.2
         },
         {
@@ -297,7 +297,7 @@
           "ch": 7,
           "name": "SuperHtr",
           "type": "K",
-          "offset": -1.5478097915649442,
+          "offset": 0.639534600575761,
           "cutoffHz": 0.2
         }
       ],

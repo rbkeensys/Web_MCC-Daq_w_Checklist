@@ -5,14 +5,15 @@
       "include": true,
       "drive_key": "dm556rs",
       "config_key": "feed_pump",
-      "port": "COM4",
-      "baud": 9600,
+      "port": "COM11",
+      "baud": 38400,
       "parity": "N",
       "stopbits": 1,
       "address": 1,
       "timeout": 0.5,
       "auto_setup": true,
-      "poll_rate_ms": 100
+      "poll_rate_ms": 100,
+      "io_log": false
     }
   ]
 }
