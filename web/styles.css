@@ -1,6 +1,7 @@
-/* styles.css v1.1.0 -- 2026-07-24: fullscreen keeps the topbar; exitFullscreenBtn retired (fullscreen = Pi kiosk mode, all functions stay reachable) */
+/* styles.css v1.1.1 -- touch lockdown: no double-tap zoom / overscroll bounce (kiosk touchscreen wandered constantly); prev v1.1.0 -- 2026-07-24: fullscreen keeps the topbar; exitFullscreenBtn retired (fullscreen = Pi kiosk mode, all functions stay reachable) */
 :root { --bg:#0f1115; --fg:#e6e6e6; --muted:#9094a1; --accent:#79c0ff; --card:#171923; --good:#2faa60; --bad:#d84a4a; --default:#636a7b; --grid:#2a2f44; --grid2:#1e2235; --cursor:#ff4d4d; }
 * { box-sizing: border-box; }
+html, body { touch-action: manipulation; overscroll-behavior: none; }
 body { margin:0; padding:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial; height:100vh; display:flex; flex-direction:column; }
 .topbar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#11131a; border-bottom:1px solid #1f2330; flex-shrink:0; }
 .topbar .left>* { margin-right:8px; }
