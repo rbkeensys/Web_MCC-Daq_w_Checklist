@@ -1,4 +1,4 @@
-/* styles.css v1.1.1 -- touch lockdown: no double-tap zoom / overscroll bounce (kiosk touchscreen wandered constantly); prev v1.1.0 -- 2026-07-24: fullscreen keeps the topbar; exitFullscreenBtn retired (fullscreen = Pi kiosk mode, all functions stay reachable) */
+/* styles.css v1.1.2 -- topbar hide reveal-tab (#tbShowBtn) + fit-zoom era; prev v1.1.1 -- touch lockdown: no double-tap zoom / overscroll bounce (kiosk touchscreen wandered constantly); prev v1.1.0 -- 2026-07-24: fullscreen keeps the topbar; exitFullscreenBtn retired (fullscreen = Pi kiosk mode, all functions stay reachable) */
 :root { --bg:#0f1115; --fg:#e6e6e6; --muted:#9094a1; --accent:#79c0ff; --card:#171923; --good:#2faa60; --bad:#d84a4a; --default:#636a7b; --grid:#2a2f44; --grid2:#1e2235; --cursor:#ff4d4d; }
 * { box-sizing: border-box; }
 html, body { touch-action: manipulation; overscroll-behavior: none; }
@@ -617,3 +617,10 @@ table.form input[type="checkbox"] { width:auto; }
   left: calc(50% - 300px);
   transform: none;
 }
+
+/* Reveal tab for the hidden topbar (kiosk): barely-there until needed */
+#tbShowBtn { position: fixed; top: 0; right: 0; z-index: 10000; display: none;
+  width: 28px; height: 15px; padding: 0; line-height: 11px; font-size: 10px;
+  opacity: 0.35; background: #22263a; color: #cfd6f0;
+  border: 1px solid #4c5170; border-top: none; border-radius: 0 0 0 6px; cursor: pointer; }
+#tbShowBtn:hover, #tbShowBtn:active { opacity: 0.95; }
