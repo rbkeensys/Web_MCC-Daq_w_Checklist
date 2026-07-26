@@ -4,12 +4,18 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+# WATCHDOG (server 2.13.21): the server pets systemd only while the control
+# loop is healthy (ticks advancing, DO writes succeeding). Crash, hang, or
+# wedged DAQ handles all starve WatchdogSec -> restart -> boot-time safe-init
+# drives every DO OFF. Restart=always: this is a boiler controller, it runs.
+Type=notify
+WatchdogSec=30
 User=__USER__
 WorkingDirectory=__REPO__/server
 ExecStart=__REPO__/.venv/bin/python __REPO__/server/server.py
-Restart=on-failure
+Restart=always
 RestartSec=5
+StartLimitIntervalSec=0
 # Control process: keep it responsive
 Nice=-5
 # Logs go to journald (journalctl -u mcc-server -f)

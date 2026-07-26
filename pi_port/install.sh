@@ -51,3 +51,14 @@ echo "DONE. Next (see PI_SETUP.md):"
 echo "  1) edit server/config serial ports to /dev/serial/by-id/..."
 echo "  2) bench-verify: .venv/bin/python pi_port/bench_daq_test.py"
 echo "  3) sudo systemctl enable --now mcc-server"
+
+# --- added 7/26: lessons from the borrowed-Pi bring-up ---
+# USB serial on some Pi images lands in plugdev (not dialout) -- join both.
+usermod -aG dialout,plugdev "$RUN_USER" || true
+# Pi HARDWARE watchdog: reboot the whole Pi on a kernel hang. Combined with the
+# server's boot-time DO safe-init, even a kernel wedge ends heaters-OFF.
+mkdir -p /etc/systemd/system.conf.d
+printf '[Manager]
+RuntimeWatchdogSec=15
+' > /etc/systemd/system.conf.d/10-watchdog.conf
+systemctl daemon-reexec
