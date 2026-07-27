@@ -117,6 +117,25 @@ Verified END TO END with no DAQ hardware attached:
   (browser-level, F11 to exit) is for setups WITH a keyboard; true
   `--kiosk` is only for locked-down panels where escaping is undesirable.
 
+## Warm-reboot acceptance test (do this at bring-up!)
+
+The borrowed bring-up Pi could NOT soft-reboot: `sudo reboot` froze black in
+the firmware phase every time (power cycle required) -- EEPROM update did not
+cure it; likely SD-card warm-reset wedge. Consequences if your Pi has this:
+
+- **Never remote-reboot unless someone can power-cycle.** The server-level
+  watchdog (systemd) does NOT need reboots and is unaffected; only full-OS
+  reboots are at risk.
+- **The kernel hardware-watchdog rescue is compromised**: its recovery IS a
+  warm reset, which may land on the same black screen. Outputs are no worse
+  than a frozen kernel (the DAQ holds last state either way) -- but recovery
+  is not automatic. The external heater-mains watchdog (planned Arduino) is
+  the true backstop.
+
+So at bring-up: run `sudo rpi-eeprom-update -a`, power cycle, then test
+`sudo reboot` twice while standing next to it. **Boot from USB SSD** (already
+recommended for log wear) -- it also avoids the SD warm-wedge class entirely.
+
 ## Known differences vs Windows
 
 - Loop rate lower (see tickHz) — harmless, everything integrates on dtReal.
