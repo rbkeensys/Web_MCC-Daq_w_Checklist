@@ -60,5 +60,16 @@ usermod -aG dialout,plugdev "$RUN_USER" || true
 mkdir -p /etc/systemd/system.conf.d
 printf '[Manager]
 RuntimeWatchdogSec=15
+RebootWatchdogSec=2min
 ' > /etc/systemd/system.conf.d/10-watchdog.conf
 systemctl daemon-reexec
+# Persistent journal (capped): volatile journald erased the evidence of a hung
+# reboot on the borrowed Pi (7/27) -- crashes/hangs must leave a trail.
+mkdir -p /var/log/journal /etc/systemd/journald.conf.d
+printf '[Journal]
+Storage=persistent
+SystemMaxUse=200M
+' > /etc/systemd/journald.conf.d/10-persist.conf
+systemctl restart systemd-journald || true
+# RebootWatchdogSec: a wedged reboot self-rescues via the SoC watchdog in 2min
+# (borrowed Pi hung blank on 'sudo reboot' once -- never strand the rig).
