@@ -1,5 +1,5 @@
 # server/mcc_bridge.py
-__version__ = "2.6.5"  # DO direction-config failures are LOUD now (silent pass left bits 2-7 as inputs on 7/27 -- pumps ran with software commanding OFF). Prev 2.6.4: _do_fail_streak: consecutive uldaq DO write failures counted (reset on success + close) -- feeds the server health monitor / systemd watchdog. Prev 2.6.3: IDEMPOTENT open(): close() runs first so a re-open never double-connects uldaq devices (invalid handles froze all DO/AO writes -> 400C superheat runaway on 7/24). Prev 2.6.2: E-TC uldaq API FIX: no get_temp_device in uldaq -- TC reads via get_ai_device().t_in(ch, scale, TInFlag.DEFAULT); TC types pushed into AiConfig (set_chan_type/set_chan_tc_type) at open+reopen; per-channel read try so one open circuit no longer NaNs the whole board; dead TcType NameError removed. Prev 2.6.1: LATE-HARDWARE RECOVERY: missing_hardware()/reopen_missing() -- absent-at-boot DAQs are re-discovered periodically (acq loop calls off-thread every ~10s) and picked up live: E-1608 gets DO safe-init + counter clears, E-TC gets its DINs configured. Linux/uldaq only. Prev 2.6.0  # RASPBERRY PI / LINUX PORT: full E-1608 uldaq parity -- open via product-name-filtered Ethernet discovery (boardNum = ordinal among E-1608s sorted by unique id), AI a_in (eng volts), AO a_out (volts, +/-10 clamp), DO d_bit_out (first port type, bits pre-configured OUT), CTR c_in/c_clear, DO safe-init. E-TC uldaq open prefers name-filtered ordinal (mixed inventory). close() disconnects everything, no longer references stale single-board attrs (latent AttributeError fixed). All guarded by HAVE_ULDAQ/_ul_1608 -- byte-identical behavior on Windows/mcculw. Prev 2.5.1:  # start_buzz(active_high=None) derives the channel Invert. Prev 2.5.0: DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
+__version__ = "2.6.6"  # REUSE healthy uldaq handles in open(): close/reconnect cycled the E-1608 outputs through power-on state (relays blipped ON at every acq start). A handle that answers a probe read keeps its latches + direction config. Prev 2.6.5: DO direction-config failures are LOUD now (silent pass left bits 2-7 as inputs on 7/27 -- pumps ran with software commanding OFF). Prev 2.6.4: _do_fail_streak: consecutive uldaq DO write failures counted (reset on success + close) -- feeds the server health monitor / systemd watchdog. Prev 2.6.3: IDEMPOTENT open(): close() runs first so a re-open never double-connects uldaq devices (invalid handles froze all DO/AO writes -> 400C superheat runaway on 7/24). Prev 2.6.2: E-TC uldaq API FIX: no get_temp_device in uldaq -- TC reads via get_ai_device().t_in(ch, scale, TInFlag.DEFAULT); TC types pushed into AiConfig (set_chan_type/set_chan_tc_type) at open+reopen; per-channel read try so one open circuit no longer NaNs the whole board; dead TcType NameError removed. Prev 2.6.1: LATE-HARDWARE RECOVERY: missing_hardware()/reopen_missing() -- absent-at-boot DAQs are re-discovered periodically (acq loop calls off-thread every ~10s) and picked up live: E-1608 gets DO safe-init + counter clears, E-TC gets its DINs configured. Linux/uldaq only. Prev 2.6.0  # RASPBERRY PI / LINUX PORT: full E-1608 uldaq parity -- open via product-name-filtered Ethernet discovery (boardNum = ordinal among E-1608s sorted by unique id), AI a_in (eng volts), AO a_out (volts, +/-10 clamp), DO d_bit_out (first port type, bits pre-configured OUT), CTR c_in/c_clear, DO safe-init. E-TC uldaq open prefers name-filtered ordinal (mixed inventory). close() disconnects everything, no longer references stale single-board attrs (latent AttributeError fixed). All guarded by HAVE_ULDAQ/_ul_1608 -- byte-identical behavior on Windows/mcculw. Prev 2.5.1:  # start_buzz(active_high=None) derives the channel Invert. Prev 2.5.0: DO INVERT: per-channel `invert` from DigitalOutCfg applied in set_do (active_high=None default derives physical = logical XOR invert) -- expression toggle writes AND pwm_step now honor it (both hardcoded active_high=True before, so the config polarity was dead). All DOs driven to logical OFF at open() so an inverted load isn't left energized from board power-up. Prev 2.4.0: E-TC DIGITAL INPUTS: read_etc_dins() reads DIO bits configured as inputs (mcculw ul.d_bit_in on AUXPORT / uldaq dio.d_bit_in), configured at open() from boardsetc[].digitalInputs; returns {static_var: 0/1} which server stamps into statics for a High-Level switch. Prev 2.3.0: CTR is a first-class input: counters read from board.counters[] (CounterCfg) into a dedicated CTR signal array via read_counters() (was apply_counter_rates onto AI). rate|total modes + rollover-safe total kept. Prev 2.2.0: counter 'total' mode on AI; 2.1.0: counter-sourced AI + PWM DOs
 BRIDGE_VERSION = "2.0.6"  # Fixed missing imports
 
 import asyncio
@@ -166,7 +166,33 @@ class MCCBridge:
         # NOT survive that -- a second connect on an already-held Ethernet DAQ
         # leaves invalid handles, every DO/AO write silently fails, and the
         # heaters sit frozen in their last physical state (the 7/24 400C
-        # superheat incident). Disconnect and forget everything first.
+        # superheat incident). Disconnect and forget everything first --
+        # EXCEPT healthy live handles (2.6.6): a close/reconnect cycles the
+        # device outputs through their power-on state (floating LOW = relays
+        # ON on the active-low board -- the pumps blipped at every acq start,
+        # 7/27). A handle that still answers a read keeps its latches and
+        # direction config; reuse it untouched.
+        keep_1608 = {}
+        for _bn, _h in list((getattr(self, "_ul_1608", None) or {}).items()):
+            try:
+                _h["ai"].a_in(0, _h["ai_mode"], UlRange.BIP10VOLTS,
+                              UlAInFlag.DEFAULT if UlAInFlag else 0)
+                keep_1608[_bn] = _h
+                self._ul_1608.pop(_bn)
+            except Exception:
+                pass
+        keep_etc = {}
+        for (_bn, _dev, _td) in list(getattr(self, "_boards_etc_uldaq", None) or []):
+            try:
+                try:
+                    _td.t_in(0, TempScale.CELSIUS, TInFlags.DEFAULT)
+                except Exception as _e:
+                    if "open" not in str(_e).lower():
+                        raise
+                keep_etc[_bn] = (_dev, _td)
+                self._boards_etc_uldaq.remove((_bn, _dev, _td))
+            except Exception:
+                pass
         try:
             self.close()
         except Exception:
@@ -191,6 +217,10 @@ class MCCBridge:
                     # ---- Raspberry Pi / Linux: open the E-1608 via uldaq ----
                     # boardNum = ordinal among E-1608s found (sorted by unique id
                     # for stability), NOT an InstaCal number (no InstaCal on Linux).
+                    if board_num in keep_1608:
+                        self._ul_1608[board_num] = keep_1608.pop(board_num)
+                        print(f"[MCCBridge] E-1608 #{board_num}: REUSING live handle (no output glitch)")
+                        continue
                     try:
                         desc = self._ul_find_descriptor("E-1608", board_num)
                         if desc is None:
@@ -333,7 +363,12 @@ class MCCBridge:
                 
                 # Try ULDAQ first
                 opened_uldaq = False
-                if HAVE_ULDAQ:
+                if HAVE_ULDAQ and (board_num in keep_etc):
+                    _dev, _td = keep_etc.pop(board_num)
+                    self._boards_etc_uldaq.append((board_num, _dev, _td))
+                    print(f"[MCCBridge] E-TC #{board_num}: REUSING live handle")
+                    opened_uldaq = True
+                if HAVE_ULDAQ and not opened_uldaq:
                     try:
                         # Prefer product-name-filtered ordinal (Linux: inventory mixes
                         # E-1608s and E-TCs); fall back to the raw-index legacy behavior.
@@ -370,6 +405,18 @@ class MCCBridge:
                     except Exception as e:
                         print(f"[MCCBridge] E-TC #{board_num}: mcculw failed: {e}")
         
+        # any rescued handle whose board vanished from config: release it
+        for _bn, _h in keep_1608.items():
+            try:
+                _h["dev"].disconnect()
+            except Exception:
+                pass
+        for _bn, (_dev, _td) in keep_etc.items():
+            try:
+                _dev.disconnect()
+            except Exception:
+                pass
+
         total_etc = len(self._boards_etc_uldaq) + len(self._boards_etc_mcc)
         print(f"[MCCBridge] Configured {total_etc} E-TC board(s)")
 
