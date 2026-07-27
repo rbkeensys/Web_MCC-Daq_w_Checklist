@@ -299,13 +299,23 @@ def _compile_posix(lib_name):
     if out.suffix.lower() != ".so":
         out = out.with_suffix(".so")
     out.parent.mkdir(parents=True, exist_ok=True)
+    # ATOMIC BUILD (7/27): a restart/kill mid-g++ left a 0-byte .so with the
+    # real name -- every later boot "loaded" it, failed ("file too short") and
+    # silently fell back to the python evaluator (half-working control). Build
+    # to a temp name; only a completed compile gets renamed into place.
+    tmp = out.parent / (out.name + ".building")
     cmd = [cxx, "-O2", "-ffast-math", "-shared", "-fPIC", "-std=c++14",
-           "-o", str(out), str(cpp_file), "-lm"]
+           "-o", str(tmp), str(cpp_file), "-lm"]
     print(f"[compile_cpp] {' '.join(cmd)}")
     r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        print("COMPILE FAILED:\n" + (r.stderr or r.stdout))
+    if r.returncode != 0 or not tmp.exists() or tmp.stat().st_size < 10000:
+        print("COMPILE FAILED: " + (r.stderr or r.stdout or "no/short output file"))
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
         return False
+    os.replace(str(tmp), str(out))
     print(f"[compile_cpp] OK -> {out} ({out.stat().st_size} bytes)")
     return True
 

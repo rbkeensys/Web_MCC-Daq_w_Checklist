@@ -10,6 +10,8 @@ Wants=network-online.target
 # drives every DO OFF. Restart=always: this is a boiler controller, it runs.
 Type=notify
 WatchdogSec=30
+# boot may transpile+compile the expression engine -- never kill it mid-build
+TimeoutStartSec=300
 User=__USER__
 WorkingDirectory=__REPO__/server
 ExecStart=__REPO__/.venv/bin/python __REPO__/server/server.py
