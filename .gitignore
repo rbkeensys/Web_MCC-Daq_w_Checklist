@@ -26,3 +26,4 @@ logs/
 # --- Secrets / TLS (never commit private keys) ---
 *.pem
 server/config/ssl/
+server/config/machineTotals.json
