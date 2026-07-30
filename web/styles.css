@@ -1,4 +1,4 @@
-/* styles.css v1.1.6 -- viewer (view-only) mode hides all control surfaces; prev v1.1.5 -- tap-ripple marker; prev v1.1.4 -- cursor-idle auto-hide class; prev v1.1.3 -- reveal tab enlarged (52x24, was 28x15 -- untappable on the touchscreen); prev v1.1.2 -- topbar hide reveal-tab (#tbShowBtn) + fit-zoom era; prev v1.1.1 -- touch lockdown: no double-tap zoom / overscroll bounce (kiosk touchscreen wandered constantly); prev v1.1.0 -- 2026-07-24: fullscreen keeps the topbar; exitFullscreenBtn retired (fullscreen = Pi kiosk mode, all functions stay reachable) */
+/* styles.css v1.1.7 -- shared-layouts dropdown menu (Layouts button; stays usable in viewer mode); prev v1.1.6 -- viewer (view-only) mode hides all control surfaces; prev v1.1.5 -- tap-ripple marker; prev v1.1.4 -- cursor-idle auto-hide class; prev v1.1.3 -- reveal tab enlarged (52x24, was 28x15 -- untappable on the touchscreen); prev v1.1.2 -- topbar hide reveal-tab (#tbShowBtn) + fit-zoom era; prev v1.1.1 -- touch lockdown: no double-tap zoom / overscroll bounce (kiosk touchscreen wandered constantly); prev v1.1.0 -- 2026-07-24: fullscreen keeps the topbar; exitFullscreenBtn retired (fullscreen = Pi kiosk mode, all functions stay reachable) */
 :root { --bg:#0f1115; --fg:#e6e6e6; --muted:#9094a1; --accent:#79c0ff; --card:#171923; --good:#2faa60; --bad:#d84a4a; --default:#636a7b; --grid:#2a2f44; --grid2:#1e2235; --cursor:#ff4d4d; }
 * { box-sizing: border-box; }
 html, body { touch-action: manipulation; overscroll-behavior: none; }
@@ -649,4 +649,24 @@ body.viewer .do-btn { pointer-events: none; opacity: 0.85; }
 body.viewer .widget .gear, body.viewer .widget header button { pointer-events: none; }
 body.viewer input, body.viewer select { pointer-events: none; }
 body.viewer #connectBtn, body.viewer #fullscreenBtn, body.viewer #fitBtn,
-body.viewer #tbHideBtn { pointer-events: auto; }
+body.viewer #tbHideBtn, body.viewer #sharedLayouts { pointer-events: auto; }
+
+/* SHARED LAYOUTS dropdown (v1.1.7): fixed-position menu under the Layouts
+   button. Deliberately NOT hidden in viewer mode -- applying a published
+   layout is a local act any visitor may do; Publish/Delete rows are simply
+   not rendered for viewers (and the server 403s them anyway). */
+.layouts-menu { position: fixed; z-index: 10001; min-width: 220px; max-height: 60vh; overflow-y: auto;
+  background: #171923; border: 1px solid #2c3150; border-radius: 8px; padding: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+.layouts-menu .layouts-row { display: flex; gap: 4px; margin: 2px 0; }
+.layouts-menu .layouts-load { flex: 1; text-align: left; background: #22263a; color: #e6e6e6;
+  border: 1px solid #2c3150; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+.layouts-menu .layouts-load:hover { background: #262b44; }
+.layouts-menu .layouts-del { background: #2b1e1e; color: #f0caca; border: 1px solid #5b2626;
+  border-radius: 6px; padding: 6px 8px; cursor: pointer; }
+.layouts-menu .layouts-del:hover { background: #3a2323; }
+.layouts-menu .layouts-publish { display: block; width: 100%; margin-top: 6px; background: #1e2a1e;
+  color: #cfe8cf; border: 1px solid #2f4a2f; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+.layouts-menu .layouts-publish:hover { background: #243424; }
+.layouts-menu .layouts-empty { color: var(--muted); padding: 6px 10px; }
+body.viewer .layouts-menu button { pointer-events: auto; }
