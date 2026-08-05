@@ -20,6 +20,9 @@ RestartSec=5
 StartLimitIntervalSec=0
 # Control process: keep it responsive
 Nice=-5
+# Core 3 is the control server's private core (8/5): chromium is fenced to
+# 0-2 in mcc_kiosk.sh; the pair guarantees the loop never contends with the UI
+CPUAffinity=3
 # Logs go to journald (journalctl -u mcc-server -f)
 
 [Install]
