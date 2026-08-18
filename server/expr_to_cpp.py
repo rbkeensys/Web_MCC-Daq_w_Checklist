@@ -14,7 +14,7 @@ Complete rewrite to handle actual expr_engine.py AST node types:
 - NUMBER, PLUS, MINUS, MULT, DIV, MOD, POWER
 """
 
-__version__ = "3.8.2"  # portable EXPORT macro in generated C++ (_WIN32 declspec / else gcc visibility) for the Raspberry Pi port
+__version__ = "3.8.3"  # portable EXPORT macro in generated C++ (_WIN32 declspec / else gcc visibility) for the Raspberry Pi port
 __updated__ = "2026-06-30"  # 3.8.0: PID reads WORK in the DLL -- pid_map filled from pid.json (loaded next to config.json), 'PID' branch in get_signal_index, and the pid[] input is STRIDE 4 per loop [out,err,pv,sp]: plain "PID:Name" = OUT, "PID:Name".OUT/.ERR/.PV/.SP (aliases OUTPUT/U/ERROR/MEAS/SET/SETPOINT) hit the slots. SIGNAL_PROP previously emitted literal 0.0 for anything non-VFD/STEP, and pid_map was never filled. Pairs with server 2.13.3 (builds the stride-4 array from telemetry with the CORRECT keys -- it passed tel.get('output') but the telemetry key is 'out', so every PID value entering expressions was 0). Prev 3.7.1: AI + TC signal maps now include ALL channels indexed by PHYSICAL POSITION (matching the positional ai[]/tc[] value arrays), regardless of the include flag -- completes what 3.3.1 did for AO (DO was always positional). The include filter COMPACTED indices: with the bench E-TC auto-detect saving 6 unplugged TCs include=false, "TC:MakeupHtr" mapped to tc[0] = FeedTemp's slot, so the makeup over-temp trip watched the wrong sensor in real mode (and the 6 excluded TCs fell to "Unknown -> index 0"). Same latent shift for any excluded middle AI. Prev 3.7.0: CTR (hardware counter) is a first-class signal type -- "CTR:Name" emits ctr[idx]; ctr_map in SignalMap (from boards1608[].counters), CTR in get_signal_index + _KNOWN_SIG_TYPES, a double* ctr param threaded through per-expr + batch C++ signatures and the call site (after scale), ctr_map written to metadata. DLL signature 18 -> 19 params (delete any stale expressions.dll). Prev 3.6.0: rand()/randn()/sign() map to xorshift32 runtime helpers (expr_rand/expr_randn/expr_sign) added to the C++ preamble; floor/ceil/round pass through <cmath>. Pairs with expr_engine 2.6.0. 3.5.0: DO_ASSIGN emits the RAW value (server thresholds normal DOs / uses it as 0..1 PWM duty). 3.4.0: STEP: stepper-drive refs (reads/status/commands) reuse the vfd_in[]/vfd_out[] machinery tagged manager='stepper'; VFD refs + DLL signature unchanged. 3.3.2: unknown AO/AI signal warnings now list the available channel names (diagnostic for name mismatches). 3.3.1: AO signal map now includes ALL analog-output channels regardless of the include flag (matches DO handling) and indexes them by physical position to align with the AO snapshot array (get_ao_snapshot/_ao_vals) -- fixes "AO:Name" reads returning 0.0 in expressions when the channel was not include-flagged. 3.3.0: restored Scale: support in the compiled DLL -- scale_map in SignalMap (reads scales.json), SCALE handled in get_signal_index, a 16th double* scale parameter threaded through per-expr + batch C++ signatures and the batch call site, scales.json loaded by compile_all_expressions, scale_map written to metadata. "Scale:Name" now emits scale[index] and reads the real serial-scale value. Keeps the 3.2.3 print/printf/min/max fixes. DLL signature 15 -> 16 params (delete any stale expressions.dll). 3.2.3: print()/printf() with a leading MESSAGE string now emit a real printf (your expressions use print("text", args) logging) instead of printf(0.0); integer format specifiers (%d etc.) are coerced to %g since all expression values are doubles; printf is treated as an alias of print; a quoted string that is not a real TYPE:name reference resolves to 0.0 instead of being mis-parsed as a signal (fixes the "min lox not reached[0]" garble from messages containing a colon). Scale: refs still emit a 0.0 placeholder (no scale array in the DLL signature) and are reported by name at build time. 3.2.2: compile_all_expressions() accepts scales_file= and **kwargs so a newer server.py passing scales_file does not crash with TypeError. This generator does not emit C++ for Scale: refs; it warns if any expression uses one. 3.2.1: CALL codegen now translates min/max to std::min/std::max with double casts, and print(...) to an expr_print/expr_print_multi helper (added to the C++ prelude with <cstdio>/<cstdarg>). Fixes C3861 'print' / 'min' not found and the printf double-arg error when expressions use print()/min()/max(). The bare func-name passthrough only ever worked for <cmath> names.
 
 import json
@@ -744,8 +744,8 @@ class CPPCodeGenerator:
                     # inline and matches the expression engine's double type.
                     if rest:
                         joined = ", ".join(rest)
-                        return f'(double)printf("[EXPR] {fmt}\\n", {joined})'
-                    return f'(double)printf("[EXPR] {fmt}\\n")'
+                        return f'expr_print_msg("[EXPR] {fmt}", {joined})'
+                    return f'expr_print_msg("[EXPR] {fmt}")'
                 # No leading message string: numeric print.
                 if len(args) == 0:
                     return "expr_print(0.0)"
@@ -919,26 +919,54 @@ inline double expr_randn() {                     // standard normal (Box-Muller)
 }
 inline double expr_sign(double x) { return (x > 0.0) ? 1.0 : ((x < 0.0) ? -1.0 : 0.0); }
 
-// print(x) from expressions: write to the C runtime stdout (the server's
-// console fd-capture forwards this to the browser console widget) and return
-// the value so print() can be used inline in an expression.
-inline double expr_print(double x) {
-    printf("[EXPR] %g\\n", x);
+// PRINT CALLBACK (3.8.3): in a PyInstaller-frozen host the DLL's C-runtime
+// stdio can bind a DIFFERENT CRT instance than python's -- printf output
+// vanished entirely (fueling-rig compiled app, 8/18). Prints now route
+// through a host-registered callback (cpp_expr_backend): a plain function
+// call into python -- no stdio, no fd tables, identical frozen or dev.
+// printf+fflush remains the fallback when no callback is registered
+// (older hosts, standalone testing).
+typedef void (*expr_print_cb_t)(const char*);
+static expr_print_cb_t g_expr_print_cb = 0;
+EXPORT void set_print_callback(expr_print_cb_t cb) { g_expr_print_cb = cb; }
+static void expr_emit(const char* line) {
+    if (g_expr_print_cb) { g_expr_print_cb(line); return; }
+    printf("%s\\n", line);
     fflush(stdout);
+}
+static double expr_print_msg(const char* fmt, ...) {
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    expr_emit(buf);
+    return (double)(n < 0 ? 0 : n);
+}
+
+// print(x) from expressions: emit via callback/fallback; returns the value
+// so print() can be used inline in an expression.
+inline double expr_print(double x) {
+    char buf[64];
+    snprintf(buf, sizeof buf, "[EXPR] %g", x);
+    expr_emit(buf);
     return x;
 }
 
-// print(a, b, ...): print each value, return the last.
+// print(a, b, ...): print each value on one line, return the last.
 inline double expr_print_multi(int n, ...) {
+    char buf[512];
+    int pos = snprintf(buf, sizeof buf, "[EXPR]");
     va_list ap;
     va_start(ap, n);
     double last = 0.0;
     for (int i = 0; i < n; ++i) {
         last = va_arg(ap, double);
-        printf("[EXPR] %g%s", last, (i + 1 < n) ? " " : "\\n");
+        if (pos > 0 && pos < (int)sizeof buf)
+            pos += snprintf(buf + pos, sizeof buf - pos, " %g", last);
     }
     va_end(ap);
-    fflush(stdout);
+    expr_emit(buf);
     return last;
 }
 

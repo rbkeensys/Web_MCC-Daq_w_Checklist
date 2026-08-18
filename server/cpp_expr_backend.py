@@ -20,7 +20,7 @@ CHANGELOG:
   • Hardware write support (DO, AO)
   • Static and global variable support
 """
-__version__ = "3.4.0"
+__version__ = "3.4.1"
 __updated__ = "2026-06-27"  # 3.4.0: added ctr[] (19-arg DLL) -- self.ctr buffer, ctr in argtypes + call (after scale), ctr_vals on evaluate() for first-class hardware counters (CTR:Name). Prev 3.3.0: added scale[] (16-arg DLL)
 
 import ctypes
@@ -149,6 +149,22 @@ class CPPExpressionBackend:
         print(f"[CPP-EXPR] DLL Signature: 19 parameters (adds ctr[] -- hardware counters)")
         
         self.dll = ctypes.CDLL(str(self.dll_path))
+
+        # PRINT CALLBACK (3.4.1): route DLL expression prints through python.
+        # In a PyInstaller-frozen host the DLL's CRT stdio can bind a different
+        # C-runtime instance than python's -- printf output vanished entirely
+        # (8/18, fueling-rig compiled app). A registered callback is a plain
+        # function call into python: print() here flows through sys.stdout and
+        # the server's console fd-capture exactly like any python print, so
+        # the web console widget gets it in every environment. Keep a strong
+        # reference on self or ctypes garbage-collects the thunk.
+        try:
+            self._print_cb = ctypes.CFUNCTYPE(None, ctypes.c_char_p)(
+                lambda msg: print(msg.decode('utf-8', 'replace') if msg else ''))
+            self.dll.set_print_callback(self._print_cb)
+            print('[CPP-EXPR] DLL print callback registered (frozen-safe expression prints)')
+        except AttributeError:
+            print('[CPP-EXPR] DLL has no set_print_callback (pre-3.8.3 build) -- printf fallback')
         
         # Load batch evaluation function
         self.batch_func = self.dll.evaluate_all_expressions
