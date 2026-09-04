@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.20.0';  // 2026-08-27: SHARED CHECKLIST LIBRARY -- loading a .txt locally auto-publishes it to the server (PUT /api/checklists/{name}); new "🌐 Shared" toolbar button lists the server library and loads one with a click, so no computer ever needs the file hand-copied. Pairs with server 2.13.30. Prev 1.19.0: 2026-06-12: Host checkbox -- share this checklist with every connected computer (server-arbitrated claim/relinquish with popups on both sides, timeout denies, disconnect auto-releases; late joiners adopt on dock open; host re-pushes on file load/snapshot restore). Prev: Multi-computer checklist mirroring -- clApplyRemoteCheck/clApplyRemoteUncheck let relayed events from other machines check/uncheck items and move the cursor here, idempotently and without re-emitting. Prev: Unchecks now also POST /api/check_events/uncheck so the server relays them to other computers and trims the log accumulator. Prev: Check/uncheck/restore/clear relay through window.broadcastCheckEvent (BroadcastChannel in app.js) so popped-out charts get checkmarks from the main-page checklist and a popped-out checklist reaches main-page charts.
+window.CHECKLIST_VERSION = '1.20.1';  // 2026-08-27: FIX popout follower losing the host's row (russ: 'I'm on 10, he's on 45'): (1) HOST CURSOR KEEPALIVE -- host re-pushes the snapshot whenever its active row changes (1.5s throttle; server rebroadcasts 'set', every follower incl. popouts self-heals; Go-To jumps carried no check events so followers could never track them), (2) popout/reconnect host-sync re-adopts SILENTLY when the hosted checklist is the same file already loaded (the 'Follow it?' confirm was noise and declining it stranded the popout). Prev 1.20.0: 2026-08-27: SHARED CHECKLIST LIBRARY -- loading a .txt locally auto-publishes it to the server (PUT /api/checklists/{name}); new "🌐 Shared" toolbar button lists the server library and loads one with a click, so no computer ever needs the file hand-copied. Pairs with server 2.13.30. Prev 1.19.0: 2026-06-12: Host checkbox -- share this checklist with every connected computer (server-arbitrated claim/relinquish with popups on both sides, timeout denies, disconnect auto-releases; late joiners adopt on dock open; host re-pushes on file load/snapshot restore). Prev: Multi-computer checklist mirroring -- clApplyRemoteCheck/clApplyRemoteUncheck let relayed events from other machines check/uncheck items and move the cursor here, idempotently and without re-emitting. Prev: Unchecks now also POST /api/check_events/uncheck so the server relays them to other computers and trims the log accumulator. Prev: Check/uncheck/restore/clear relay through window.broadcastCheckEvent (BroadcastChannel in app.js) so popped-out charts get checkmarks from the main-page checklist and a popped-out checklist reaches main-page charts.
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -156,6 +156,20 @@ function buildChecklistPanel() {
   panel.querySelector('#clHostChk').onchange  = _clHostToggle;
   // Late joiner: if a host is already active, offer/adopt its checklist.
   setTimeout(_clHostSyncOnMount, 400);
+  // HOST CURSOR KEEPALIVE (1.20.1): followers track the host by check-event
+  // deltas, which carry NO cursor for jumps (Go-To/Return) and can be missed
+  // across a popout open -- a follower could sit on row 10 while the host ran
+  // row 45. While hosting, re-push the full snapshot whenever the active row
+  // changes (throttled): the server rebroadcasts 'set' and every follower --
+  // popouts included, they own a WebSocket -- self-heals within ~2s.
+  if (!window._clHostRowTimer) {
+    window._clHostRowTimer = setInterval(() => {
+      if (_clAmHost && window.checklistLoaded &&
+          window.checklistActiveRow !== window._clLastPushedRow) {
+        _clHostPush();
+      }
+    }, 1500);
+  }
   panel.querySelector('#clSaveBtn').onclick   = () => clSaveFile(true);
   panel.querySelector('#clGotoBtn').onclick   = clGoto;
   panel.querySelector('#clReturnBtn').onclick = clReturn;
@@ -495,6 +509,7 @@ async function _clHostToggle(e) {
  * the current host as a data refresh + rebroadcast. */
 function _clHostPush() {
   if (!_clAmHost || !window.checklistLoaded) return;
+  window._clLastPushedRow = window.checklistActiveRow;
   fetch('/api/checklist_host/claim', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ client_id: window.MCC_CLIENT_ID,
@@ -554,7 +569,12 @@ async function _clHostSyncOnMount() {
     const j = await r.json();
     if (!j.host_id || !j.checklist) return;
     if (j.host_id === window.MCC_CLIENT_ID) { _clAmHost = true; _clSetHostChk(true); return; }
-    if (window.checklistLoaded &&
+    // Same checklist file already loaded (e.g. a popout of a following
+    // window, or a reconnect): re-adopt silently -- the prompt is noise and
+    // declining it is how a popout ended up stranded rows behind the host.
+    const samePath = window.checklistLoaded &&
+      (j.checklist.checklistPath || '') === (window.checklistPath || '');
+    if (window.checklistLoaded && !samePath &&
         !confirm('A hosted checklist is active (' + (j.checklist.checklistPath || '?') +
                  ').\nFollow it? This replaces your current checklist.')) return;
     _clApplySnapshot(j.checklist);
