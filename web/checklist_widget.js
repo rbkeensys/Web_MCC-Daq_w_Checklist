@@ -5,7 +5,7 @@
 
 'use strict';
 
-window.CHECKLIST_VERSION = '1.19.0';  // 2026-06-12: Host checkbox -- share this checklist with every connected computer (server-arbitrated claim/relinquish with popups on both sides, timeout denies, disconnect auto-releases; late joiners adopt on dock open; host re-pushes on file load/snapshot restore). Prev: Multi-computer checklist mirroring -- clApplyRemoteCheck/clApplyRemoteUncheck let relayed events from other machines check/uncheck items and move the cursor here, idempotently and without re-emitting. Prev: Unchecks now also POST /api/check_events/uncheck so the server relays them to other computers and trims the log accumulator. Prev: Check/uncheck/restore/clear relay through window.broadcastCheckEvent (BroadcastChannel in app.js) so popped-out charts get checkmarks from the main-page checklist and a popped-out checklist reaches main-page charts.
+window.CHECKLIST_VERSION = '1.20.0';  // 2026-08-27: SHARED CHECKLIST LIBRARY -- loading a .txt locally auto-publishes it to the server (PUT /api/checklists/{name}); new "🌐 Shared" toolbar button lists the server library and loads one with a click, so no computer ever needs the file hand-copied. Pairs with server 2.13.30. Prev 1.19.0: 2026-06-12: Host checkbox -- share this checklist with every connected computer (server-arbitrated claim/relinquish with popups on both sides, timeout denies, disconnect auto-releases; late joiners adopt on dock open; host re-pushes on file load/snapshot restore). Prev: Multi-computer checklist mirroring -- clApplyRemoteCheck/clApplyRemoteUncheck let relayed events from other machines check/uncheck items and move the cursor here, idempotently and without re-emitting. Prev: Unchecks now also POST /api/check_events/uncheck so the server relays them to other computers and trims the log accumulator. Prev: Check/uncheck/restore/clear relay through window.broadcastCheckEvent (BroadcastChannel in app.js) so popped-out charts get checkmarks from the main-page checklist and a popped-out checklist reaches main-page charts.
 
 window.checklistItems     = [];
 window.checklistActiveRow = 0;
@@ -116,6 +116,7 @@ function buildChecklistPanel() {
   panel.innerHTML = `
     <div class="cl-toolbar">
       <button class="btn cl-btn" id="clLoadBtn"   title="Load checklist (Ctrl+O)">📂 Load</button>
+      <button class="btn cl-btn" id="clSharedBtn" title="Load a checklist from the server library (auto-published whenever any computer loads one locally)">🌐 Shared</button>
       <button class="btn cl-btn" id="clSaveBtn"   title="Save annotated (Ctrl+S)">💾 Save</button>
       <button class="btn cl-btn" id="clGotoBtn"   title="Jump to item (Ctrl+G)">⤵ Go-To</button>
       <button class="btn cl-btn" id="clReturnBtn" title="Return to saved pos (Ctrl+R)">↩ Return</button>
@@ -151,6 +152,7 @@ function buildChecklistPanel() {
 
   // Toolbar wiring
   panel.querySelector('#clLoadBtn').onclick   = clOpenFile;
+  panel.querySelector('#clSharedBtn').onclick = (e) => clOpenShared(e.currentTarget);
   panel.querySelector('#clHostChk').onchange  = _clHostToggle;
   // Late joiner: if a host is already active, offer/adopt its checklist.
   setTimeout(_clHostSyncOnMount, 400);
@@ -799,25 +801,89 @@ function _currentT() {
 }
 
 /* ================================================================ toolbar actions */
+/* Apply checklist text as the freshly loaded checklist (shared by the local
+ * file picker and the server "Shared" library load). */
+function _clApplyLoadedText(name, text) {
+  window.checklistPath      = name;
+  window.checklistItems     = parseChecklistText(text);
+  window.checklistActiveRow = 0;
+  window.checklistShowRow   = 0;
+  window.checklistReturnRow = 0;
+  window.checklistLoaded    = true;
+  if (window.checklistItems.length > 0) window.checklistItems[0].timeIn = _nowStr();
+  window.checkEvents = [];
+  window.broadcastCheckEvent?.('replace', { events: [] });
+  _renderTable();
+  if (_clPanel) _clPanel.focus();
+  _clHostPush();   // hosting? share the freshly loaded file
+}
+
+/* Publish a locally loaded checklist to the server library so ANY other
+ * computer can pull it (Shared button) instead of hand-copying the file.
+ * Fire-and-forget: view-only clients get a 403 and that's fine. */
+function _clPublishShared(name, text) {
+  const base = String(name || 'checklist').replace(/\.txt$/i, '');
+  fetch('/api/checklists/' + encodeURIComponent(base), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  }).then(r => r.json()).then(j => {
+    if (j.ok) console.log('[Checklist] published to server library as', j.name);
+  }).catch(() => {});
+}
+
+/* "Shared" toolbar button: list the server's checklist library, one click
+ * loads. Anything anyone loaded locally on any computer is in here. */
+async function clOpenShared(anchorBtn) {
+  let j;
+  try { j = await (await fetch('/api/checklists')).json(); }
+  catch (e) { alert('Server not reachable.'); return; }
+  if (!j.ok) { alert(j.error || 'Failed to list shared checklists.'); return; }
+  if (!j.names || !j.names.length) {
+    alert('No shared checklists on the server yet.\nLoad a checklist locally on any computer and it is shared automatically.');
+    return;
+  }
+  document.getElementById('clSharedMenu')?.remove();
+  const m = document.createElement('div');
+  m.id = 'clSharedMenu';
+  m.style.cssText = 'position:fixed;z-index:10000;background:#1e2235;border:1px solid #4c5170;border-radius:6px;padding:4px;min-width:180px;max-height:60vh;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.5)';
+  const r = anchorBtn.getBoundingClientRect();
+  m.style.left = r.left + 'px';
+  m.style.top  = (r.bottom + 4) + 'px';
+  j.names.forEach(n => {
+    const b = document.createElement('div');
+    b.textContent = n;
+    b.style.cssText = 'padding:4px 10px;font-size:12px;color:#e6e6e6;cursor:pointer;border-radius:4px;white-space:nowrap';
+    b.onmouseenter = () => b.style.background = '#2a2f4a';
+    b.onmouseleave = () => b.style.background = '';
+    b.onclick = async () => {
+      m.remove();
+      if (window.checklistLoaded &&
+          !confirm('Load shared checklist "' + n + '"?\nThis replaces the current checklist.')) return;
+      try {
+        const g = await (await fetch('/api/checklists/' + encodeURIComponent(n))).json();
+        if (!g.ok) { alert(g.error || 'Failed to fetch checklist.'); return; }
+        _clApplyLoadedText(g.name + '.txt', g.text);
+        console.log('[Checklist] loaded shared checklist', g.name);
+      } catch (e) { alert('Failed to fetch checklist: ' + e.message); }
+    };
+    m.append(b);
+  });
+  document.body.append(m);
+  const close = (ev) => {
+    if (!m.contains(ev.target)) { m.remove(); document.removeEventListener('pointerdown', close, true); }
+  };
+  setTimeout(() => document.addEventListener('pointerdown', close, true));
+}
+
 function clOpenFile() {
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = '.txt';
   inp.onchange = () => {
     const f = inp.files?.[0]; if (!f) return;
-    window.checklistPath = f.name;
     const rd = new FileReader();
     rd.onload = () => {
-      window.checklistItems     = parseChecklistText(rd.result);
-      window.checklistActiveRow = 0;
-      window.checklistShowRow   = 0;
-      window.checklistReturnRow = 0;
-      window.checklistLoaded    = true;
-      if (window.checklistItems.length > 0) window.checklistItems[0].timeIn = _nowStr();
-      window.checkEvents = [];
-      window.broadcastCheckEvent?.('replace', { events: [] });
-      _renderTable();
-      if (_clPanel) _clPanel.focus();
-      _clHostPush();   // hosting? share the freshly loaded file
+      _clApplyLoadedText(f.name, rd.result);
+      _clPublishShared(f.name, rd.result);   // auto-share: this computer becomes a supplier
 
       // Offer to restore a saved snapshot (chk.json) for this checklist
       if (confirm('Load a saved checkpoint (.chk.json) to restore where you left off?\n(Cancel to start fresh)')) {
