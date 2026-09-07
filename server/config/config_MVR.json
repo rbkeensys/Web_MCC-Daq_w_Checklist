@@ -310,7 +310,7 @@
   "digitalOutputs": null,
   "analogOutputs": null,
   "thermocouples": null,
-  "logMode": "full",
+  "logMode": "eco",
   "logHz": 1.0,
   "logRetainDays": 30,
   "viewOnlyUsers": [],
