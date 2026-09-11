@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bokeh_viewer.py v1.0.1 -- axes follow only VISIBLE series (invisible clock counters at ~1e8 were setting the y-scale). Prev v1.0.0 -- browser-based log viewer (russ 9/11: "instead of
+"""bokeh_viewer.py v1.1.0 -- legend of visible series + app-chart colors from the bundle. Prev v1.0.1 -- axes follow only VISIBLE series (invisible clock counters at ~1e8 were setting the y-scale). Prev v1.0.0 -- browser-based log viewer (russ 9/11: "instead of
 matplotlib how about bokeh?").
 
 Renders a session CSV as a standalone interactive HTML page and opens it in
@@ -24,7 +24,7 @@ import os
 import sys
 import webbrowser
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 EMBED_FULL_ROWS = 120_000   # embed full resolution up to this many rows
 OVERVIEW_POINTS = 4_000     # decimation target beyond that
@@ -45,25 +45,26 @@ def parse_args(argv):
 
 
 def load_bundle(scales_path):
-    names, scales, charted = {}, {}, []
+    names, scales, charted, colors = {}, {}, [], {}
     if not scales_path or not os.path.isfile(scales_path):
-        return names, scales, charted
+        return names, scales, charted, colors
     try:
         raw = json.load(open(scales_path, encoding="utf-8"))
     except Exception:
-        return names, scales, charted
+        return names, scales, charted, colors
     if not isinstance(raw, dict):
-        return names, scales, charted
+        return names, scales, charted, colors
     if "scales" in raw or "names" in raw or "charted" in raw:
         names = {k: str(v) for k, v in (raw.get("names") or {}).items()}
         charted = [str(c) for c in (raw.get("charted") or [])]
         scales = raw.get("scales") or {}
+        colors = {k: str(v) for k, v in (raw.get("colors") or {}).items()}
     else:
         scales = raw
     for col, spec in list(scales.items()):
         if isinstance(spec, dict) and spec.get("label") and col not in names:
             names[col] = str(spec["label"])
-    return names, scales, charted
+    return names, scales, charted, colors
 
 
 def load_csv(path):
@@ -126,7 +127,8 @@ def main():
     try:
         from bokeh.plotting import figure, output_file, save
         from bokeh.models import (ColumnDataSource, MultiChoice, CustomJS,
-                                  HoverTool, Button, DataRange1d)
+                                  HoverTool, Button, DataRange1d,
+                                  Legend, LegendItem)
         from bokeh.layouts import column, row
         from bokeh.palettes import Category20_20
     except ImportError:
@@ -135,7 +137,7 @@ def main():
         lv = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log_viewer.py")
         os.execv(sys.executable, [sys.executable, lv] + sys.argv[1:])
 
-    names, scales, charted = load_bundle(scales_path)
+    names, scales, charted, colors = load_bundle(scales_path)
     t, cols = load_csv(initial)
 
     # display transform (chart-style scaled view, like the Tk viewer)
@@ -166,18 +168,27 @@ def main():
 
     charted_set = [c for c in charted if c in cols]
     default_visible = charted_set or list(cols)[:8]
+    label_of = lambda c: names.get(c, c)
     renderers = {}
+    legend_items = {}
     for i, col in enumerate(cols):
+        # APP-CHART COLORS (1.1.0): the bundle carries each charted series'
+        # color from the app, so the viewer matches the dashboard; everything
+        # else cycles the palette.
         renderers[col] = p.line(
             "t", col, source=src, name=col,
             line_width=1.3,
-            color=Category20_20[i % 20],
+            color=colors.get(col, Category20_20[i % 20]),
             visible=(col in default_visible))
+        legend_items[col] = LegendItem(label=label_of(col),
+                                       renderers=[renderers[col]],
+                                       visible=(col in default_visible))
+    legend = Legend(items=list(legend_items.values()),
+                    label_text_font_size="9pt", spacing=0, padding=4)
+    p.add_layout(legend, "right")
     p.add_tools(HoverTool(
         tooltips=[("series", "$name"), ("t", "$x{0.00}"), ("value", "$y{0.000}")],
         line_policy="nearest"))
-
-    label_of = lambda c: names.get(c, c)
     options = sorted(((c, label_of(c)) for c in cols), key=lambda x: x[1].lower())
     picker = MultiChoice(
         value=default_visible,
@@ -185,8 +196,8 @@ def main():
         title="Visible series (type to search %d available)" % len(cols),
         sizing_mode="stretch_width")
     picker.js_on_change("value", CustomJS(
-        args=dict(rmap=renderers),
-        code="for (const [c, r] of Object.entries(rmap)) r.visible = this.value.includes(c);"))
+        args=dict(rmap=renderers, imap=legend_items),
+        code="for (const [c, r] of Object.entries(rmap)) { const on = this.value.includes(c); r.visible = on; imap[c].visible = on; }"))
 
     btn_charted = Button(label="Charted", width=90)
     btn_charted.js_on_click(CustomJS(
