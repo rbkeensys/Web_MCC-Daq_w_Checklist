@@ -4,7 +4,8 @@ rem web app's Viewer button opens the log viewer ON THIS COMPUTER.
 rem Registers the mccviewer: URL protocol (current user only, no admin) to run
 rem server\viewer_local_launch.py with the first python on PATH.
 rem Requirements on this computer: python with tkinter + matplotlib
-rem   (pip install matplotlib), and this repo checked out.
+rem   (pip install bokeh   -- or matplotlib for the old Tk viewer fallback),
+rem   and this repo checked out.
 
 setlocal
 set "SCRIPT=%~dp0..\server\viewer_local_launch.py"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""viewer_local_launch.py v1.2.0 -- origin probe + LAN fallback (tunnel origin is Access-guarded: browser has the cookie, we get 403). Prev v1.1.0 -- bundle-fetch retries (browser posts it in parallel). Prev v1.0.0 -- mccviewer: protocol handler.
+"""viewer_local_launch.py v1.3.0 -- launches bokeh_viewer.py (browser-based; falls back to Tk log_viewer when bokeh missing). Prev v1.2.0 -- origin probe + LAN fallback (tunnel origin is Access-guarded: browser has the cookie, we get 403). Prev v1.1.0 -- bundle-fetch retries (browser posts it in parallel). Prev v1.0.0 -- mccviewer: protocol handler.
 
 Opens the MCC log viewer ON THE COMPUTER WHERE THE BROWSER BUTTON WAS
 CLICKED (russ 9/11: "have it open where clicked"). The web app's Viewer
@@ -26,7 +26,7 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 
 def fail(msg):
@@ -131,7 +131,12 @@ def main():
             else:
                 time.sleep(0.7)
 
-    viewer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log_viewer.py")
+    # BOKEH FIRST (v1.3.0, russ): the browser-based viewer (wheel zoom, hover,
+    # searchable series picker). bokeh_viewer itself execs log_viewer.py when
+    # bokeh is not installed, so machines without it keep working.
+    viewer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bokeh_viewer.py")
+    if not os.path.isfile(viewer):
+        viewer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log_viewer.py")
     args = [sys.executable, viewer, main_csv]
     if scales:
         args += ["--scales", scales]
