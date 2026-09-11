@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bokeh_viewer.py v1.0.0 -- browser-based log viewer (russ 9/11: "instead of
+"""bokeh_viewer.py v1.0.1 -- axes follow only VISIBLE series (invisible clock counters at ~1e8 were setting the y-scale). Prev v1.0.0 -- browser-based log viewer (russ 9/11: "instead of
 matplotlib how about bokeh?").
 
 Renders a session CSV as a standalone interactive HTML page and opens it in
@@ -24,7 +24,7 @@ import os
 import sys
 import webbrowser
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 EMBED_FULL_ROWS = 120_000   # embed full resolution up to this many rows
 OVERVIEW_POINTS = 4_000     # decimation target beyond that
@@ -126,7 +126,7 @@ def main():
     try:
         from bokeh.plotting import figure, output_file, save
         from bokeh.models import (ColumnDataSource, MultiChoice, CustomJS,
-                                  HoverTool, Button)
+                                  HoverTool, Button, DataRange1d)
         from bokeh.layouts import column, row
         from bokeh.palettes import Category20_20
     except ImportError:
@@ -150,7 +150,13 @@ def main():
     data.update(cols)
     src = ColumnDataSource(data=data)
 
+    # AUTO Y-SCALE (1.0.1, russ: "y values go into the millions"): the default
+    # range follows ALL renderers including the ~470 invisible ones -- the
+    # clock counters (sysMs ~1e8) set the scale and flatline everything real.
+    # only_visible makes both axes track just the series you have on.
     p = figure(sizing_mode="stretch_both",
+               y_range=DataRange1d(only_visible=True),
+               x_range=DataRange1d(only_visible=True),
                title=os.path.basename(initial),
                x_axis_label="t (s)",
                tools="pan,wheel_zoom,box_zoom,reset,save",
