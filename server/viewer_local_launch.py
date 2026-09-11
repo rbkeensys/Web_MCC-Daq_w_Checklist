@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""viewer_local_launch.py v1.0.0 -- mccviewer: protocol handler.
+"""viewer_local_launch.py v1.1.0 -- bundle-fetch retries (browser posts it in parallel). Prev v1.0.0 -- mccviewer: protocol handler.
 
 Opens the MCC log viewer ON THE COMPUTER WHERE THE BROWSER BUTTON WAS
 CLICKED (russ 9/11: "have it open where clicked"). The web app's Viewer
@@ -26,7 +26,7 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 def fail(msg):
@@ -101,13 +101,21 @@ def main():
         fail("session %s holds no CSV files" % sess["name"])
     main_csv = max(csvs, key=os.path.getsize)
 
+    # The browser posts the bundle IN PARALLEL with invoking us (the
+    # protocol navigation must fire first to keep Chrome's user-activation),
+    # so the bundle may land a moment after we start: retry briefly.
     scales = None
-    try:
-        dest = os.path.join(base, "_viewer_scales.json")
-        download(origin + "/api/logs/viewer_scales", dest, "scales bundle")
-        scales = dest
-    except Exception as e:
-        print("[viewer-launch] no scales bundle (%s) -- opening plain" % e)
+    dest = os.path.join(base, "_viewer_scales.json")
+    for attempt in range(6):
+        try:
+            download(origin + "/api/logs/viewer_scales", dest, "scales bundle")
+            scales = dest
+            break
+        except Exception as e:
+            if attempt == 5:
+                print("[viewer-launch] no scales bundle (%s) -- opening plain" % e)
+            else:
+                time.sleep(0.7)
 
     viewer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log_viewer.py")
     args = [sys.executable, viewer, main_csv]
