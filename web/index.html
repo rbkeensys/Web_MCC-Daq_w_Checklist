@@ -28,26 +28,31 @@
       <button id="gridBtn" class="btn" title="Layout grid settings (snap-to-grid for widget placement)">⊞ Grid</button>
       <button id="editConfig" class="btn">Config</button>
       <button id="zeroAI" class="btn" title="Zero AI Channels" onclick="openZeroAIDialog()">⚡ Zero</button>
-      <button id="calibrateAI" class="btn" title="Calibrate AI Channels" onclick="openCalibrateAIDialog()">📐 Calibrate</button>
-      <button id="editPID" class="btn">PID</button>
-      <button id="editVFD" class="btn">MOD Drv</button>
-      <button id="editScales" class="btn">Scales</button>
       <button id="editExpr" class="btn">Expressions</button>
-      <button id="editSim" class="btn" title="Simulator: simulate inputs / hardware-in-the-loop">Sim</button>
-      <button id="exprHelp" class="btn" title="Expression Language Reference">❓ Expr Help</button>
-      <button id="editScript" class="btn">Script</button>
       <button id="clToggleBtn" class="btn" title="Open Checklist Editor">📋 CL Editor</button>
-      <button id="saveLayout" class="btn">Save Layout</button>
-      <button id="loadLayout" class="btn">Load Layout</button>
-      <button id="sharedLayouts" class="btn" title="Browse layouts published on the server — pick one to apply (available to every visitor, including view-only)">Layouts ▾</button>
-      <button id="openLogBtn" type="button" class="btn">Open Log</button>
-      <button id="viewerBtn" type="button" class="btn" title="Launch the standalone Python log viewer — handles huge files the browser can't">🖥 Viewer</button>
-      <button id="mergeChkBtn" type="button" class="btn" title="Merge a session's chk.json check events into its CSV (recovery for sessions where the server was terminated)">🔗 Merge chk</button>
+      <button id="tbLayoutBtn" type="button" class="btn" title="Save / load this browser's layout, or browse the server layout library">Layout ▾</button>
+      <button id="tbMoreBtn" type="button" class="btn" title="Everything else, grouped by function">☰ Menu</button>
       <button id="closeLogBtn" type="button" class="btn">Start New Log</button>
-      <button id="resetTotalsBtn" type="button" class="btn" title="Zero the machine lifetime totals (energy kWh / product L). The current values are archived first to a dated machineTotals file for later review.">&#9100; Reset Totals</button>
       <button id="closeUiBtn" type="button" class="btn" title="Close THIS browser on the server machine (the rig kiosk display)">Close UI</button>
-      <button id="fitBtn" type="button" class="btn" title="Zoom the whole dashboard to fit the window (applies while locked; released during layout editing)">&#10530; Fit</button>
+      <button id="fitBtn" type="button" class="btn" title="Zoom the whole dashboard to fit the window (applies while locked; released during layout editing)">⤢ Fit</button>
       <button id="tbHideBtn" type="button" class="btn" title="Hide this menu bar &mdash; a small &#9662; tab at the top-right brings it back">&#9652;</button>
+      <!-- MENU-ONLY buttons (2.1.110): hidden here; moved into the dropdown
+           panels by initTopbarMenus() at boot so all existing wiring survives.
+           If JS ever fails to move them they stay hidden, never mislaid. -->
+      <button id="calibrateAI" class="btn tb-menu-only" title="Calibrate AI Channels" onclick="openCalibrateAIDialog()">📐 Calibrate</button>
+      <button id="exprHelp" class="btn tb-menu-only" title="Expression Language Reference">❓ Expr Help</button>
+      <button id="editSim" class="btn tb-menu-only" title="Simulator: simulate inputs / hardware-in-the-loop">Sim</button>
+      <button id="editVFD" class="btn tb-menu-only">MOD Drv</button>
+      <button id="editScales" class="btn tb-menu-only">Scales</button>
+      <button id="editPID" class="btn tb-menu-only">PID</button>
+      <button id="editScript" class="btn tb-menu-only">Script</button>
+      <button id="viewerBtn" type="button" class="btn tb-menu-only" title="Launch the standalone Python log viewer — handles huge files the browser can't">🖥 Viewer</button>
+      <button id="openLogBtn" type="button" class="btn tb-menu-only">Open Log</button>
+      <button id="mergeChkBtn" type="button" class="btn tb-menu-only" title="Merge a session's chk.json check events into its CSV (recovery for sessions where the server was terminated)">🔗 Merge chk</button>
+      <button id="saveLayout" class="btn tb-menu-only">Save Layout</button>
+      <button id="loadLayout" class="btn tb-menu-only">Load Layout</button>
+      <button id="sharedLayouts" class="btn tb-menu-only" title="Browse layouts published on the server — pick one to apply (available to every visitor, including view-only)">Layouts ▾</button>
+      <button id="resetTotalsBtn" type="button" class="btn tb-menu-only" title="Zero the machine lifetime totals (energy kWh / product L). The current values are archived first to a dated machineTotals file for later review.">&#9100; Reset Totals</button>
     </div>
   </header>
 
