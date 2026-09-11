@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""viewer_local_launch.py v1.1.0 -- bundle-fetch retries (browser posts it in parallel). Prev v1.0.0 -- mccviewer: protocol handler.
+"""viewer_local_launch.py v1.2.0 -- origin probe + LAN fallback (tunnel origin is Access-guarded: browser has the cookie, we get 403). Prev v1.1.0 -- bundle-fetch retries (browser posts it in parallel). Prev v1.0.0 -- mccviewer: protocol handler.
 
 Opens the MCC log viewer ON THE COMPUTER WHERE THE BROWSER BUTTON WAS
 CLICKED (russ 9/11: "have it open where clicked"). The web app's Viewer
@@ -26,7 +26,7 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 
 def fail(msg):
@@ -67,10 +67,24 @@ def main():
         origin = "http://" + origin
     print("[viewer-launch] v%s  server: %s" % (__version__, origin))
 
-    try:
-        j = get_json(origin + "/api/logs/sessions")
-    except Exception as e:
-        fail("cannot reach the server: %s" % e)
+    # ORIGIN PROBE + LAN FALLBACK (v1.2.0): browsing via the Cloudflare
+    # tunnel (https://mvr1.keenmvr.com) hands us that origin, but Access
+    # guards it -- the browser has the auth cookie, this bare client gets
+    # 403. Probe the given origin; on failure walk the fallbacks (the rig
+    # LAN address works unauthenticated whenever the laptop is at the shop).
+    candidates = [origin, "http://192.168.1.104:8000", "http://localhost:8000"]
+    j = None
+    for cand in candidates:
+        try:
+            j = get_json(cand + "/api/logs/sessions")
+            if cand != origin:
+                print("[viewer-launch] origin unreachable/forbidden -- using %s" % cand)
+            origin = cand
+            break
+        except Exception as e:
+            print("[viewer-launch] %s: %s" % (cand, e))
+    if j is None:
+        fail("cannot reach the server on any address (tunnel needs browser auth; LAN needs the laptop at the shop)")
     sess = None
     act = j.get("active")
     if act and any(f.endswith(".csv") for f in act.get("files", [])):
