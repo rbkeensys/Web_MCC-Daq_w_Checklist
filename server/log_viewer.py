@@ -2,7 +2,7 @@
 # log_viewer.py
 """
 MCC Log Viewer — standalone session.csv viewer for HUGE log files.
-Version: 1.2.0 (2026-06-11) — friendly signal names + chart-driven defaults:
+Version: 1.3.0 (2026-09-11) — MAX_SERIES_COLS 64 -> 600 (the 64 cap dropped most of the MVR log: no TCs, no y* mux, no PI duties — only the first 64 columns ever appeared). Prev 1.2.0 (2026-06-11) — friendly signal names + chart-driven defaults:
   the launch bundle now carries configured names (LOX P, Chamber T, …) for
   every signal and the list of columns shown on the app's charts. Series
   checkboxes and the legend use the names, and exactly the charted signals
@@ -61,7 +61,7 @@ __version__ = "1.2.0"
 INDEX_EVERY         = 2000    # one (byte_offset, t, row#) index entry per N rows
 MAX_OVERVIEW_POINTS = 4000    # decimated points per series for the full view
 MAX_WINDOW_POINTS   = 20000   # max points per series when zoomed into a window
-MAX_SERIES_COLS     = 64      # safety cap on number of numeric columns tracked
+MAX_SERIES_COLS     = 600     # cap on numeric columns tracked. 64 (russ 9/11) silently DROPPED everything after the first 64 CSV columns -- the MVR log's 492 columns lost all TCs, y* mux values and PI duties (the list showed only channels/DOs/setpoints). 600 covers the full MVR set; overview RAM ~= cols x 4000 pts, fine at this size
 SAMPLE_LINES        = 200     # lines sampled to estimate total row count
 
 try:
