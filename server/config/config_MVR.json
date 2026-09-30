@@ -183,12 +183,12 @@
           "pwmPeriodMs": 1000.0
         },
         {
-          "name": "DO7",
+          "name": "SprayPump",
           "invert": false,
           "normallyOpen": true,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": false,
+          "include": true,
           "logicElement": null,
           "mode": "toggle",
           "pwmPeriodMs": 1000.0
