@@ -190,8 +190,8 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle",
-          "pwmPeriodMs": 1000.0
+          "mode": "pwm",
+          "pwmPeriodMs": 5000
         }
       ],
       "analogOutputs": [
