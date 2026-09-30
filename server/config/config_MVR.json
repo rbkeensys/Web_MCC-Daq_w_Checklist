@@ -161,7 +161,7 @@
           "pwmPeriodMs": 1000.0
         },
         {
-          "name": "HeaterEnable",
+          "name": "MistPumpEnable",
           "invert": true,
           "normallyOpen": true,
           "momentary": false,
