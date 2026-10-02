@@ -183,7 +183,7 @@
           "pwmPeriodMs": 1000.0
         },
         {
-          "name": "SprayPump",
+          "name": "MistValve",
           "invert": false,
           "normallyOpen": true,
           "momentary": false,
