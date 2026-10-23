@@ -172,14 +172,14 @@
           "pwmPeriodMs": 1000.0
         },
         {
-          "name": "Alarm",
+          "name": "MakeupHtr2",
           "invert": true,
           "normallyOpen": true,
           "momentary": false,
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle",
+          "mode": "pwm",
           "pwmPeriodMs": 1000.0
         },
         {
@@ -269,9 +269,9 @@
           "cutoffHz": 0.02
         },
         {
-          "include": false,
+          "include": true,
           "ch": 4,
-          "name": "CondTemp",
+          "name": "MakeupHtr2",
           "type": "K",
           "offset": 0.0,
           "cutoffHz": 0.02
