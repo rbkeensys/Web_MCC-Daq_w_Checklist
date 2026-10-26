@@ -161,7 +161,7 @@
           "pwmPeriodMs": 1000.0
         },
         {
-          "name": "MistPumpEnable",
+          "name": "CleanValves",
           "invert": true,
           "normallyOpen": true,
           "momentary": false,
