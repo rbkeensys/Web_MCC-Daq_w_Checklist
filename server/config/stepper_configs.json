@@ -7,7 +7,7 @@
       "full_step_deg": 1.8,
       "peak_current_a": 2,
       "reverse": false,
-      "max_rpm": 720,
+      "max_rpm": 900,
       "accel": 200,
       "decel": 200,
       "standstill_current_pct": 0,
