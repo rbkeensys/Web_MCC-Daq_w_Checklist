@@ -1,0 +1,255 @@
+Date: ____________9-4-2026______________________
+Time: ________________________________________
+Place: _________Glen Rose_____________
+Conditions: ____________________________________
+_______Purpose / Objectives ____Test Fire Mixed LOX/CH4 with Short Engine_________
+___Assuming He Press and Purge, Pyro Ignition ___
+___LOX Conditions line from pump to engine, Nitrogen dilutes mix in mini-dewar
+
+CREW: ___TD__,  PAD1___
+
+ITEMS IN ITALLICS  OR  GRAY  TEXT ARE INFORMATIONAL ONLY AND NOT TO BE CALLED OUT
+5|TD  |Load current CHECKLIST   "checklist_MIX_Testing.txt"  if you haven't done so    
+10|TD  |Comm Check,  PAD1                                                               
+15|PAD1|Verify all containment ready, blocks and shields                                
+20|TD  |Verify  'Ignition ARM'   is off                                                 
+
+      TEST will have previously started Command and Control App
+25|PAD1|Has tightness check been completed                                              
+30|PAD1|Verify LOX, Fuel and Nitrogen Vents Closed, Liquid Lines Open, Pressure Builders
+35|PAD1|Verify Helium Bottle Valve Closed                                               
+40|PAD1|Verify Helium Regulator Fully OFF                                               
+======================= PRE-TEST CHECKS ==================================================
+45|TD  |On control app restart log, note name ______________________________            
+50|PAD1|Verify the following (PAGE2 of control panel):                                  
+55|    |       S1 - LOX Fill                                                            
+60|    |       S2 - Fuel Fill                                                           
+65|    |       S3 - MIX Into Engine                                                     
+70|    |       S4 - Run Tank Vent                                                       
+75|    |       S5 - Condition Vent                                                      
+80|    |       S6 - LN2 Dilute                                                          
+85|    |       S7 - MIX Out                                                             
+90|    |       S8 - Helium                                                              
+95|    |       S9 - LOX Condition                                                       
+100|    |       S10 - LN2 Vent                                                           
+105|    |       Pump Motor                                                               
+110|TD  |Zero Pressure Transducers,    LOX Zero ____________,  Fuel Zero _________       
+115|PAD1|Disconnect Igniter, connect indicator                                           
+120|TD  |Turn on    'Ignition ARM'                                                       
+125|PAD1|Verify igniter with indicator      (TD FLASH IGNITER)                           
+130|TD  |Turn off   'Ignition ARM'                                                       
+135|PAD1|Connect Igniter                                                                 
+140|PAD1|Verify camera positions                                                         
+145|PAD1|Open Helium Bottle Valve, report pressure ________________________              
+150|PAD1|Set Helium regulator to : _____55_____psi                                       
+155|PAD1|Turn gaseous Oxygen to pump ON                                                  
+160|PAD1|Retreat to safe position                                                        
+=============================== START HAZARDOUS OPS ====================================
+=========================== BEGIN CONDITIONING MIX FILL LINE===============================
+165|TD  |Turn ON    "S9 - LOX Condition"                                                 
+170|TD  |Wait for liquid to show out of   S4 - Engine Vent                               
+175|TD  |Switch on LOX Maintain                                                          
+=========================================================================================
+=========================== BEGIN CONDITIONING LN2 =======================================
+180|TD  |Turn ON   "S10 - LN2 Condition Vent"                                            
+185|TD  |Wait for liquid to show out of S10 - Vent                                       
+190|TD  |Switch on LN2 Maintain                                                          
+==========================================================================================
+============================= PRELIMINARY FUEL CONDITION =================================
+195|TD  |Turn on  "S2 - Fuel Direct"                                                     
+200|TD  |Wait for liquid to show in mix tank                                             
+205|TD  |Flush Mix tank with LN2, use     "S6 - Dilute", short bursts, keep as gas!      
+==========================================================================================
+===================================== FILL MIX TANK ========================================
+210|TD  |Verify desired LOX amount variable is set to   600 grams                        
+215|TD  |Turn ON   "S1 - Fill LOX "                                                      
+220|TD  |Once LOX is filled, turn    OFF    "S1 - Fill LOX"                            
+225|TD|Turn    ON   "Load Prop"   
+230|TD  |Turn on Pump and pump out mix tank                                              
+235|TD|Turn   OFF    "Load Prop"
+240|TD  |Press    "Backflush Eng"   to clear engine and line                             
+245|TD  |Set desired LOX amount to test condition 200 grams,   verify_________g          
+250|TD  |Turn ON   "S1 - Fill LOX",   wait for quantity to load                          
+255|TD  |Turn ON   "Fill Fuel",  wait for gas to increase weight,   press "Gas Offset"   
+260|TD  |Verify load matches desired MR                                                  
+265|TD  |Turn OFF   "S1 Fill LOX"                                                        
+270|TD  |Turn ON   "Load Prop"                                                           
+275|TD  |Turn ON  PUMP,    wait for load to finish                                       
+280|TD  |Turn OFF Pump                                                                   
+285|TD  |Turn OFF "Load Prop"                                                            
+290|TD  |Press  "Backflush Line"                                                         
+==========================================================================================
+============================== START TEST SEQUENCE =======================================
+295|PAD1|Start Recording CAM1 (normal speed)                                             
+300|TD  |Announce   'ARMING THE SYSTEM'                                                  
+305|TD  |Press   'Ignition ARM'                                                          
+310|PAD1|Start High Speed Recording                                                      
+================================ FIRING SEQUENCE ========================================
+315|TD  |Press    RUN TEST   Button                                                      
+Test is automated, purges lines, pressurizes run tank and runs test.
+NOTE: the automated test DOES NOT ARM ignition!
+
+===================== APPENDIX - A       EMERGENCY MIX DUMP ===============================
+320|TD  |TURN OFF ALL BUT LN2 Cond                                                       
+325|TD  |Turn   ON    "S6 Dilute"                                                        
+330|TD  |Wait for double the weight                                                      
+335|TD  |Turn  ON    "S7 Chill Out"                                                      
+340|TD  |Turn  ON  Pump                                                                  
+345|TD  |When weight is at minimum, turn   OFF   Pump                                    
+350|    |Turn OFF   "S7 Chill Out"                                                       
+ GOTO APPENDIX B  - SCRUB
+ 
+===================== APPENDIX - B       SCRUB / TEST COMPLETE ===============================
+355|TD  |Press  'Purge'                                                                  
+360|TD  |Turn on   "S6 Dilute"    Wait for 2X weight dilution                            
+365|TD  |Turn OFF   'Ignition ARM'                                                       
+370|    |Turn on   "S6 Dilute"   again and double the weight                             
+375|TD  |Announce when safe to approach                                                  
+380|PAD1|All dewars:  Turn off liquid lines, pressure builder and gas use                
+385|TD  |All dewars:   Turn on vents                                                     
+=========================================================================================
+=========================== POST TEST TASKS ==============================================
+390|PAD1|Open LN2 Dewar Vent                                                             
+395|PAD1|Close LN2 Dewar Pressure-builder                                                
+400|PAD1|Open LOX Dewar Vent                                                             
+405|PAD1|Close LOX Dewar Pressure-builder                                                
+410|PAD1|Open LNG Dewar Vent                                                             
+415|PAD1|Close LNG Dewar Pressure-builder                                                
+420|PAD1|Turn of Helium Regulator                                                        
+425|PAD1|Report final Helium pressure __________________                                 
+430|PAD1|Close  Helium  bottle valve                                                     
+435|ALL |TURN OFF RADIOS                                                                 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

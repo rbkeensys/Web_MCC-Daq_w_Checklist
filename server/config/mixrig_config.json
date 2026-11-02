@@ -1,19 +1,23 @@
 {
   "boards1608": [
     {
-      "boardNum": 0,
-      "sampleRateHz": 160.0,
+      "boardNum": 3,
+      "sampleRateHz": 160,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
       "analogs": [
         {
           "name": "AI0",
-          "slope": 25.0,
+          "slope": 25,
           "offset": -0.683135986328125,
           "cutoffHz": 0.2,
           "units": "psi",
-          "include": true
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI1",
@@ -21,55 +25,83 @@
           "offset": 17.055130004882812,
           "cutoffHz": 0.2,
           "units": "psi",
-          "include": true
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI2",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 1.0,
+          "slope": 1,
+          "offset": 0,
+          "cutoffHz": 1,
           "units": "psi",
-          "include": true
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI3",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 1.0,
+          "slope": 1,
+          "offset": 0,
+          "cutoffHz": 1,
           "units": "psi",
-          "include": true
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "Ch P",
           "slope": 50.17183999499474,
           "offset": -27.436806323434716,
-          "cutoffHz": 0.0,
+          "cutoffHz": 0,
           "units": "psi",
-          "include": true
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI5",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
+          "slope": 1,
+          "offset": 0,
+          "cutoffHz": 0,
           "units": "",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI6",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
+          "slope": 1,
+          "offset": 0,
+          "cutoffHz": 0,
           "units": "",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI7",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
+          "slope": 1,
+          "offset": 0,
+          "cutoffHz": 0,
           "units": "",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         }
       ],
       "digitalOutputs": [
@@ -77,81 +109,89 @@
           "name": "S5_MIXNearVent",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "S1_LOXOUT",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "S6_LN2In",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "S2_FuelOUT",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "S7_NearMIXOut",
           "normallyOpen": false,
           "momentary": true,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "momentary"
+          "mode": "momentary",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "S9_LOXChill",
           "normallyOpen": false,
           "momentary": true,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "momentary"
+          "mode": "momentary",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "S8_PURGE",
           "normallyOpen": false,
           "momentary": true,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "momentary"
+          "mode": "momentary",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "Igniter",
           "normallyOpen": false,
           "momentary": true,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "momentary"
+          "mode": "momentary",
+          "pwmPeriodMs": 1000
         }
       ],
       "analogOutputs": [
         {
           "name": "AO0",
-          "minV": 0.0,
-          "maxV": 10.0,
-          "startupV": 0.0,
+          "minV": 0,
+          "maxV": 10,
+          "startupV": 0,
           "include": true,
           "enable_gate": false,
           "enable_kind": "le",
@@ -159,19 +199,20 @@
         },
         {
           "name": "AO1",
-          "minV": 0.0,
-          "maxV": 10.0,
-          "startupV": 0.0,
+          "minV": 0,
+          "maxV": 10,
+          "startupV": 0,
           "include": true,
           "enable_gate": false,
           "enable_kind": "do",
           "enable_index": 0
         }
-      ]
+      ],
+      "counters": []
     },
     {
-      "boardNum": 2,
-      "sampleRateHz": 160.0,
+      "boardNum": 4,
+      "sampleRateHz": 160,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -180,65 +221,97 @@
           "name": "Scale",
           "slope": 123.39041416348212,
           "offset": -251.79958882492227,
-          "cutoffHz": 1.0,
+          "cutoffHz": 1,
           "units": "grams",
-          "include": true
+          "include": true,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI1",
-          "slope": 1.0,
-          "offset": 0.0,
+          "slope": 1,
+          "offset": 0,
           "cutoffHz": 0.1,
           "units": "psi",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI2",
-          "slope": 1.0,
-          "offset": 0.0,
+          "slope": 1,
+          "offset": 0,
           "cutoffHz": 0.1,
           "units": "psi",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI3",
-          "slope": 1.0,
-          "offset": 0.0,
+          "slope": 1,
+          "offset": 0,
           "cutoffHz": 0.1,
           "units": "psi",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI4",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
+          "slope": 1,
+          "offset": 0,
+          "cutoffHz": 0,
           "units": "",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI5",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
+          "slope": 1,
+          "offset": 0,
+          "cutoffHz": 0,
           "units": "",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI6",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
+          "slope": 1,
+          "offset": 0,
+          "cutoffHz": 0,
           "units": "",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         },
         {
           "name": "AI7",
-          "slope": 1.0,
-          "offset": 0.0,
-          "cutoffHz": 0.0,
+          "slope": 1,
+          "offset": 0,
+          "cutoffHz": 0,
           "units": "",
-          "include": false
+          "include": false,
+          "counter_num": null,
+          "pulses_per_unit": 1,
+          "counter_window_s": 1,
+          "counter_mode": "rate"
         }
       ],
       "digitalOutputs": [
@@ -246,81 +319,89 @@
           "name": "Spark",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "S4_RunTankVent",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "S3_PropMixLoad",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "S10_LN2CondVent",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "DO24",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "DO25",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "DO26",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         },
         {
           "name": "DO27",
           "normallyOpen": false,
           "momentary": false,
-          "actuationTime": 0.0,
+          "actuationTime": 0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "pwmPeriodMs": 1000
         }
       ],
       "analogOutputs": [
         {
           "name": "AO2",
-          "minV": 0.0,
-          "maxV": 10.0,
-          "startupV": 0.0,
+          "minV": 0,
+          "maxV": 10,
+          "startupV": 0,
           "include": true,
           "enable_gate": false,
           "enable_kind": "le",
@@ -328,21 +409,22 @@
         },
         {
           "name": "AO3",
-          "minV": 0.0,
-          "maxV": 10.0,
-          "startupV": 0.0,
+          "minV": 0,
+          "maxV": 10,
+          "startupV": 0,
           "include": true,
           "enable_gate": false,
           "enable_kind": "do",
           "enable_index": 0
         }
-      ]
+      ],
+      "counters": []
     }
   ],
   "boardsetc": [
     {
-      "boardNum": 1,
-      "sampleRateHz": 10.0,
+      "boardNum": 5,
+      "sampleRateHz": 10,
       "blockSize": 1,
       "enabled": false,
       "thermocouples": [
@@ -351,7 +433,7 @@
           "ch": 0,
           "name": "TC0",
           "type": "K",
-          "offset": 0.0,
+          "offset": 0,
           "cutoffHz": 0.1
         },
         {
@@ -359,7 +441,7 @@
           "ch": 1,
           "name": "TC1",
           "type": "K",
-          "offset": 0.0,
+          "offset": 0,
           "cutoffHz": 0.1
         },
         {
@@ -367,7 +449,7 @@
           "ch": 2,
           "name": "TC2",
           "type": "K",
-          "offset": 0.0,
+          "offset": 0,
           "cutoffHz": 0.1
         },
         {
@@ -375,7 +457,7 @@
           "ch": 3,
           "name": "TC3",
           "type": "K",
-          "offset": 0.0,
+          "offset": 0,
           "cutoffHz": 0.1
         },
         {
@@ -383,7 +465,7 @@
           "ch": 4,
           "name": "TC4",
           "type": "K",
-          "offset": 0.0,
+          "offset": 0,
           "cutoffHz": 0.1
         },
         {
@@ -391,7 +473,7 @@
           "ch": 5,
           "name": "TC5",
           "type": "T",
-          "offset": 0.0,
+          "offset": 0,
           "cutoffHz": 0.1
         },
         {
@@ -399,7 +481,7 @@
           "ch": 6,
           "name": "TC6",
           "type": "T",
-          "offset": 0.0,
+          "offset": 0,
           "cutoffHz": 0.1
         },
         {
@@ -407,10 +489,11 @@
           "ch": 7,
           "name": "TC7",
           "type": "T",
-          "offset": 0.0,
+          "offset": 0,
           "cutoffHz": 0.1
         }
-      ]
+      ],
+      "digitalInputs": []
     }
   ],
   "board1608": null,
