@@ -190,7 +190,7 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "pwm",
+          "mode": "toggle",
           "pwmPeriodMs": 5000
         }
       ],
