@@ -1,4 +1,12 @@
-"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.0.0 (russ 11/17).
+"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.1.0 (russ 11/17).
+
+v1.1.0: MEDIAN DESPIKE (russ 11/17 cal run "we had some weird jumps"): the sensor
+occasionally returns 1-2 polls of mid-range garbage (sight-tube multipath -- e.g.
+270 -> 293 -> 266 mm with a still surface). dist published is now the MEDIAN of
+the last medianN good readings (default 7 =~ 2.8 s at 400 ms polls): up to 3
+consecutive liars get voted out entirely; real level moves just arrive ~1.4 s
+late, nothing against the 25 s fusion tau. medianN=1 disables. raw_mm in status
+stays unfiltered for diagnostics.
 
 The radar (slave 1, 9600 N81, FC03 only) answers a 2-register read at 0x0000:
     reg0 = distance from the sensor face (mm), reg1 = range - distance.
@@ -31,7 +39,7 @@ import threading
 import time
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 try:
     import serial                       # pyserial
@@ -54,7 +62,7 @@ def _crc16(data: bytes) -> bytes:
 
 def default_config() -> dict:
     return {"enabled": False, "port": "", "pollMs": 400, "slave": 1,
-            "maxAgeS": 5.0, "blindMM": 201.0, "lostMM": 2999.0,
+            "maxAgeS": 5.0, "blindMM": 201.0, "lostMM": 2999.0, "medianN": 7,
             "distStatic": "radarDistMM", "ageStatic": "radarAgeS", "okStatic": "radarOK"}
 
 
@@ -97,6 +105,8 @@ class RadarLevelManager:
         cfg["pollMs"] = int(max(150, min(5000, int(cfg.get("pollMs") or 400))))
         cfg["slave"] = int(max(1, min(250, int(cfg.get("slave") or 1))))
         cfg["maxAgeS"] = float(max(1.0, min(60.0, float(cfg.get("maxAgeS") or 5.0))))
+        n = int(cfg.get("medianN") or 7)
+        cfg["medianN"] = max(1, min(15, n | 1))   # odd, 1..15 (1 = filter off)
         self._cfg = cfg
         self.save()
         self._restart()
@@ -200,6 +210,7 @@ class RadarLevelManager:
     def _run(self):
         ser = None
         next_retry = 0.0
+        window: list[float] = []   # last medianN GOOD readings (despike vote)
         while not self._stop.is_set():
             if ser is None:
                 if time.time() < next_retry:
@@ -235,7 +246,13 @@ class RadarLevelManager:
                         else:
                             if dist <= float(self._cfg["blindMM"]):
                                 self._st["blind"] += 1     # blind-zone clamp: real but pinned
-                            self._st["dist_mm"] = dist
+                            # MEDIAN DESPIKE: publish the median of the last
+                            # medianN good readings -- 1-3 poll multipath jumps
+                            # never reach the level law (v1.1.0)
+                            n = int(self._cfg.get("medianN") or 1)
+                            window.append(dist)
+                            del window[:-n]
+                            self._st["dist_mm"] = sorted(window)[len(window) // 2]
                             self._st["last_good"] = now
                     else:
                         self._st["bad"] += 1
