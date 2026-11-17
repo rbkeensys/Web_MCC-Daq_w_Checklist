@@ -1,4 +1,16 @@
-"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.2.0 (russ 11/17).
+"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.3.0 (russ 11/17).
+
+v1.3.0: JUMP-CANCEL offset tracker (russ 11/17: "subtracts the jump size and
+keeps going from what we know is correct" -- the empty-down jump went UP, kept
+TRACKING the inflow in parallel, then jumped back: an alternate-echo lock, the
+sensor rides a second reflection with a ~constant offset). A median-to-median
+step > jumpMM (default 10; physical max is ~0.6 mm/poll at 500 rpm) is
+impossible, so the step is absorbed into a running offset and the published
+level continues seamlessly from the last known-correct value -- still tracking
+real motion through the episode. The jump-back cancels the offset; any residual
+asymmetry leaks out at offsetLeakMMS (default 0.1 mm/s). Offset resets with the
+window on reconnect/dropout re-seed, and is reported in status as "offs_mm".
+jumpMM=0 disables. Chain: median -> jump-cancel -> slew limit.
 
 v1.2.0: SLEW LIMITER (russ 11/17 "if the height jumps that large amount you need
 to remove it from the level" -- a jump outlived the median window during the
@@ -48,7 +60,7 @@ import threading
 import time
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 try:
     import serial                       # pyserial
@@ -72,7 +84,7 @@ def _crc16(data: bytes) -> bytes:
 def default_config() -> dict:
     return {"enabled": False, "port": "", "pollMs": 400, "slave": 1,
             "maxAgeS": 5.0, "blindMM": 201.0, "lostMM": 2999.0, "medianN": 7,
-            "maxSlewMMS": 6.0,
+            "maxSlewMMS": 6.0, "jumpMM": 10.0, "offsetLeakMMS": 0.1,
             "distStatic": "radarDistMM", "ageStatic": "radarAgeS", "okStatic": "radarOK"}
 
 
@@ -85,7 +97,8 @@ class RadarLevelManager:
         self._path: Path | None = None
         self._st = {"connected": False, "port": None, "err": None,
                     "polls": 0, "bad": 0, "lost": 0, "blind": 0,
-                    "last_rx": 0.0, "last_good": 0.0, "dist_mm": None, "raw_mm": None}
+                    "last_rx": 0.0, "last_good": 0.0, "dist_mm": None, "raw_mm": None,
+                    "offs_mm": 0.0}
 
     # ---------------- config ----------------
     def load(self, path: Path):
@@ -118,6 +131,8 @@ class RadarLevelManager:
         n = int(cfg.get("medianN") or 7)
         cfg["medianN"] = max(1, min(15, n | 1))   # odd, 1..15 (1 = filter off)
         cfg["maxSlewMMS"] = float(max(0.0, min(100.0, float(cfg.get("maxSlewMMS", 6.0)))))
+        cfg["jumpMM"] = float(max(0.0, min(500.0, float(cfg.get("jumpMM", 10.0)))))
+        cfg["offsetLeakMMS"] = float(max(0.0, min(10.0, float(cfg.get("offsetLeakMMS", 0.1)))))
         self._cfg = cfg
         self.save()
         self._restart()
@@ -173,6 +188,7 @@ class RadarLevelManager:
                     "err": self._st["err"], "polls": self._st["polls"], "bad": self._st["bad"],
                     "lost_echo": self._st["lost"], "blind": self._st["blind"],
                     "dist_mm": self._st["dist_mm"], "raw_mm": self._st["raw_mm"],
+                    "offs_mm": self._st.get("offs_mm", 0.0),
                     "rx_age_s": (round(now - self._st["last_rx"], 1) if self._st["last_rx"] else None),
                     "good_age_s": (round(now - self._st["last_good"], 1) if self._st["last_good"] else None)}
 
@@ -224,6 +240,8 @@ class RadarLevelManager:
         window: list[float] = []   # last medianN GOOD readings (despike vote)
         pub: float | None = None   # slew-limited published distance
         pub_t = 0.0                # time of the previous publish (slew dt)
+        prev_med: float | None = None  # previous median (jump-cancel step detect)
+        offs = 0.0                 # running alternate-echo offset (subtracted)
         while not self._stop.is_set():
             if ser is None:
                 if time.time() < next_retry:
@@ -264,17 +282,36 @@ class RadarLevelManager:
                             window.append(dist)
                             del window[:-n]
                             med = sorted(window)[len(window) // 2]
+                            gap = now - (self._st["last_good"] or 0.0)
+                            if gap > 5.0:          # dropout: no continuity claim
+                                prev_med, offs, pub = None, 0.0, None
+                            # JUMP-CANCEL (v1.3.0): a med-to-med step beyond
+                            # jumpMM is physically impossible (alternate-echo
+                            # lock) -- absorb it into the offset so the level
+                            # keeps going from the last known-correct value and
+                            # still tracks real motion; the jump-back cancels
+                            # it, leak bleeds any residual asymmetry.
+                            jump = float(self._cfg.get("jumpMM") or 0.0)
+                            if jump > 0.0 and prev_med is not None:
+                                step = med - prev_med
+                                if abs(step) > jump:
+                                    offs += step
+                                leak = float(self._cfg.get("offsetLeakMMS") or 0.0) \
+                                    * max(0.0, now - pub_t)
+                                offs -= max(-leak, min(leak, offs))
+                            prev_med = med
+                            corr = med - offs
                             # SLEW LIMITER (v1.2.0): the level physically moves
                             # <= ~2.5 mm/s -- crush any surviving jump to a
-                            # maxSlewMMS crawl; re-seed after a >5 s good-gap
+                            # maxSlewMMS crawl
                             slew = float(self._cfg.get("maxSlewMMS") or 0.0)
-                            gap = now - (self._st["last_good"] or 0.0)
-                            if pub is None or slew <= 0.0 or gap > 5.0:
-                                pub = med
+                            if pub is None or slew <= 0.0:
+                                pub = corr
                             else:
                                 lim = slew * max(0.0, now - pub_t)
-                                pub += max(-lim, min(lim, med - pub))
+                                pub += max(-lim, min(lim, corr - pub))
                             pub_t = now
+                            self._st["offs_mm"] = round(offs, 1)
                             self._st["dist_mm"] = round(pub, 1)
                             self._st["last_good"] = now
                     else:
