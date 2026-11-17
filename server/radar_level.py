@@ -1,4 +1,12 @@
-"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.3.0 (russ 11/17).
+"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.4.0 (russ 11/17).
+
+v1.4.0: BLIND-ZONE GATE (russ 11/17 max-reading campaign: "we must know your max
+reading"): measured on the rig -- readings clean down to ~215 mm, intermittent
+clamps 207-212, HARD PIN at 200-201 with the surface still rising (a frozen lie
+at ~3250 mL). Readings <= blindMM are now HELD like lost echoes instead of
+published: radarOK drops, fusion coasts on dead-reckon, the frozen clamp never
+reaches the level law. blindMM default 201 -> 215 (the measured trust edge).
+Trustworthy ceiling at the 11/17 cal: dist 215 =~ 3120 mL.
 
 v1.3.0: JUMP-CANCEL offset tracker (russ 11/17: "subtracts the jump size and
 keeps going from what we know is correct" -- the empty-down jump went UP, kept
@@ -60,7 +68,7 @@ import threading
 import time
 from pathlib import Path
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 try:
     import serial                       # pyserial
@@ -83,7 +91,7 @@ def _crc16(data: bytes) -> bytes:
 
 def default_config() -> dict:
     return {"enabled": False, "port": "", "pollMs": 400, "slave": 1,
-            "maxAgeS": 5.0, "blindMM": 201.0, "lostMM": 2999.0, "medianN": 7,
+            "maxAgeS": 5.0, "blindMM": 215.0, "lostMM": 2999.0, "medianN": 7,
             "maxSlewMMS": 6.0, "jumpMM": 10.0, "offsetLeakMMS": 0.1,
             "distStatic": "radarDistMM", "ageStatic": "radarAgeS", "okStatic": "radarOK"}
 
@@ -272,11 +280,19 @@ class RadarLevelManager:
                         dist = float(int.from_bytes(r[3:5], "big"))
                         self._st["last_rx"] = now
                         self._st["raw_mm"] = dist
-                        if dist >= float(self._cfg["lostMM"]):
-                            self._st["lost"] += 1          # lost echo: HOLD last good
+                        if dist >= float(self._cfg["lostMM"]) or dist <= float(self._cfg["blindMM"]):
+                            # OUTSIDE THE TRUST WINDOW -- hold last good, let
+                            # radarOK age out, fusion coasts on dead-reckon.
+                            # Far side: lost echo / double bounce. Near side
+                            # (v1.4.0): blind-zone clamp -- the sensor PINS at
+                            # ~200 mm while the surface keeps rising (measured
+                            # 11/17: clean to 215, pinned at 200-201 = a frozen
+                            # lie at ~3250 mL that must never reach the law).
+                            if dist >= float(self._cfg["lostMM"]):
+                                self._st["lost"] += 1
+                            else:
+                                self._st["blind"] += 1
                         else:
-                            if dist <= float(self._cfg["blindMM"]):
-                                self._st["blind"] += 1     # blind-zone clamp: real but pinned
                             # MEDIAN DESPIKE (v1.1.0): vote out 1-3 poll liars
                             n = int(self._cfg.get("medianN") or 1)
                             window.append(dist)
