@@ -1,4 +1,13 @@
-"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.1.0 (russ 11/17).
+"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.2.0 (russ 11/17).
+
+v1.2.0: SLEW LIMITER (russ 11/17 "if the height jumps that large amount you need
+to remove it from the level" -- a jump outlived the median window during the
+empty-down): the published distance may move at most maxSlewMMS (default 6 mm/s)
+from its previous value. PHYSICS: the level is liquid in a tube -- the feed pump
+flat out (500 rpm =~ 23 mL/s / 9.27 mL/mm) moves it ~2.5 mm/s, so 6 mm/s passes
+every real move unlagged while a spike of ANY duration is crushed to a crawl and
+pulled straight back (net effect ~zero). Re-seeds directly after a >5 s good-gap
+(dropout recovery must not crawl from a stale value). 0 = off.
 
 v1.1.0: MEDIAN DESPIKE (russ 11/17 cal run "we had some weird jumps"): the sensor
 occasionally returns 1-2 polls of mid-range garbage (sight-tube multipath -- e.g.
@@ -39,7 +48,7 @@ import threading
 import time
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 try:
     import serial                       # pyserial
@@ -63,6 +72,7 @@ def _crc16(data: bytes) -> bytes:
 def default_config() -> dict:
     return {"enabled": False, "port": "", "pollMs": 400, "slave": 1,
             "maxAgeS": 5.0, "blindMM": 201.0, "lostMM": 2999.0, "medianN": 7,
+            "maxSlewMMS": 6.0,
             "distStatic": "radarDistMM", "ageStatic": "radarAgeS", "okStatic": "radarOK"}
 
 
@@ -107,6 +117,7 @@ class RadarLevelManager:
         cfg["maxAgeS"] = float(max(1.0, min(60.0, float(cfg.get("maxAgeS") or 5.0))))
         n = int(cfg.get("medianN") or 7)
         cfg["medianN"] = max(1, min(15, n | 1))   # odd, 1..15 (1 = filter off)
+        cfg["maxSlewMMS"] = float(max(0.0, min(100.0, float(cfg.get("maxSlewMMS", 6.0)))))
         self._cfg = cfg
         self.save()
         self._restart()
@@ -211,6 +222,8 @@ class RadarLevelManager:
         ser = None
         next_retry = 0.0
         window: list[float] = []   # last medianN GOOD readings (despike vote)
+        pub: float | None = None   # slew-limited published distance
+        pub_t = 0.0                # time of the previous publish (slew dt)
         while not self._stop.is_set():
             if ser is None:
                 if time.time() < next_retry:
@@ -246,13 +259,23 @@ class RadarLevelManager:
                         else:
                             if dist <= float(self._cfg["blindMM"]):
                                 self._st["blind"] += 1     # blind-zone clamp: real but pinned
-                            # MEDIAN DESPIKE: publish the median of the last
-                            # medianN good readings -- 1-3 poll multipath jumps
-                            # never reach the level law (v1.1.0)
+                            # MEDIAN DESPIKE (v1.1.0): vote out 1-3 poll liars
                             n = int(self._cfg.get("medianN") or 1)
                             window.append(dist)
                             del window[:-n]
-                            self._st["dist_mm"] = sorted(window)[len(window) // 2]
+                            med = sorted(window)[len(window) // 2]
+                            # SLEW LIMITER (v1.2.0): the level physically moves
+                            # <= ~2.5 mm/s -- crush any surviving jump to a
+                            # maxSlewMMS crawl; re-seed after a >5 s good-gap
+                            slew = float(self._cfg.get("maxSlewMMS") or 0.0)
+                            gap = now - (self._st["last_good"] or 0.0)
+                            if pub is None or slew <= 0.0 or gap > 5.0:
+                                pub = med
+                            else:
+                                lim = slew * max(0.0, now - pub_t)
+                                pub += max(-lim, min(lim, med - pub))
+                            pub_t = now
+                            self._st["dist_mm"] = round(pub, 1)
                             self._st["last_good"] = now
                     else:
                         self._st["bad"] += 1
