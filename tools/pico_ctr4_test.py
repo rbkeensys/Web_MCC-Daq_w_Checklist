@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
-"""pico_ctr4_test.py -- v1.0.0 (russ 11/16)
+"""pico_ctr4_test.py -- v2.0.1 (russ 11/19: ignore the firmware's "# ..." help lines)
 
-Host-side checker for the MCC-CTR4 Pico pulse counter (pi_port/pico_ctr4/main.py).
-Finds the Pico's USB serial port, polls it once a second and prints per-channel
-totals, Hz from delta-count/delta-time, and L/min for an SMWF-0420A
-(f = 50*Q - 3  =>  Q = (f + 3) / 50, valid 0.4..2.0 L/min; 0 below ~5 Hz).
+Host-side checker for the MCC-CTR4 Pico pulse counter, firmware 2.x
+(pi_port/pico_ctr4/main.py: PWM-slice hardware counters, one streamed line per
+timer window). Finds the Pico's USB serial port, sets the window, and prints
+each window as it arrives: pulses in the window, Hz, running total, and L/min
+for an SMWF-0420A (f = 50*Q - 3  =>  Q = (f + 3) / 50, valid 0.4..2.0 L/min;
+0 below ~5 Hz).
 
-    python3 tools/pico_ctr4_test.py                 # auto-find the Pico
+    python3 tools/pico_ctr4_test.py                 # auto-find the Pico, 250 ms windows
     python3 tools/pico_ctr4_test.py /dev/ttyACM0    # or name the port
-    python3 tools/pico_ctr4_test.py --zero          # zero the counters first
-    python3 tools/pico_ctr4_test.py --gap 2000      # 2 ms debounce on every channel (reed switches)
+    python3 tools/pico_ctr4_test.py --zero          # zero the totals first
+    python3 tools/pico_ctr4_test.py --window 1000   # 1 s windows (1 Hz resolution)
+    python3 tools/pico_ctr4_test.py --avg 4         # average Hz over the last 4 windows
+    python3 tools/pico_ctr4_test.py --inject 37     # no-wire self-test: step each channel's hardware
+                                                    # counter by 37 (T command) and check the total
+                                                    # moves by exactly 37, then exit
 
 Needs pyserial (the Pi venv already has it for the VFD/stepper drivers).
 """
 import sys
 import time
 import argparse
+from collections import deque
 
 import serial
 from serial.tools import list_ports
@@ -23,6 +30,7 @@ from serial.tools import list_ports
 PICO_VID = 0x2E8A          # Raspberry Pi (MicroPython USB CDC is VID 2E8A, PID 0005)
 SMWF_SLOPE = 50.0          # Hz per L/min
 SMWF_OFFSET = 3.0          # Hz
+NCH = 4
 
 
 def find_port():
@@ -44,9 +52,10 @@ def smwf_lpm(hz):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("port", nargs="?", help="serial port (default: auto-detect by VID 2E8A)")
-    ap.add_argument("--zero", action="store_true", help="zero all counters before polling")
-    ap.add_argument("--gap", type=int, help="set min-gap (debounce) in us on all channels")
-    ap.add_argument("--period", type=float, default=1.0, help="poll period s (default 1)")
+    ap.add_argument("--zero", action="store_true", help="zero all totals before listening")
+    ap.add_argument("--window", type=int, default=250, help="Pico window (timer) period ms, 50..5000 (default 250)")
+    ap.add_argument("--avg", type=int, default=4, help="windows to average Hz over (default 4 = 1 s at 250 ms)")
+    ap.add_argument("--inject", type=int, help="self-test: advance each channel's counter by N via T,<ch>,N and verify")
     a = ap.parse_args()
 
     port = a.port or find_port()
@@ -56,61 +65,87 @@ def main():
     time.sleep(0.3)
     ser.reset_input_buffer()
 
-    def ask(cmd):
+    def ask(cmd, want=("OK", "ERR")):
         ser.write((cmd + "\n").encode())
-        while True:
+        deadline = time.time() + 1.5
+        while time.time() < deadline:
             line = ser.readline().decode(errors="replace").strip()
-            if not line:
-                return None
-            if line.startswith("ID,") and cmd != "?":
-                continue              # boot banner / stray identify, keep waiting
-            return line
+            if line.startswith(want):
+                return line
+        return None
 
-    ident = ask("?")
+    ident = ask("?", ("ID,",))
     print("port", port, "->", ident)
     if not ident or not ident.startswith("ID,MCC-CTR4"):
         sys.exit("that is not an MCC-CTR4 Pico (no ID reply)")
+    fw = ident.split(",")[2]
+    if not fw.startswith("2."):
+        sys.exit("firmware %s: this tool needs 2.x (flash pi_port/pico_ctr4/main.py)" % fw)
     boot_id = ident.split(",")[3]
 
-    if a.gap is not None:
-        for ch in range(4):
-            print("G,%d,%d ->" % (ch, a.gap), ask("G,%d,%d" % (ch, a.gap)))
-    print("gaps:", ask("G"))
+    print("W,%d ->" % a.window, ask("W,%d" % a.window))
     if a.zero:
         print("Z ->", ask("Z"))
+    print("S,1 ->", ask("S,1"))
 
-    prev = None
-    print("\n   t(s)   ch   total      Hz   period(us)   SMWF L/min")
+    def latest_totals():
+        """Totals from the next W line (the stream is on)."""
+        deadline = time.time() + 2.5
+        while time.time() < deadline:
+            line = ser.readline().decode(errors="replace").strip()
+            f = line.split(",")
+            if line.startswith("W,") and len(f) == 3 + 2 * NCH:
+                return [int(f[3 + NCH + i]) for i in range(NCH)]
+        sys.exit("no W line within 2.5 s -- is the stream on?")
+
+    if a.inject is not None:
+        n = a.inject
+        ok = True
+        for ch in range(NCH):
+            before = latest_totals()[ch]
+            rep = ask("T,%d,%d" % (ch, n))
+            time.sleep(2.2 * a.window / 1000.0)     # let the window containing the steps go out
+            after = latest_totals()[ch]
+            good = (after - before) == n
+            ok &= good
+            print("ch%d: T,%d,%d -> %s   total %d -> %d   (delta %d, expected %d)   %s" % (
+                ch, ch, n, rep, before, after, after - before, n, "OK" if good else "FAIL"))
+        print("self-test", "PASSED" if ok else "FAILED")
+        sys.exit(0 if ok else 1)
+
+    hist = [deque(maxlen=max(1, a.avg)) for _ in range(NCH)]
+    last_total = [None] * NCH
+    print("\n   t(s)   dt(ms)   ch   n/win      Hz      total   SMWF L/min")
     while True:
-        line = ask("R")
-        if not line or not line.startswith("C,"):
-            print("no/odd reply:", line)
-            time.sleep(a.period)
+        line = ser.readline().decode(errors="replace").strip()
+        if not line:
+            print("... no line in 1 s (boot_id was %s)" % boot_id)
             continue
+        if line.startswith("ID,"):
+            print("Pico rebooted:", line, "-- re-sending window/stream")
+            boot_id = line.split(",")[3]
+            ask("W,%d" % a.window); ask("S,1")
+            continue
+        if line.startswith("#"):
+            continue                       # help text from ? / H
         f = line.split(",")
-        if len(f) != 2 + 2 * 4:
-            print("short frame:", line)
+        if not line.startswith("W,") or len(f) != 3 + 2 * NCH:
+            print("odd line:", line)
             continue
-        t_ms = int(f[1])
-        counts = [int(f[2 + 2 * i]) for i in range(4)]
-        periods = [int(f[3 + 2 * i]) for i in range(4)]
-        if prev:
-            pt, pc = prev
-            dt = (t_ms - pt) / 1000.0
-            if dt <= 0 or any(c < p for c, p in zip(counts, pc)):
-                print("counter reset / time jump -- delta skipped (boot_id was %s)" % boot_id)
-            else:
-                for ch in range(4):
-                    hz = (counts[ch] - pc[ch]) / dt
-                    # with 1 s polls a single 97 Hz pulse train quantizes to 1 Hz; the
-                    # period field gives the instantaneous rate when the count is small
-                    hz_p = 1e6 / periods[ch] if periods[ch] else 0.0
-                    print("%7.1f   %d   %7d   %6.2f   %9d   %7.3f%s" % (
-                        t_ms / 1000.0, ch, counts[ch], hz, periods[ch], smwf_lpm(hz),
-                        ("   (1/period %.2f Hz)" % hz_p) if periods[ch] else ""))
-                print()
-        prev = (t_ms, counts)
-        time.sleep(a.period)
+        t_ms, dt_us = int(f[1]), int(f[2])
+        ns = [int(f[3 + i]) for i in range(NCH)]
+        ts = [int(f[3 + NCH + i]) for i in range(NCH)]
+        for ch in range(NCH):
+            if last_total[ch] is not None and ts[ch] < last_total[ch]:
+                print("ch%d total dropped (reset/zero) -- averaging restarted" % ch)
+                hist[ch].clear()
+            last_total[ch] = ts[ch]
+            hist[ch].append((ns[ch], dt_us / 1e6))
+            span = sum(d for _, d in hist[ch])
+            hz = sum(n for n, _ in hist[ch]) / span if span > 0 else 0.0
+            print("%7.2f   %6.1f   %d   %5d   %7.2f   %8d   %7.3f" % (
+                t_ms / 1000.0, dt_us / 1000.0, ch, ns[ch], hz, ts[ch], smwf_lpm(hz)))
+        print()
 
 
 if __name__ == "__main__":

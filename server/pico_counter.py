@@ -1,23 +1,27 @@
-"""pico_counter.py -- MCC-CTR4 Raspberry Pi Pico pulse-counter client -- v1.0.0 (russ 11/16).
+"""pico_counter.py -- MCC-CTR4 Raspberry Pi Pico pulse-counter client -- v2.0.1 (russ 11/19).
 
-The Pico (pi_port/pico_ctr4/main.py) counts pulses on four inputs with hard
-GPIO interrupts and answers "R" on its USB serial port with
-    C,<uptime_ms>,<c0>,<p0>,<c1>,<p1>,<c2>,<p2>,<c3>,<p3>
-(c = total edges, p = last edge-to-edge period in us, 0 when stale).
+v2.0.1: "# ..." help lines (firmware 2.0.1 answers "?" with the ID line plus a help
+list) are not counted as bad lines. Verified 11/18 against a real Pico on COM5.
+v2.0.0: firmware 2.x counts in the Pico's PWM-slice hardware counters and
+STREAMS one line per timer window (default 250 ms = 4 per second):
+    W,<uptime_ms>,<dt_us>,<n0>,<n1>,<n2>,<n3>,<t0>,<t1>,<t2>,<t3>
+    n = pulses in that window, dt_us = the window's true length,
+    t = running total since boot/zero (monotonic, so a dropped line loses nothing).
+The Pi does the engineering here: Hz = sum(n) / sum(dt) over the last
+rateWindowS worth of windows, and the rest as before.
+(v1.0.0, 11/16, polled an interrupt-counting firmware with "R"; firmware 1.x is
+refused at connect with a clear error -- flash pi_port/pico_ctr4/main.py 2.x.)
 
-This module owns ONE background thread that keeps that port open, polls it at
-pollMs, and turns the counts into engineering values per channel:
+This module owns ONE background thread that keeps the port open, tells the Pico
+the window length (pollMs) and turns on streaming, then listens:
 
-    hz    = delta-count / delta-time over rateWindowS (lossless: the Pico's
-            totals are monotonic, so nothing between polls is ever missed);
-            when fewer than 2 pulses landed in the window and the Pico still
-            reports a fresh period, 1e6/period gives the instantaneous rate
-            instead (resolves very low flow); p == 0 => 0 Hz (zero flow).
+    hz    = pulses / seconds over rateWindowS of windows (lossless: the counts
+            come from hardware and every window is accounted for)
     rate  = (hz + hzOffset) * 60 / pulsesPerUnit   [units per minute], 0 when hz is 0
             -- the Shineui SMWF-0420A is f = 50*Q - 3 Hz, i.e. 3000 pulses/L and
                hzOffset +3 (its table: 22/47/72/97 Hz at 0.5/1/1.5/2 L/min)
-    total = (host base + count) / pulsesPerUnit    [units]; survives a Pico
-            reboot (count drop => base += last count) and is zeroed by zero().
+    total = (host base + Pico total) / pulsesPerUnit   [units]; survives a Pico
+            reboot (total drop => base += last total) and is zeroed by zero().
 
 Values are published by NAME into expression statics (rateStatic / totalStatic),
 exactly like the E-TC digital inputs: the server stamps them before every
@@ -30,8 +34,11 @@ Config lives in config/pico_counters.json (per machine, like scales.json):
   "enabled": true, "port": "auto", "pollMs": 250, "rateWindowS": 1.0,
   "channels": [ {"ch":0, "name":"Flow0", "enabled":true, "pulsesPerUnit":3000,
                  "hzOffset":3.0, "units":"L", "rateStatic":"picoRate0",
-                 "totalStatic":"picoTotal0", "gapUs":0, "lowCutHz":5.0}, ... ]
+                 "totalStatic":"picoTotal0", "lowCutHz":5.0}, ... ]
 }
+pollMs is the Pico's window (timer) period, 50..5000 ms. rateWindowS is how
+much of the stream the rate is averaged over (at 97 Hz one 250 ms window holds
+~24 pulses, so a single window quantizes to 4 Hz; 1 s brings that to 1 Hz).
 port "auto" = first serial port with the Raspberry Pi USB VID (0x2E8A); on the
 rig prefer the /dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_<serial>-if00
 name so USB enumeration order cannot swap it with another device.
@@ -44,9 +51,10 @@ import time
 from collections import deque
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "2.0.1"
 PICO_VID = 0x2E8A
 NCH = 4
+FW_MAJOR = 2                        # firmware protocol this client speaks
 
 try:
     import serial                       # pyserial
@@ -66,7 +74,6 @@ def default_channel(i: int) -> dict:
         "units": "L",
         "rateStatic": f"picoRate{i}",   # units/min
         "totalStatic": f"picoTotal{i}", # units
-        "gapUs": 0,                     # debounce on the Pico; 0 = Hall sensor, ~2000 = reed
         "lowCutHz": 5.0,                # below this the rate is reported as 0 (sensor floor)
     }
 
@@ -74,6 +81,11 @@ def default_channel(i: int) -> dict:
 def default_config() -> dict:
     return {"enabled": False, "port": "auto", "pollMs": 250, "rateWindowS": 1.0,
             "channels": [default_channel(i) for i in range(NCH)]}
+
+
+def _blank_channel() -> dict:
+    return {"pico_total": 0, "base": 0, "hz": 0.0, "rate": 0.0, "total": 0.0,
+            "last_n": 0, "dt_ms": 0.0, "last_total": None}
 
 
 class PicoCounterManager:
@@ -85,11 +97,10 @@ class PicoCounterManager:
         self._zero_req: set[int] = set()
         self._path: Path | None = None
         # live state
-        self._st = {"connected": False, "port": None, "boot_id": None, "err": None,
-                    "last_rx": 0.0, "polls": 0, "bad": 0}
-        self._ch = [{"count": 0, "base": 0, "hz": 0.0, "rate": 0.0, "total": 0.0,
-                     "period_us": 0, "last_count": None} for _ in range(NCH)]
-        self._hist: list[deque] = [deque() for _ in range(NCH)]   # (t, total_count) per channel
+        self._st = {"connected": False, "port": None, "boot_id": None, "fw": None, "err": None,
+                    "last_rx": 0.0, "windows": 0, "bad": 0}
+        self._ch = [_blank_channel() for _ in range(NCH)]
+        self._hist: list[deque] = [deque() for _ in range(NCH)]   # (n, dt_s) per window, newest last
 
     # ---------------- config ----------------
     def load(self, path: Path):
@@ -104,6 +115,7 @@ class PicoCounterManager:
                     if i < len(chans) and isinstance(chans[i], dict):
                         cfg["channels"][i].update(chans[i])
                         cfg["channels"][i]["ch"] = i
+                        cfg["channels"][i].pop("gapUs", None)   # v1 debounce: gone with the IRQ firmware
         except Exception as e:
             print(f"[PICO] config load failed ({e}) -- defaults in use")
         self._cfg = cfg
@@ -127,6 +139,7 @@ class PicoCounterManager:
             if i < len(chans) and isinstance(chans[i], dict):
                 cfg["channels"][i].update(chans[i])
                 cfg["channels"][i]["ch"] = i
+                cfg["channels"][i].pop("gapUs", None)
         cfg["pollMs"] = int(max(50, min(5000, int(cfg.get("pollMs") or 250))))
         cfg["rateWindowS"] = float(max(0.2, min(30.0, float(cfg.get("rateWindowS") or 1.0))))
         self._cfg = cfg
@@ -157,15 +170,19 @@ class PicoCounterManager:
 
     # ---------------- public reads ----------------
     def zero(self, ch: int | None = None):
-        """Zero the host totals now and ask the Pico to zero on its next poll."""
+        """Queue a zero: the worker sends Z,<ch> and resets the host state once the
+        Pico has acknowledged (resetting first would make the Pico's total drop
+        look like a reboot and get added straight back). Takes effect within one
+        window (pollMs)."""
         with self._lock:
             for i in range(NCH):
-                if ch is not None and i != ch:
-                    continue
-                c = self._ch[i]
-                c["base"] = 0; c["count"] = 0; c["total"] = 0.0; c["last_count"] = None
-                self._hist[i].clear()
-                self._zero_req.add(i)
+                if ch is None or i == ch:
+                    self._zero_req.add(i)
+
+    def _zero_host(self, i: int):
+        c = self._ch[i]
+        c["base"] = 0; c["pico_total"] = 0; c["total"] = 0.0; c["last_total"] = None
+        self._hist[i].clear()
 
     def get_static_writes(self) -> dict:
         """{static name: value} for the acq loop to stamp before evaluate()."""
@@ -192,20 +209,21 @@ class PicoCounterManager:
             for i, cc in enumerate(self._cfg["channels"]):
                 c = self._ch[i]
                 chans.append({"ch": i, "name": cc.get("name"), "enabled": bool(cc.get("enabled")),
-                              "count": int(c["base"] + c["count"]), "hz": round(c["hz"], 3),
+                              "count": int(c["base"] + c["pico_total"]), "hz": round(c["hz"], 3),
                               "rate": round(c["rate"], 4), "total": round(c["total"], 4),
-                              "period_us": int(c["period_us"]), "units": cc.get("units", "")})
+                              "last_n": int(c["last_n"]), "dt_ms": round(c["dt_ms"], 1),
+                              "units": cc.get("units", "")})
             return {"version": VERSION, "enabled": bool(self._cfg.get("enabled")),
                     "connected": self._st["connected"], "port": self._st["port"],
-                    "boot_id": self._st["boot_id"], "err": self._st["err"],
+                    "boot_id": self._st["boot_id"], "fw": self._st["fw"], "err": self._st["err"],
                     "rx_age_s": (round(now - self._st["last_rx"], 1) if self._st["last_rx"] else None),
-                    "polls": self._st["polls"], "bad": self._st["bad"], "channels": chans}
+                    "windows": self._st["windows"], "bad": self._st["bad"], "channels": chans}
 
     def brief(self) -> dict:
         """Small block for /api/diag."""
         with self._lock:
             return {"enabled": bool(self._cfg.get("enabled")), "connected": self._st["connected"],
-                    "port": self._st["port"], "err": self._st["err"]}
+                    "port": self._st["port"], "fw": self._st["fw"], "err": self._st["err"]}
 
     # ---------------- worker ----------------
     def _find_port(self) -> str | None:
@@ -220,6 +238,26 @@ class PicoCounterManager:
             pass
         return None
 
+    @staticmethod
+    def _ask(ser, cmd: str, want=("OK", "ERR")) -> str | None:
+        """Send a command and return the first reply line starting with one of `want`.
+        Stream lines (W,...) that arrive meanwhile are skipped, not lost: the
+        worker re-reads the stream right after, and totals are cumulative."""
+        ser.write((cmd + "\n").encode())
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            line = ser.readline().decode(errors="replace").strip()
+            if not line:
+                continue
+            if line.startswith(want):
+                return line
+        return None
+
+    def _configure(self, ser):
+        """Push window length and turn streaming on (also after a Pico reboot)."""
+        self._ask(ser, f"W,{int(self._cfg.get('pollMs') or 250)}")
+        self._ask(ser, "S,1")
+
     def _open(self):
         port = self._find_port()
         if not port:
@@ -227,37 +265,27 @@ class PicoCounterManager:
         ser = serial.Serial(port, 115200, timeout=0.5, write_timeout=0.5)
         time.sleep(0.2)
         ser.reset_input_buffer()
-        ident = self._ask(ser, "?")
+        ident = self._ask(ser, "?", ("ID,",))
         if not ident or not ident.startswith("ID,MCC-CTR4"):
             ser.close()
             raise IOError(f"{port}: not an MCC-CTR4 (reply {ident!r})")
         f = ident.split(",")
+        fw = f[2] if len(f) > 2 else "?"
         boot_id = f[3] if len(f) > 3 else None
-        # push per-channel debounce
-        for cc in self._cfg["channels"]:
-            try:
-                self._ask(ser, f"G,{int(cc['ch'])},{int(cc.get('gapUs') or 0)}")
-            except Exception:
-                pass
+        try:
+            major = int(fw.split(".")[0])
+        except ValueError:
+            major = 0
+        if major != FW_MAJOR:
+            ser.close()
+            raise IOError(f"{port}: MCC-CTR4 firmware {fw}, this server needs {FW_MAJOR}.x "
+                          f"(flash pi_port/pico_ctr4/main.py)")
+        self._configure(ser)
         with self._lock:
-            self._st.update({"connected": True, "port": port, "boot_id": boot_id, "err": None})
-        print(f"[PICO] MCC-CTR4 connected on {port} (boot {boot_id}, fw {f[2] if len(f) > 2 else '?'})")
+            self._st.update({"connected": True, "port": port, "boot_id": boot_id, "fw": fw, "err": None})
+        print(f"[PICO] MCC-CTR4 connected on {port} (boot {boot_id}, fw {fw}, "
+              f"window {self._cfg.get('pollMs')} ms)")
         return ser
-
-    @staticmethod
-    def _ask(ser, cmd: str, want_prefix: str | None = None) -> str | None:
-        ser.write((cmd + "\n").encode())
-        deadline = time.time() + 1.0
-        while time.time() < deadline:
-            line = ser.readline().decode(errors="replace").strip()
-            if not line:
-                continue
-            if cmd != "?" and line.startswith("ID,"):
-                continue                    # boot banner mid-stream: the Pico just reset
-            if want_prefix and not line.startswith(want_prefix):
-                continue
-            return line
-        return None
 
     def _run(self):
         ser = None
@@ -269,6 +297,8 @@ class PicoCounterManager:
                     continue
                 try:
                     ser = self._open()
+                    with self._lock:
+                        self._st["last_rx"] = time.time()
                 except Exception as e:
                     with self._lock:
                         self._st.update({"connected": False, "err": str(e)})
@@ -279,11 +309,32 @@ class PicoCounterManager:
                 with self._lock:
                     zq = sorted(self._zero_req); self._zero_req.clear()
                 for i in zq:
-                    self._ask(ser, f"Z,{i}")
-                line = self._ask(ser, "R", "C,")
-                if line is None:
-                    raise IOError("no reply to R")
-                self._ingest(line)
+                    rep = self._ask(ser, f"Z,{i}")        # W lines read meanwhile carry the OLD totals: skipped
+                    if rep == "OK":
+                        with self._lock:
+                            self._zero_host(i)            # every W line from here on is post-zero
+                    else:
+                        print(f"[PICO] zero ch{i}: no OK ({rep!r})")
+                line = ser.readline().decode(errors="replace").strip()   # <= 0.5 s block
+                if line.startswith("W,"):
+                    self._ingest(line)
+                elif line.startswith("ID,"):
+                    # boot banner mid-stream: the Pico just reset. Its window/stream
+                    # settings are back at defaults, so push ours again; the total
+                    # drop is handled in _ingest (base += last total).
+                    f = line.split(",")
+                    with self._lock:
+                        self._st["boot_id"] = f[3] if len(f) > 3 else None
+                    self._configure(ser)
+                    print("[PICO] MCC-CTR4 rebooted (boot %s) -- reconfigured" % self._st["boot_id"])
+                elif line and not line.startswith("#"):     # "# ..." = help text (fw 2.0.1 "?"/"H")
+                    with self._lock:
+                        self._st["bad"] += 1
+                with self._lock:
+                    silent = time.time() - self._st["last_rx"]
+                limit = max(2.0, 3.0 * (self._cfg.get("pollMs") or 250) / 1000.0)
+                if silent > limit:
+                    raise IOError(f"no W line for {silent:.1f} s")
             except Exception as e:
                 with self._lock:
                     self._st.update({"connected": False, "err": f"link lost: {e}"})
@@ -295,9 +346,9 @@ class PicoCounterManager:
                 ser = None
                 next_retry = time.time() + 2.0
                 continue
-            self._stop.wait(max(0.05, self._cfg.get("pollMs", 250) / 1000.0))
         try:
             if ser:
+                self._ask(ser, "S,0")
                 ser.close()
         except Exception:
             pass
@@ -306,40 +357,44 @@ class PicoCounterManager:
 
     def _ingest(self, line: str):
         f = line.split(",")
-        if len(f) < 2 + 2 * NCH:
+        if len(f) != 3 + 2 * NCH:
             with self._lock:
                 self._st["bad"] += 1
             return
-        now = time.time()
+        try:
+            dt_us = int(f[2])
+            ns = [int(f[3 + i]) for i in range(NCH)]
+            ts = [int(f[3 + NCH + i]) for i in range(NCH)]
+        except ValueError:
+            with self._lock:
+                self._st["bad"] += 1
+            return
+        if dt_us <= 0:
+            return
+        dt_s = dt_us / 1e6
         win = float(self._cfg.get("rateWindowS") or 1.0)
         with self._lock:
-            self._st["last_rx"] = now
-            self._st["polls"] += 1
+            self._st["last_rx"] = time.time()
+            self._st["windows"] += 1
             for i in range(NCH):
                 cc = self._cfg["channels"][i]
                 c = self._ch[i]
-                try:
-                    cnt = int(f[2 + 2 * i]); per = int(f[3 + 2 * i])
-                except ValueError:
-                    continue
-                if c["last_count"] is not None and cnt < c["last_count"]:
+                n, t = ns[i], ts[i]
+                if c["last_total"] is not None and t < c["last_total"]:
                     # Pico rebooted (or was zeroed on its side): keep the host total continuous
-                    c["base"] += c["last_count"]
+                    c["base"] += c["last_total"]
                     self._hist[i].clear()
-                c["last_count"] = cnt
-                c["count"] = cnt
-                c["period_us"] = per
-                total_cnt = c["base"] + cnt
+                c["last_total"] = t
+                c["pico_total"] = t
+                c["last_n"] = n
+                c["dt_ms"] = dt_us / 1000.0
                 h = self._hist[i]
-                h.append((now, total_cnt))
-                while len(h) > 2 and now - h[0][0] > win:
-                    h.popleft()
-                hz = 0.0
-                if per > 0:
-                    if len(h) >= 2 and (h[-1][1] - h[0][1]) >= 2 and (h[-1][0] - h[0][0]) > 0:
-                        hz = (h[-1][1] - h[0][1]) / (h[-1][0] - h[0][0])
-                    else:
-                        hz = 1e6 / per          # low flow: last period is the better estimate
+                h.append((n, dt_s))
+                span = sum(d for _, d in h)
+                while len(h) > 1 and span - h[0][1] >= win:
+                    span -= h.popleft()[1]
+                pulses = sum(k for k, _ in h)
+                hz = pulses / span if span > 0 else 0.0
                 low = float(cc.get("lowCutHz") or 0.0)
                 if hz < low:
                     hz = 0.0
@@ -347,4 +402,4 @@ class PicoCounterManager:
                 off = float(cc.get("hzOffset") or 0.0)
                 c["hz"] = hz
                 c["rate"] = ((hz + off) * 60.0 / ppu) if hz > 0 else 0.0
-                c["total"] = total_cnt / ppu
+                c["total"] = (c["base"] + t) / ppu
