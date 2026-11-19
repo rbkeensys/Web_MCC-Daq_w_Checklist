@@ -2,7 +2,14 @@
 # MicroPython (rp2 port). Reports pulse counts over the USB CDC serial port to
 # the main Raspberry Pi running the MCC DAQ server.
 #
-# VERSION 2.0.1 (russ 11/19: help list on "?" and "H", like his other firmware;
+# VERSION 2.1.0 (russ 11/19: "add support for the raspberry pi pico starter kit
+# LCD that uses the I2C connection, just put out two lines, top line ID, Version,
+# period. Second line fixed width 4 digits and a space for ch0, ch1 count/period"):
+# optional 16x2 LCD1602 on a PCF8574 I2C backpack, auto-detected on I2C0
+# (SDA GP8 board pin 11, SCL GP9 board pin 12, VCC 3V3 pin 36 or VBUS pin 40,
+# GND pin 38). Line 1 "CTR4 2.1.0 250ms", line 2 "0024 0005" = pulses in the
+# last window on CH0 and CH1, refreshed every window. No LCD = nothing changes.
+# 2.0.1 (russ 11/19: help list on "?" and "H", like his other firmware;
 # control bytes in the command buffer ignored). First ran on a real Pico 11/18:
 # window timing within 10 us, T self-test exact on all four slices.
 # 2.0.0 (russ 11/18: "have the firmware produce 4 timer events per
@@ -61,6 +68,7 @@
 #              channel's counter by n           counter steps exactly n with nothing wired)
 #   X          exit to the REPL      OK        (Ctrl-C is disabled below, so Thonny/mpremote
 #                                               cannot interrupt this program; send X first)
+#   L          LCD status            L,<i2c addr hex>  or  L,none
 #   anything else                    ERR,<reason>
 #
 # Rate on the host: Hz = n / (dt_us / 1e6), averaged over as many windows as it
@@ -71,11 +79,13 @@ import time
 import select
 import machine
 import micropython
-from machine import Pin, Timer, mem32
+from machine import Pin, Timer, I2C, mem32
 
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 PINS = (1, 3, 5, 7)            # GP numbers for CH0..CH3 -- PWM B pins, slices 0..3
 WINDOW_MS = 250                # 4 timer events per second
+LCD_SDA, LCD_SCL = 8, 9        # I2C0: GP8 = board pin 11, GP9 = board pin 12 (not used by the counters)
+LCD_ADDRS = (0x27, 0x3F, 0x20, 0x38)   # PCF8574 / PCF8574A backpacks, usual jumpers first
 USE_WDT = False                # True on the rig: 8 s hardware watchdog (reboots a hung Pico).
                                # Leave False while developing in Thonny, or the REPL reboots
                                # 8 s after you stop the script (the WDT cannot be disabled).
@@ -128,6 +138,80 @@ for _i in range(N):
 
 led = Pin("LED", Pin.OUT)
 boot_id = time.ticks_us() & 0xFFFF   # changes on every reset; host uses it to spot reboots
+
+
+# ---- optional 16x2 character LCD (HD44780 behind a PCF8574 I2C backpack: the
+# starter-kit "LCD1602 I2C"). Backpack bits: P0 RS, P1 RW, P2 E, P3 backlight,
+# P4-P7 D4-D7. Each character goes out as one 4-byte I2C write (hi nibble with E
+# high then low, lo nibble likewise); a 16-char line is one 64-byte transaction,
+# ~2 ms at 400 kHz. Any I2C error drops the display and counting carries on.
+class LCD1602:
+    def __init__(self, i2c, addr):
+        self.i2c = i2c
+        self.addr = addr
+        self.bl = 0x08                                 # backlight on
+        time.sleep_ms(50)                              # power-up settle
+        for nib, ms in ((0x30, 5), (0x30, 1), (0x30, 1), (0x20, 1)):   # 8-bit x3 then 4-bit
+            self.i2c.writeto(addr, bytes((nib | self.bl | 0x04, nib | self.bl)))
+            time.sleep_ms(ms)
+        self.cmd(0x28)                                 # 4-bit, 2 lines, 5x8 font
+        self.cmd(0x08)                                 # display off
+        self.cmd(0x01); time.sleep_ms(2)               # clear (needs 1.5 ms)
+        self.cmd(0x06)                                 # entry: cursor increments
+        self.cmd(0x0C)                                 # display on, cursor off
+
+    def _frame(self, out, b, rs):
+        hi = (b & 0xF0) | rs | self.bl
+        lo = ((b << 4) & 0xF0) | rs | self.bl
+        out.extend((hi | 0x04, hi, lo | 0x04, lo))    # E high then low latches each nibble
+
+    def cmd(self, c):
+        out = bytearray()
+        self._frame(out, c, 0)
+        self.i2c.writeto(self.addr, out)
+
+    def line(self, row, text):
+        out = bytearray()
+        self._frame(out, 0x80 | (0x40 if row else 0x00), 0)   # DDRAM address: row 0 / row 1
+        for ch in ("%-16s" % text)[:16]:
+            self._frame(out, ord(ch), 1)
+        self.i2c.writeto(self.addr, out)
+
+
+lcd = None
+lcd_addr = None
+try:
+    _i2c = I2C(0, sda=Pin(LCD_SDA), scl=Pin(LCD_SCL), freq=400000)
+    _found = _i2c.scan()
+    for _a in LCD_ADDRS:
+        if _a in _found:
+            lcd = LCD1602(_i2c, _a)
+            lcd_addr = _a
+            break
+except Exception:
+    lcd = None
+
+
+def _lcd_top():
+    # "CTR4 2.1.0 250ms" is 16 chars; drop the unit when the period needs 4 digits
+    if lcd:
+        t = "CTR4 %s %dms" % (VERSION, WINDOW_MS)
+        if len(t) > 16:
+            t = "CTR4 %s %d" % (VERSION, WINDOW_MS)
+        _lcd_line(0, t)
+
+
+def _lcd_line(row, text):
+    global lcd
+    if lcd:
+        try:
+            lcd.line(row, text)
+        except Exception:
+            lcd = None                                 # unplugged / bus fault: display gone, counting unaffected
+
+
+_lcd_top()
+_lcd_line(1, "0000 0000")
 t0 = time.ticks_ms()
 wdt = machine.WDT(timeout=8000) if USE_WDT else None
 
@@ -150,6 +234,7 @@ def _set_window(ms):
     timer.deinit()
     WINDOW_MS = ms
     timer = Timer(period=ms, mode=Timer.PERIODIC, callback=_tick)
+    _lcd_top()
 
 
 _prev_t = time.ticks_us()
@@ -177,6 +262,8 @@ def _consume(snap):
         _total[i] += n[i]
     _last_line = "W,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d" % (
         _uptime_ms(), dt, n[0], n[1], n[2], n[3], _total[0], _total[1], _total[2], _total[3])
+    if lcd:
+        _lcd_line(1, "%04d %04d" % (min(n[0], 9999), min(n[1], 9999)))   # CH0 CH1 pulses this window
     return _last_line
 
 
@@ -213,9 +300,11 @@ HELP = (
     "#   Z,<ch>      zero one channel, 0..3",
     "#   T,<ch>,<n>  self-test: step channel <ch>'s hardware counter by <n> (0..60000)",
     "#   X           exit to the REPL for Thonny/mpremote (Ctrl-C is disabled)",
+    "#   L           LCD status: L,<i2c addr> or L,none",
     "# W,<uptime_ms>,<dt_us>,<n0>,<n1>,<n2>,<n3>,<t0>,<t1>,<t2>,<t3> every window:",
     "#   dt = window length us, n = pulses in it, t = running total since boot/zero",
     "# Inputs: CH0 GP1  CH1 GP3  CH2 GP5  CH3 GP7 (falling edge, pull-up to 3V3, not 5 V)",
+    "# LCD1602 I2C (optional): SDA GP8 pin 11, SCL GP9 pin 12, GND pin 38, VCC 3V3 pin 36 / VBUS pin 40",
 )
 
 
@@ -266,10 +355,13 @@ def _handle(line):
                 raise ValueError("range")
             _advance(ch, n)
             _send("OK")
+        elif cmd == "L":
+            _send("L,0x%02X" % lcd_addr if lcd else "L,none")
         elif cmd == "X":
             _send("OK")
             timer.deinit()
             micropython.kbd_intr(3)
+            _lcd_line(1, "REPL")
             _exit = True                      # main loop ends -> script ends -> friendly REPL.
                                               # NOT SystemExit: on rp2 that soft-reboots and
                                               # re-runs main.py (found out 11/18).

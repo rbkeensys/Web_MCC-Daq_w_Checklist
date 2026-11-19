@@ -1,6 +1,6 @@
 # MCC-CTR4 — Pico 4-channel pulse counter
 
-Version 2.0.1 — 2026-11-19 (help list on `?`/`H`; control bytes ignored). 2.0.0 on 2026-11-18: hardware counting in the PWM slices, one streamed line per timer window, first run on a real Pico (timing within 10 µs, self-test exact on all four slices). 1.0.0 on 2026-11-16 counted with GPIO interrupts.
+Version 2.1.0 — 2026-11-19 (optional I2C LCD1602 readout, see below). 2.0.1 same day: help list on `?`/`H`; control bytes ignored. 2.0.0 on 2026-11-18: hardware counting in the PWM slices, one streamed line per timer window, first run on a real Pico (timing within 10 µs, self-test exact on all four slices). 1.0.0 on 2026-11-16 counted with GPIO interrupts.
 
 A Raspberry Pi Pico counts pulses on four inputs in hardware and, four times a second, hands the main Pi the number of pulses that landed in the last window. The Pi turns that into Hz and L/min. The CPU on the Pico never handles an edge, so nothing on it (USB, the main loop, garbage collection) can delay or drop a pulse.
 
@@ -44,6 +44,26 @@ Inputs count the falling edge, which is what an open-collector or Hall output pr
 
 SMWF-0420A: red = V+ (VBUS), black = GND, white = output to the channel pin, 10 kΩ to 3V3, optional 4.7 nF output to GND per its datasheet. Its output is 50 × Q − 3 Hz with Q in L/min (3000 pulses per litre), 97 Hz at full scale.
 
+## Optional LCD (starter-kit LCD1602 with the I2C backpack)
+
+A 16×2 character LCD on a PCF8574 I2C backpack is detected at boot (addresses 0x27, 0x3F, 0x20, 0x38 tried in that order) and shows:
+
+```
+CTR4 2.1.0 250ms     <- ID, firmware version, window period
+0024 0005            <- pulses in the last window, CH0 then CH1, 4 digits each
+```
+
+The second line refreshes every window (4×/s). Without a display nothing changes; if the display drops off the bus mid-run the firmware stops writing to it and keeps counting. `L` reports `L,0x27` or `L,none`. The `X` command writes `REPL` on the second line.
+
+| LCD pin | Pico pin | Notes |
+|---|---|---|
+| VCC | 3V3 OUT, board pin 36 | try this first. If the text is faint or blank with the contrast pot adjusted, use VBUS, board pin 40 (5 V) |
+| GND | board pin 38 | any GND pin |
+| SDA | GP8, board pin 11 | I2C0 SDA |
+| SCL | GP9, board pin 12 | I2C0 SCL |
+
+5 V note: the backpack pulls SDA/SCL up to its VCC, and RP2040 pins are not 5 V tolerant. Running these displays at 5 V on a Pico is common practice and works, but it is outside the datasheet; a level shifter, or moving the backpack pull-ups to 3.3 V, is the proper fix.
+
 ## Protocol
 
 ASCII lines over USB CDC, newline terminated. Baud setting is ignored. Streaming is on at boot.
@@ -59,6 +79,7 @@ ASCII lines over USB CDC, newline terminated. Baud setting is ignored. Streaming
 | host `W,<ms>` | `OK` | set the window period, 50 to 5000 ms |
 | host `S,0` / `S,1` | `OK` | streaming off / on |
 | host `T,<ch>,<n>` | `OK` | self-test: steps that channel's hardware counter by `n` through the slice's PH_ADV bit, so the total must move by exactly `n` with nothing wired (`tools/pico_ctr4_test.py --inject 37`) |
+| host `L` | `L,0x27` or `L,none` | LCD detected at boot, and its I2C address |
 | host `X` | `OK` | exit to the REPL. Ctrl-C is disabled in the firmware, so Thonny and `mpremote` cannot interrupt it; send `X` first (any serial terminal), then connect. |
 | other | `ERR,<reason>` | |
 
