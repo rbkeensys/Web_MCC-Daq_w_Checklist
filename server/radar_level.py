@@ -1,4 +1,26 @@
-"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.4.0 (russ 11/17).
+"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.5.0 (russ 11/20).
+
+v1.5.0: DOUBLE-BOUNCE RATIO GATE + OFFSET RESEED CAP + offs export (russ 11/20
+"we have to have mechanisms to catch this until I get a better tube"). Incident:
+during the 11/20 fill the echo was lost for long stretches (bottom-of-tube
+double-bounce zone) with brief reacquisitions; each sub-5s reacquire saw the
+real catch-up as a >jumpMM step and ATE IT into offs_mm, which built to -152.8
+mm = the app showed ~1315 mL while the sight tube sat at ~2730 (75%). Three
+mechanisms:
+  (1) RATIO GATE (ratioTolPct, default 8, 0=off): a raw reading within +/-tol%
+      of 2x the current published distance IS the double bounce (11/19 tall-tube
+      data: raw/filtered ratio was EXACTLY 2.00 on all 19 jumps) -- held like a
+      lost echo, counted in status "dbl". Matters most at HIGH level: below a
+      true ~253 mm the double lands INSIDE the 215-505 trust window and would
+      otherwise reach the median/jump-cancel (the lost gate only catches doubles
+      of readings deeper than ~253).
+  (2) OFFSET RESEED CAP (offsetMaxMM, default 30, 0=off): a genuine alternate-
+      echo offset is roughly constant and cancels on the jump-back; an offset
+      that GROWS past the cap means the jump-cancel is eating a real move (the
+      11/20 -152.8). At the cap the filter drops its continuity claim and
+      reseeds from the live reading (counted in status "reseeds").
+  (3) offs_mm is now stamped to a static (offsStatic, default "radarOffsMM") so
+      the UI can chart it and expressions can alarm on a big standing offset.
 
 v1.4.0: BLIND-ZONE GATE (russ 11/17 max-reading campaign: "we must know your max
 reading"): measured on the rig -- readings clean down to ~215 mm, intermittent
@@ -68,7 +90,7 @@ import threading
 import time
 from pathlib import Path
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 try:
     import serial                       # pyserial
@@ -93,7 +115,9 @@ def default_config() -> dict:
     return {"enabled": False, "port": "", "pollMs": 400, "slave": 1,
             "maxAgeS": 5.0, "blindMM": 215.0, "lostMM": 2999.0, "medianN": 7,
             "maxSlewMMS": 6.0, "jumpMM": 10.0, "offsetLeakMMS": 0.1,
-            "distStatic": "radarDistMM", "ageStatic": "radarAgeS", "okStatic": "radarOK"}
+            "ratioTolPct": 8.0, "offsetMaxMM": 30.0,
+            "distStatic": "radarDistMM", "ageStatic": "radarAgeS", "okStatic": "radarOK",
+            "offsStatic": "radarOffsMM"}
 
 
 class RadarLevelManager:
@@ -104,7 +128,7 @@ class RadarLevelManager:
         self._stop = threading.Event()
         self._path: Path | None = None
         self._st = {"connected": False, "port": None, "err": None,
-                    "polls": 0, "bad": 0, "lost": 0, "blind": 0,
+                    "polls": 0, "bad": 0, "lost": 0, "blind": 0, "dbl": 0, "reseeds": 0,
                     "last_rx": 0.0, "last_good": 0.0, "dist_mm": None, "raw_mm": None,
                     "offs_mm": 0.0}
 
@@ -141,6 +165,8 @@ class RadarLevelManager:
         cfg["maxSlewMMS"] = float(max(0.0, min(100.0, float(cfg.get("maxSlewMMS", 6.0)))))
         cfg["jumpMM"] = float(max(0.0, min(500.0, float(cfg.get("jumpMM", 10.0)))))
         cfg["offsetLeakMMS"] = float(max(0.0, min(10.0, float(cfg.get("offsetLeakMMS", 0.1)))))
+        cfg["ratioTolPct"] = float(max(0.0, min(30.0, float(cfg.get("ratioTolPct", 8.0)))))
+        cfg["offsetMaxMM"] = float(max(0.0, min(300.0, float(cfg.get("offsetMaxMM", 30.0)))))
         self._cfg = cfg
         self.save()
         self._restart()
@@ -186,6 +212,9 @@ class RadarLevelManager:
                 out[ag] = float(min(age, 9999.0))
             if ko:
                 out[ko] = ok
+            om = (self._cfg.get("offsStatic") or "").strip()
+            if om:
+                out[om] = float(self._st.get("offs_mm", 0.0))
         return out
 
     def status(self) -> dict:
@@ -195,6 +224,7 @@ class RadarLevelManager:
                     "connected": self._st["connected"], "port": self._st["port"],
                     "err": self._st["err"], "polls": self._st["polls"], "bad": self._st["bad"],
                     "lost_echo": self._st["lost"], "blind": self._st["blind"],
+                    "dbl": self._st.get("dbl", 0), "reseeds": self._st.get("reseeds", 0),
                     "dist_mm": self._st["dist_mm"], "raw_mm": self._st["raw_mm"],
                     "offs_mm": self._st.get("offs_mm", 0.0),
                     "rx_age_s": (round(now - self._st["last_rx"], 1) if self._st["last_rx"] else None),
@@ -280,7 +310,23 @@ class RadarLevelManager:
                         dist = float(int.from_bytes(r[3:5], "big"))
                         self._st["last_rx"] = now
                         self._st["raw_mm"] = dist
-                        if dist >= float(self._cfg["lostMM"]) or dist <= float(self._cfg["blindMM"]):
+                        # DOUBLE-BOUNCE RATIO GATE (v1.5.0): a reading at ~2x
+                        # the current published distance IS the second bounce
+                        # (measured ratio EXACTLY 2.00 on the 11/19 run) -- hold
+                        # it like a lost echo. The lost gate alone only catches
+                        # doubles of surfaces deeper than lostMM/2: at HIGH
+                        # level the double lands INSIDE the trust window.
+                        # Only while continuity holds (<5 s since the last good
+                        # reading, same horizon as the dropout reseed): after a
+                        # long blind stretch pub is stale and a REAL reading
+                        # near 2x stale-pub must not be rejected forever.
+                        rtol = float(self._cfg.get("ratioTolPct") or 0.0)
+                        is_dbl = (rtol > 0.0 and pub is not None and pub > 0.0
+                                  and (now - (self._st["last_good"] or 0.0)) < 5.0
+                                  and abs(dist - 2.0 * pub) <= 2.0 * pub * rtol / 100.0)
+                        if is_dbl:
+                            self._st["dbl"] += 1
+                        elif dist >= float(self._cfg["lostMM"]) or dist <= float(self._cfg["blindMM"]):
                             # OUTSIDE THE TRUST WINDOW -- hold last good, let
                             # radarOK age out, fusion coasts on dead-reckon.
                             # Far side: lost echo / double bounce. Near side
@@ -315,6 +361,19 @@ class RadarLevelManager:
                                 leak = float(self._cfg.get("offsetLeakMMS") or 0.0) \
                                     * max(0.0, now - pub_t)
                                 offs -= max(-leak, min(leak, offs))
+                            # OFFSET RESEED CAP (v1.5.0): a real alternate-echo
+                            # offset is ~constant and cancels on the jump-back;
+                            # one that GROWS past the cap means the jump-cancel
+                            # is eating a real move (11/20: repeated sub-5s
+                            # reacquisitions during the fill built -152.8 mm and
+                            # the app showed 1315 mL against a 75% sight tube).
+                            # Drop the continuity claim, reseed from the live
+                            # reading.
+                            omax = float(self._cfg.get("offsetMaxMM") or 0.0)
+                            if omax > 0.0 and abs(offs) > omax:
+                                self._st["reseeds"] += 1
+                                offs = 0.0
+                                pub = None
                             prev_med = med
                             corr = med - offs
                             # SLEW LIMITER (v1.2.0): the level physically moves
