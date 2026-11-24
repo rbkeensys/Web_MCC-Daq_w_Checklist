@@ -1,4 +1,21 @@
-"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.6.0 (russ 11/24).
+"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.6.1 (russ 11/24).
+
+v1.6.1: CAP RE-ANCHORS AT A CRAWL, NEVER A STEP (russ 11/24, first boiling RUN
+still jumping under v1.6.0: "you can see those instantaneous jumps and correct
+them, it really screws things up"): the offset reseed cap was the last
+instantaneous-jump source -- flicker cycles leave a leak-sized residue in offs
+each time (jump-and-back never cancels exactly while offsetLeakMMS bleeds
+during the bogus-lock half), so offs ratcheted to the 60 cap every ~4-5 min and
+each fire (pub=None) STEPPED the published distance ~60 mm =~ 550 mL straight
+into the level law. Now the cap zeroes the offset but KEEPS pub: the v1.2.0
+slew limiter walks the published distance to the new anchor at maxSlewMMS
+(60 mm in ~17 s at 3.5 mm/s) -- same re-anchor, zero step. pub=None (true
+reseed) now only ever means first acquisition. Hot incident response the same
+hour: cap OFF + trust window squeezed shut (blind 504 / lost 505) = radar fully
+quarantined for the rest of the run after the boil echoes fed a false-LOW level
+(app 2417 vs pot visibly way high, feed slammed to 400 rpm chasing the phantom
+shortfall) -- the run finished on the pump-integrator dead-reckon. Radar stays
+quarantined until the gauge is remounted (russ is moving it up) and re-zeroed.
 
 v1.6.0: REACQUIRE CONFIRMATION (russ 11/24 "the radar is jumping a lot causing
 false readings forcing the pump to extremes"): during the first boiling RUN the
@@ -122,7 +139,7 @@ import threading
 import time
 from pathlib import Path
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 
 try:
     import serial                       # pyserial
@@ -451,22 +468,38 @@ class RadarLevelManager:
                                     step = med - prev_med
                                     if abs(step) > jump:
                                         offs += step
+                                    # dt CLAMP (v1.6.1): across a dropout
+                                    # now-pub_t is the whole gap -- an un-
+                                    # clamped dt hands the leak (and the slew
+                                    # below) a gap-sized budget spent in ONE
+                                    # poll = an instantaneous step (measured
+                                    # 26 mm after a 7 s gap). Cap at 1 s.
                                     leak = float(self._cfg.get("offsetLeakMMS") or 0.0) \
-                                        * max(0.0, now - pub_t)
+                                        * max(0.0, min(now - pub_t, 1.0))
                                     offs -= max(-leak, min(leak, offs))
-                                # OFFSET RESEED CAP (v1.5.0): a real alternate-echo
-                                # offset is ~constant and cancels on the jump-back;
-                                # one that GROWS past the cap means the jump-cancel
-                                # is eating a real move (11/20: repeated sub-5s
-                                # reacquisitions during the fill built -152.8 mm and
-                                # the app showed 1315 mL against a 75% sight tube).
-                                # Drop the continuity claim, reseed from the live
-                                # reading.
+                                # OFFSET RESEED CAP (v1.5.0, CRAWL since v1.6.1):
+                                # a real alternate-echo offset is ~constant and
+                                # cancels on the jump-back; one that GROWS past
+                                # the cap means the jump-cancel is eating a real
+                                # move (11/20: repeated sub-5s reacquisitions
+                                # during the fill built -152.8 mm and the app
+                                # showed 1315 mL against a 75% sight tube).
+                                # v1.6.1 (russ 11/24 "you can see those
+                                # instantaneous jumps and correct them"): the
+                                # old reseed set pub=None = an INSTANTANEOUS
+                                # step to the raw echo (~550 mL at cap 60) --
+                                # during the first boiling RUN the flicker-leak
+                                # residue ratcheted offs to the cap every ~4-5
+                                # min and each fire slammed the level law. Now
+                                # the cap only zeroes the offset and KEEPS pub:
+                                # the slew limiter below walks the published
+                                # distance to the new anchor at maxSlewMMS
+                                # (60 mm in ~17 s at 3.5) -- re-anchors just the
+                                # same, never a step.
                                 omax = float(self._cfg.get("offsetMaxMM") or 0.0)
                                 if omax > 0.0 and abs(offs) > omax:
                                     self._st["reseeds"] += 1
                                     offs = 0.0
-                                    pub = None
                                 prev_med = med
                                 corr = med - offs
                                 # SLEW LIMITER (v1.2.0): the level physically moves
@@ -476,7 +509,9 @@ class RadarLevelManager:
                                 if pub is None or slew <= 0.0:
                                     pub = corr
                                 else:
-                                    lim = slew * max(0.0, now - pub_t)
+                                    # dt clamped (v1.6.1): see the leak note --
+                                    # a gap must never grant a step budget
+                                    lim = slew * max(0.0, min(now - pub_t, 1.0))
                                     pub += max(-lim, min(lim, corr - pub))
                                 pub_t = now
                                 self._st["offs_mm"] = round(offs, 1)
