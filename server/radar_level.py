@@ -1,4 +1,36 @@
-"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.5.0 (russ 11/20).
+"""radar_level.py -- 80GHz Modbus-RTU radar level transmitter client -- v1.6.0 (russ 11/24).
+
+v1.6.0: REACQUIRE CONFIRMATION (russ 11/24 "the radar is jumping a lot causing
+false readings forcing the pump to extremes"): during the first boiling RUN the
+sight tube flickered with steam/condensate echoes -- the driver cycled dropout ->
+single bogus mid-tube echo accepted -> pub RESEEDED from that one reading and
+radarOK restored -> the level law stepped hundreds of mL instantly (yEvapLevRaw
+= radarLevelML with no smoothing, and radarSnapML snapped feedInvEst to the lie
+as well) -> feed pump slammed -> echo lost again -> back to dead-reckon. Session
+counters: 1894 lost / 1475 blind-pins / 166 doubles / 40 reseeds. The hole: after
+a >5 s gap ONE in-window reading restored trust. Now a reacquire (any gap > 5 s
+since the last good reading, first acquisition included) must present confirmN
+CONSECUTIVE in-window readings spanning <= confirmBandMM before anything is
+published or radarOK can return: a one-poll liar can never re-arm the level law,
+and the new lock must be a STABLE echo. Any reject (lost/blind/double) restarts
+the count. Genuine reacquires cost confirmN-1 polls (~0.75 s at 250 ms) -- noise
+against the 25 s fusion tau. confirmN 0/1 disables. Status: "reacq" = confirmed
+reacquisitions, "pend" = readings collected toward the current confirmation.
+
+PLUS TRACKING ACROSS DROPOUTS (russ 11/24 "add that tracking over jumps up/down,
+that worked fine before"): the v1.3.0 jump-cancel used to die at every >5 s gap
+(continuity reset), so a jump that STRADDLED a dropout -- the entire boil
+pattern -- reseeded the published distance to the new lock instead of being
+absorbed. Now a confirmed reacquire KEEPS prev_med/offs/pub: the step from the
+pre-dropout value to the confirmed new lock runs through the jump-cancel, a
+bogus lock is absorbed into offs while the published distance continues
+seamlessly and keeps tracking the lock's relative motion, the jump-back cancels
+it, offsetLeakMMS re-anchors any residual, and the offset cap still bails out
+when the absorb was actually a real move. offsetMaxMM default 30 -> 60: one
+dropout-spanning absorb of a mid-tube bogus lock (~50 mm on 11/24) must live
+under the cap or the cap instantly defeats the tracking; an 11/20-style ratchet
+still dies at 60 (that incident built to 152.8). Continuity resets only on true
+first acquisition, after a cap reseed, or with confirmation disabled.
 
 v1.5.0: DOUBLE-BOUNCE RATIO GATE + OFFSET RESEED CAP + offs export (russ 11/20
 "we have to have mechanisms to catch this until I get a better tube"). Incident:
@@ -90,7 +122,7 @@ import threading
 import time
 from pathlib import Path
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 try:
     import serial                       # pyserial
@@ -115,7 +147,8 @@ def default_config() -> dict:
     return {"enabled": False, "port": "", "pollMs": 400, "slave": 1,
             "maxAgeS": 5.0, "blindMM": 215.0, "lostMM": 2999.0, "medianN": 7,
             "maxSlewMMS": 6.0, "jumpMM": 10.0, "offsetLeakMMS": 0.1,
-            "ratioTolPct": 8.0, "offsetMaxMM": 30.0,
+            "ratioTolPct": 8.0, "offsetMaxMM": 60.0,
+            "confirmN": 4, "confirmBandMM": 8.0,
             "distStatic": "radarDistMM", "ageStatic": "radarAgeS", "okStatic": "radarOK",
             "offsStatic": "radarOffsMM"}
 
@@ -129,6 +162,7 @@ class RadarLevelManager:
         self._path: Path | None = None
         self._st = {"connected": False, "port": None, "err": None,
                     "polls": 0, "bad": 0, "lost": 0, "blind": 0, "dbl": 0, "reseeds": 0,
+                    "reacq": 0, "pend": 0,
                     "last_rx": 0.0, "last_good": 0.0, "dist_mm": None, "raw_mm": None,
                     "offs_mm": 0.0}
 
@@ -166,7 +200,9 @@ class RadarLevelManager:
         cfg["jumpMM"] = float(max(0.0, min(500.0, float(cfg.get("jumpMM", 10.0)))))
         cfg["offsetLeakMMS"] = float(max(0.0, min(10.0, float(cfg.get("offsetLeakMMS", 0.1)))))
         cfg["ratioTolPct"] = float(max(0.0, min(30.0, float(cfg.get("ratioTolPct", 8.0)))))
-        cfg["offsetMaxMM"] = float(max(0.0, min(300.0, float(cfg.get("offsetMaxMM", 30.0)))))
+        cfg["offsetMaxMM"] = float(max(0.0, min(300.0, float(cfg.get("offsetMaxMM", 60.0)))))
+        cfg["confirmN"] = int(max(0, min(15, int(cfg.get("confirmN", 4)))))
+        cfg["confirmBandMM"] = float(max(0.0, min(100.0, float(cfg.get("confirmBandMM", 8.0)))))
         self._cfg = cfg
         self.save()
         self._restart()
@@ -225,6 +261,7 @@ class RadarLevelManager:
                     "err": self._st["err"], "polls": self._st["polls"], "bad": self._st["bad"],
                     "lost_echo": self._st["lost"], "blind": self._st["blind"],
                     "dbl": self._st.get("dbl", 0), "reseeds": self._st.get("reseeds", 0),
+                    "reacq": self._st.get("reacq", 0), "pend": self._st.get("pend", 0),
                     "dist_mm": self._st["dist_mm"], "raw_mm": self._st["raw_mm"],
                     "offs_mm": self._st.get("offs_mm", 0.0),
                     "rx_age_s": (round(now - self._st["last_rx"], 1) if self._st["last_rx"] else None),
@@ -280,6 +317,7 @@ class RadarLevelManager:
         pub_t = 0.0                # time of the previous publish (slew dt)
         prev_med: float | None = None  # previous median (jump-cancel step detect)
         offs = 0.0                 # running alternate-echo offset (subtracted)
+        confirm: list[tuple[float, float]] = []  # (t, mm) reacquire candidates (v1.6.0)
         while not self._stop.is_set():
             if ser is None:
                 if time.time() < next_retry:
@@ -326,6 +364,8 @@ class RadarLevelManager:
                                   and abs(dist - 2.0 * pub) <= 2.0 * pub * rtol / 100.0)
                         if is_dbl:
                             self._st["dbl"] += 1
+                            confirm.clear()           # a reject breaks the reacquire run
+                            self._st["pend"] = 0
                         elif dist >= float(self._cfg["lostMM"]) or dist <= float(self._cfg["blindMM"]):
                             # OUTSIDE THE TRUST WINDOW -- hold last good, let
                             # radarOK age out, fusion coasts on dead-reckon.
@@ -338,57 +378,110 @@ class RadarLevelManager:
                                 self._st["lost"] += 1
                             else:
                                 self._st["blind"] += 1
+                            confirm.clear()           # a reject breaks the reacquire run
+                            self._st["pend"] = 0
                         else:
-                            # MEDIAN DESPIKE (v1.1.0): vote out 1-3 poll liars
-                            n = int(self._cfg.get("medianN") or 1)
-                            window.append(dist)
-                            del window[:-n]
-                            med = sorted(window)[len(window) // 2]
+                            # REACQUIRE CONFIRMATION (v1.6.0): after any >5 s
+                            # good-gap (dropout or first acquisition), ONE
+                            # in-window echo must not restore trust -- during
+                            # the 11/24 boil each flicker-reacquire reseeded pub
+                            # from a single bogus echo, radarOK snapped back and
+                            # the level law (+ feedInvEst via radarSnapML)
+                            # stepped to the lie, slamming the feed pump. Hold
+                            # until confirmN CONSECUTIVE in-window readings
+                            # agree within confirmBandMM, then reseed from them.
                             gap = now - (self._st["last_good"] or 0.0)
-                            if gap > 5.0:          # dropout: no continuity claim
-                                prev_med, offs, pub = None, 0.0, None
-                            # JUMP-CANCEL (v1.3.0): a med-to-med step beyond
-                            # jumpMM is physically impossible (alternate-echo
-                            # lock) -- absorb it into the offset so the level
-                            # keeps going from the last known-correct value and
-                            # still tracks real motion; the jump-back cancels
-                            # it, leak bleeds any residual asymmetry.
-                            jump = float(self._cfg.get("jumpMM") or 0.0)
-                            if jump > 0.0 and prev_med is not None:
-                                step = med - prev_med
-                                if abs(step) > jump:
-                                    offs += step
-                                leak = float(self._cfg.get("offsetLeakMMS") or 0.0) \
-                                    * max(0.0, now - pub_t)
-                                offs -= max(-leak, min(leak, offs))
-                            # OFFSET RESEED CAP (v1.5.0): a real alternate-echo
-                            # offset is ~constant and cancels on the jump-back;
-                            # one that GROWS past the cap means the jump-cancel
-                            # is eating a real move (11/20: repeated sub-5s
-                            # reacquisitions during the fill built -152.8 mm and
-                            # the app showed 1315 mL against a 75% sight tube).
-                            # Drop the continuity claim, reseed from the live
-                            # reading.
-                            omax = float(self._cfg.get("offsetMaxMM") or 0.0)
-                            if omax > 0.0 and abs(offs) > omax:
-                                self._st["reseeds"] += 1
-                                offs = 0.0
-                                pub = None
-                            prev_med = med
-                            corr = med - offs
-                            # SLEW LIMITER (v1.2.0): the level physically moves
-                            # <= ~2.5 mm/s -- crush any surviving jump to a
-                            # maxSlewMMS crawl
-                            slew = float(self._cfg.get("maxSlewMMS") or 0.0)
-                            if pub is None or slew <= 0.0:
-                                pub = corr
+                            cn = int(self._cfg.get("confirmN") or 0)
+                            if cn > 1 and gap > 5.0:
+                                stale = max(2.0, 3.0 * float(self._cfg.get("pollMs", 400)) / 1000.0)
+                                if confirm and (now - confirm[-1][0]) > stale:
+                                    confirm.clear()   # polls stopped mid-run: start over
+                                confirm.append((now, dist))
+                                del confirm[:-cn]
+                                band = float(self._cfg.get("confirmBandMM") or 0.0)
+                                ds_c = [c[1] for c in confirm]
+                                if band > 0.0 and (max(ds_c) - min(ds_c)) > band:
+                                    confirm[:] = confirm[-1:]   # disagreement: newest only
+                                self._st["pend"] = len(confirm)
+                                if len(confirm) < cn:
+                                    raise_hold = True   # not yet trusted -- hold
+                                else:
+                                    raise_hold = False
+                                    self._st["reacq"] += 1
+                                    # seed the despike vote with the confirm run
+                                    # (all but the current sample -- it is
+                                    # appended by the normal path below)
+                                    window[:] = [c[1] for c in confirm][:-1]
+                                    confirm.clear()
+                                    self._st["pend"] = 0
                             else:
-                                lim = slew * max(0.0, now - pub_t)
-                                pub += max(-lim, min(lim, corr - pub))
-                            pub_t = now
-                            self._st["offs_mm"] = round(offs, 1)
-                            self._st["dist_mm"] = round(pub, 1)
-                            self._st["last_good"] = now
+                                raise_hold = False
+                                confirm.clear()
+                                self._st["pend"] = 0
+                            if not raise_hold:
+                                # MEDIAN DESPIKE (v1.1.0): vote out 1-3 poll liars
+                                n = int(self._cfg.get("medianN") or 1)
+                                window.append(dist)
+                                del window[:-n]
+                                med = sorted(window)[len(window) // 2]
+                                # TRACKING ACROSS DROPOUTS (v1.6.0, russ 11/24
+                                # "add that tracking over jumps up/down, that
+                                # worked fine before"): a confirmed reacquire
+                                # KEEPS continuity -- prev_med/offs/pub survive
+                                # the gap, so the med-to-med step vs the pre-
+                                # dropout value runs through the jump-cancel
+                                # below: a bogus new lock is absorbed into offs
+                                # and the published distance continues from the
+                                # last known-correct value, still tracking the
+                                # lock's relative motion; the leak re-anchors
+                                # and the offset cap bails out a real move.
+                                # Continuity only resets when there is nothing
+                                # to carry (first acquisition / post-cap
+                                # reseed) or confirmation is disabled.
+                                if gap > 5.0 and (cn <= 1 or pub is None):
+                                    prev_med, offs, pub = None, 0.0, None
+                                # JUMP-CANCEL (v1.3.0): a med-to-med step beyond
+                                # jumpMM is physically impossible (alternate-echo
+                                # lock) -- absorb it into the offset so the level
+                                # keeps going from the last known-correct value and
+                                # still tracks real motion; the jump-back cancels
+                                # it, leak bleeds any residual asymmetry.
+                                jump = float(self._cfg.get("jumpMM") or 0.0)
+                                if jump > 0.0 and prev_med is not None:
+                                    step = med - prev_med
+                                    if abs(step) > jump:
+                                        offs += step
+                                    leak = float(self._cfg.get("offsetLeakMMS") or 0.0) \
+                                        * max(0.0, now - pub_t)
+                                    offs -= max(-leak, min(leak, offs))
+                                # OFFSET RESEED CAP (v1.5.0): a real alternate-echo
+                                # offset is ~constant and cancels on the jump-back;
+                                # one that GROWS past the cap means the jump-cancel
+                                # is eating a real move (11/20: repeated sub-5s
+                                # reacquisitions during the fill built -152.8 mm and
+                                # the app showed 1315 mL against a 75% sight tube).
+                                # Drop the continuity claim, reseed from the live
+                                # reading.
+                                omax = float(self._cfg.get("offsetMaxMM") or 0.0)
+                                if omax > 0.0 and abs(offs) > omax:
+                                    self._st["reseeds"] += 1
+                                    offs = 0.0
+                                    pub = None
+                                prev_med = med
+                                corr = med - offs
+                                # SLEW LIMITER (v1.2.0): the level physically moves
+                                # <= ~2.5 mm/s -- crush any surviving jump to a
+                                # maxSlewMMS crawl
+                                slew = float(self._cfg.get("maxSlewMMS") or 0.0)
+                                if pub is None or slew <= 0.0:
+                                    pub = corr
+                                else:
+                                    lim = slew * max(0.0, now - pub_t)
+                                    pub += max(-lim, min(lim, corr - pub))
+                                pub_t = now
+                                self._st["offs_mm"] = round(offs, 1)
+                                self._st["dist_mm"] = round(pub, 1)
+                                self._st["last_good"] = now
                     else:
                         self._st["bad"] += 1
                         if len(r) == 0:
