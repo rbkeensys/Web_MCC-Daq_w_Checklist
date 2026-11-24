@@ -2,7 +2,27 @@
 # MicroPython (rp2 port). Reports pulse counts over the USB CDC serial port to
 # the main Raspberry Pi running the MCC DAQ server.
 #
-# VERSION 2.1.0 (russ 11/19: "add support for the raspberry pi pico starter kit
+# VERSION 2.2.1 (russ 11/20: "since we only have the one LED ... flash per period if you
+# see zero ticks for 4 seconds and then show flashes per falling edge once they occur"):
+# with no CH0 edge for IDLE_MS the LED falls back to the 2.1.2 heartbeat (one
+# WINDOW_MS/10 flash per sample period, so a dead input still shows the board is
+# alive and sampling); the first edge switches it straight back to per-edge flashes.
+# 2.2.0 (russ 11/20: "make the led pulse for about 2mS for each falling edge
+# detected on ch0 instead of the time base"): the LED is now an activity light for
+# CH0. A hard GPIO interrupt on GP1 (falling edge, the same edge the slice counts)
+# turns it on, the main loop turns it off LED_FLASH_US later. The interrupt is only
+# for the LED: the IO_BANK0 edge detector watches the pad regardless of FUNCSEL, so
+# the slice keeps counting in hardware exactly as before and a late or missed IRQ
+# costs nothing but a flash. One 2 ms flash per pulse = 20 % duty at the meter's
+# 97 Hz full scale, so brightness tracks flow by eye. (Plain Pico only: on a Pico W
+# the LED is behind the wireless chip and cannot be driven from a hard IRQ.)
+# 2.1.2 (russ 11/19: "make the pulse of the LED 1/10 the period"): flash was
+# WINDOW_MS/10 per sample period.
+# 2.1.1 (russ 11/19: "the LED toggles on every sample period, can we instead
+# have a short flash ... for every period so I see periods not 1/2 periods"):
+# LED turns on in the timer callback, i.e. at the sample instant, and the main
+# loop turns it off a fraction of the window later.
+# 2.1.0 (russ 11/19: "add support for the raspberry pi pico starter kit
 # LCD that uses the I2C connection, just put out two lines, top line ID, Version,
 # period. Second line fixed width 4 digits and a space for ch0, ch1 count/period"):
 # optional 16x2 LCD1602 on a PCF8574 I2C backpack, auto-detected on I2C0
@@ -81,9 +101,12 @@ import machine
 import micropython
 from machine import Pin, Timer, I2C, mem32
 
-VERSION = "2.1.0"
+VERSION = "2.2.1"
 PINS = (1, 3, 5, 7)            # GP numbers for CH0..CH3 -- PWM B pins, slices 0..3
 WINDOW_MS = 250                # 4 timer events per second
+LED_CH = 0                     # the on-board LED flashes once per falling edge on this channel
+LED_FLASH_US = 2000            # ... for this long (2 ms)
+IDLE_MS = 4000                 # no edge on LED_CH for this long -> heartbeat: one flash per sample period
 LCD_SDA, LCD_SCL = 8, 9        # I2C0: GP8 = board pin 11, GP9 = board pin 12 (not used by the counters)
 LCD_ADDRS = (0x27, 0x3F, 0x20, 0x38)   # PCF8574 / PCF8574A backpacks, usual jumpers first
 USE_WDT = False                # True on the rig: 8 s hardware watchdog (reboots a hung Pico).
@@ -138,6 +161,22 @@ for _i in range(N):
 
 led = Pin("LED", Pin.OUT)
 boot_id = time.ticks_us() & 0xFFFF   # changes on every reset; host uses it to spot reboots
+
+# ---- LED activity flash: hard IRQ on LED_CH's pad, falling edge. Pin(gp) with no
+# mode argument touches no hardware, so the pad stays routed to the PWM slice; the
+# IO_BANK0 edge detector sees the pad input whatever FUNCSEL says. The handler only
+# switches a GPIO and stores an int (no allocation: safe as a hard IRQ).
+_edge_us = 0
+
+
+def _edge(p):
+    global _edge_us
+    led.on()
+    _edge_us = time.ticks_us()
+
+
+_led_pin = Pin(PINS[LED_CH])
+_led_pin.irq(_edge, Pin.IRQ_FALLING, hard=True)
 
 
 # ---- optional 16x2 character LCD (HD44780 behind a PCF8574 I2C backpack: the
@@ -301,6 +340,8 @@ HELP = (
     "#   T,<ch>,<n>  self-test: step channel <ch>'s hardware counter by <n> (0..60000)",
     "#   X           exit to the REPL for Thonny/mpremote (Ctrl-C is disabled)",
     "#   L           LCD status: L,<i2c addr> or L,none",
+    "# LED: one 2 ms flash per falling edge on CH0 (brightness ~ flow);",
+    "#      after 4 s with no edge, one short flash per sample period until the next edge",
     "# W,<uptime_ms>,<dt_us>,<n0>,<n1>,<n2>,<n3>,<t0>,<t1>,<t2>,<t3> every window:",
     "#   dt = window length us, n = pulses in it, t = running total since boot/zero",
     "# Inputs: CH0 GP1  CH1 GP3  CH2 GP5  CH3 GP7 (falling edge, pull-up to 3V3, not 5 V)",
@@ -360,6 +401,7 @@ def _handle(line):
         elif cmd == "X":
             _send("OK")
             timer.deinit()
+            _led_pin.irq(None)                # no main loop left to end a flash
             micropython.kbd_intr(3)
             _lcd_line(1, "REPL")
             _exit = True                      # main loop ends -> script ends -> friendly REPL.
@@ -371,17 +413,41 @@ def _handle(line):
         _send("ERR,bad argument")
 
 
-# ---- main loop: poll USB stdin without blocking, emit each window, blink, feed WDT
+# ---- main loop: poll USB stdin without blocking, emit each window, end LED flashes, feed WDT
 poller = select.poll()
 poller.register(sys.stdin, select.POLLIN)
 buf = ""
 _seen_snap = None
 _exit = False
+_seen_edge_us = _edge_us                      # last _edge_us value the loop has acted on
+_last_edge_ms = time.ticks_ms()               # when the loop last saw a new edge (ms clock: no wrap worries)
+_idle = False                                 # True = heartbeat mode (no edge for IDLE_MS), sticky until an edge
+_hb_off_at = None                             # ticks_ms when the current heartbeat flash ends
 
 _send("ID,MCC-CTR4,%s,%d,%d" % (VERSION, boot_id, _uptime_ms()))   # banner on connect/boot
 
 while not _exit:
-    if poller.poll(20):                       # 20 ms slice; the slices keep counting regardless
+    now_ms = time.ticks_ms()
+    e = _edge_us
+    if e != _seen_edge_us:                    # one or more CH0 edges since the last pass
+        _seen_edge_us = e
+        _last_edge_ms = now_ms
+        if _idle:                             # input is back: per-edge flashes take over at once
+            _idle = False
+            _hb_off_at = None
+    elif not _idle and time.ticks_diff(now_ms, _last_edge_ms) >= IDLE_MS:
+        _idle = True
+    if led.value():                           # a flash is running: end it on time
+        if _hb_off_at is not None:            # heartbeat flash: WINDOW_MS/10 after the sample
+            if time.ticks_diff(now_ms, _hb_off_at) >= 0:
+                led.off()
+                _hb_off_at = None
+        elif time.ticks_diff(time.ticks_us(), _edge_us) >= LED_FLASH_US:   # edge flash: 2 ms after its edge
+            led.off()
+        slice_ms = 1                          # fine-grained while the LED is on
+    else:
+        slice_ms = 5
+    if poller.poll(slice_ms):                 # the PWM slices keep counting regardless
         ch = sys.stdin.read(1)
         if ch:
             if ch == "\n" or ch == "\r":
@@ -398,7 +464,9 @@ while not _exit:
         line = _consume(s)
         if stream_on:
             _send(line)
-        led.toggle()                          # 2 Hz blink at the default window = alive and ticking
+        if _idle:                             # heartbeat: one flash per sample period while the input is dead
+            led.on()
+            _hb_off_at = time.ticks_add(time.ticks_ms(), max(5, WINDOW_MS // 10))
     if wdt:
         wdt.feed()
 

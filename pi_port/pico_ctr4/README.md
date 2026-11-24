@@ -1,6 +1,6 @@
 # MCC-CTR4 — Pico 4-channel pulse counter
 
-Version 2.1.0 — 2026-11-19 (optional I2C LCD1602 readout, see below). 2.0.1 same day: help list on `?`/`H`; control bytes ignored. 2.0.0 on 2026-11-18: hardware counting in the PWM slices, one streamed line per timer window, first run on a real Pico (timing within 10 µs, self-test exact on all four slices). 1.0.0 on 2026-11-16 counted with GPIO interrupts.
+Version 2.2.1 — 2026-11-20 (after 4 s with no CH0 edge the LED falls back to one short flash per sample period, as a heartbeat, until the next edge). 2.2.0 same day: the LED is a CH0 activity light, one 2 ms flash per falling edge on GP1, from a GPIO interrupt that runs beside the hardware counter (2.1.1/2.1.2 flashed once per sample period instead). 2.1.0 on 2026-11-19: optional I2C LCD1602 readout, see below. 2.0.1 same day: help list on `?`/`H`; control bytes ignored. 2.0.0 on 2026-11-18: hardware counting in the PWM slices, one streamed line per timer window, first run on a real Pico (timing within 10 µs, self-test exact on all four slices). 1.0.0 on 2026-11-16 counted with GPIO interrupts.
 
 A Raspberry Pi Pico counts pulses on four inputs in hardware and, four times a second, hands the main Pi the number of pulses that landed in the last window. The Pi turns that into Hz and L/min. The CPU on the Pico never handles an edge, so nothing on it (USB, the main loop, garbage collection) can delay or drop a pulse.
 
@@ -24,7 +24,7 @@ Only the B pin of a slice can be a counter input, and B pins are the odd GPIOs, 
 1. Hold BOOTSEL, plug the Pico into USB, release. It mounts as `RPI-RP2`.
 2. Copy the MicroPython UF2 for Pico (or Pico W / Pico 2, match the board) onto it. It reboots as a USB serial device.
 3. Open Thonny, pick the Pico interpreter, open `main.py`, File → Save as → Raspberry Pi Pico → name it `main.py`. Or use `mpremote cp main.py :main.py`.
-4. Unplug and replug. The LED blinks at 2 Hz (once per window) and the port prints `ID,MCC-CTR4,2.0.0,<boot>,<ms>` once, then a `W,...` line every 250 ms.
+4. Unplug and replug. The port prints `ID,MCC-CTR4,2.2.0,<boot>,<ms>` once, then a `W,...` line every 250 ms. The LED flashes for 2 ms on every falling edge on CH0 (GP1), so its brightness follows the pulse rate (about 20 % duty at the SMWF meter's 97 Hz full scale). After 4 s without an edge it falls back to a heartbeat, one short flash per sample period (a tenth of the window, 25 ms at 250 ms), so a board with a dead or unwired input still shows it is alive and sampling; the first edge switches it back at once. The edge flash comes from a GPIO interrupt on the same pad; the pulse itself is still counted by the PWM slice, so a late interrupt can only cost a flash, never a count.
 
 Before leaving it on the rig set `USE_WDT = True` in `main.py` so a hung Pico reboots in 8 s. Leave it `False` while working in Thonny.
 
@@ -49,7 +49,7 @@ SMWF-0420A: red = V+ (VBUS), black = GND, white = output to the channel pin, 10 
 A 16×2 character LCD on a PCF8574 I2C backpack is detected at boot (addresses 0x27, 0x3F, 0x20, 0x38 tried in that order) and shows:
 
 ```
-CTR4 2.1.0 250ms     <- ID, firmware version, window period
+CTR4 2.1.2 250ms     <- ID, firmware version, window period
 0024 0005            <- pulses in the last window, CH0 then CH1, 4 digits each
 ```
 

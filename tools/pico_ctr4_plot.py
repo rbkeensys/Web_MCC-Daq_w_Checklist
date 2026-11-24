@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""pico_ctr4_plot.py -- v1.0.0 (russ 11/19: "read the device and graph ch0 vs time, fixed scale adjustable")
+"""pico_ctr4_plot.py -- v1.1.0 (russ 11/20: "do a quick cal at W=1000ms ... then run the plot with that scale")
+v1.1.0: --ml plots mL/min = (Hz + offhz) * 60 / ppl * 1000. Defaults are the 11/20 one-point
+        cal of the SMWF-0420A on CH0: 34.4 Hz at 780 mL/min -> 2875 pulses/L with the datasheet's
+        -3 Hz start offset kept (datasheet nominal is 3000 p/L, which read 4.5 % low).
+v1.0.0 (russ 11/19: "read the device and graph ch0 vs time, fixed scale adjustable")
 
 Live strip chart of one MCC-CTR4 channel (firmware 2.x stream) with a FIXED
 y-axis you set and change while it runs -- no autoscale jumping around.
@@ -8,6 +12,8 @@ y-axis you set and change while it runs -- no autoscale jumping around.
     python tools/pico_ctr4_plot.py COM5 --ymax 120     # name the port, y-axis 0..120
     python tools/pico_ctr4_plot.py --ch 1 --count      # CH1, pulses per window instead of Hz
     python tools/pico_ctr4_plot.py --window 100 --span 30
+    python tools/pico_ctr4_plot.py --ml --window 1000 --ymax 1000   # mL/min with the cal constants
+    python tools/pico_ctr4_plot.py --ml --ppl 3000 --offhz 3        # datasheet constants instead
     python tools/pico_ctr4_plot.py --demo              # no Pico: synthetic signal, to try the controls
 
 While it runs:
@@ -28,6 +34,8 @@ import math
 
 NCH = 4
 PICO_VID = 0x2E8A
+CAL_PPL = 2875.0        # pulses per litre, SMWF-0420A on CH0, one-point cal 11/20 (780 mL/min <-> 34.4 Hz)
+CAL_OFFHZ = 3.0         # datasheet start offset: f = K*Q - 3 Hz, so Q = (f + 3) / K
 
 
 def find_port():
@@ -41,10 +49,11 @@ def find_port():
 class Source:
     """Reads W lines from the Pico on a thread; keeps (t_s, value, total) samples."""
 
-    def __init__(self, port, ch, window_ms, count_mode, span_s):
+    def __init__(self, port, ch, window_ms, count_mode, span_s, ml=None):
         import serial
         self.ch = ch
         self.count_mode = count_mode
+        self.ml = ml                                 # (ppl, offhz) -> plot mL/min; None -> Hz
         self.samples = collections.deque()          # (t, value, total)
         self.keep_s = max(span_s, 1.0) * 4           # history beyond the span so a wider span fills in
         self.lock = threading.Lock()
@@ -99,7 +108,13 @@ class Source:
                 continue
             if dt_us <= 0:
                 continue
-            v = n if self.count_mode else n * 1e6 / dt_us
+            if self.count_mode:
+                v = n
+            else:
+                v = n * 1e6 / dt_us                                  # Hz
+                if self.ml:
+                    ppl, off = self.ml
+                    v = (v + off) * 60.0 / ppl * 1000.0 if n else 0.0   # mL/min; a dead window reads 0, not the offset
             t = time.time() - self.t0
             with self.lock:
                 self.samples.append((t, v, tot))
@@ -114,8 +129,9 @@ class Source:
 class DemoSource:
     """Synthetic 'flow' for trying the plot without hardware: slow ramp + a few bursts."""
 
-    def __init__(self, ch, window_ms, count_mode, span_s):
+    def __init__(self, ch, window_ms, count_mode, span_s, ml=None):
         self.count_mode = count_mode
+        self.ml = ml
         self.window_s = window_ms / 1000.0
         self.samples = collections.deque()
         self.keep_s = max(span_s, 1.0) * 4
@@ -138,6 +154,8 @@ class DemoSource:
             n = int(round(hz * self.window_s))
             self.total += n
             v = n if self.count_mode else n / self.window_s
+            if self.ml and not self.count_mode:
+                v = (v + self.ml[1]) * 60.0 / self.ml[0] * 1000.0 if n else 0.0
             with self.lock:
                 self.samples.append((t, v, self.total))
                 while self.samples and t - self.samples[0][0] > self.keep_s:
@@ -158,9 +176,13 @@ def main():
     ap.add_argument("--span", type=float, default=60.0, help="seconds of history on screen (default 60)")
     ap.add_argument("--ymax", type=float, default=100.0, help="fixed y-axis maximum (default 100)")
     ap.add_argument("--count", action="store_true", help="plot pulses per window instead of Hz")
+    ap.add_argument("--ml", action="store_true", help="plot mL/min = (Hz + offhz) * 60 / ppl * 1000")
+    ap.add_argument("--ppl", type=float, default=CAL_PPL, help="pulses per litre for --ml (default %g, 11/20 cal)" % CAL_PPL)
+    ap.add_argument("--offhz", type=float, default=CAL_OFFHZ, help="Hz added before scaling for --ml (default %g)" % CAL_OFFHZ)
     ap.add_argument("--demo", action="store_true", help="synthetic data, no Pico needed")
     ap.add_argument("--snapshot", help="headless: run a few seconds and save a PNG (self-test)")
     a = ap.parse_args()
+    ml = (a.ppl, a.offhz) if a.ml and not a.count else None
 
     import matplotlib
     if a.snapshot:
@@ -170,17 +192,17 @@ def main():
     from matplotlib.animation import FuncAnimation
 
     if a.demo:
-        src = DemoSource(a.ch, a.window, a.count, a.span)
+        src = DemoSource(a.ch, a.window, a.count, a.span, ml)
         title_port = "demo"
     else:
         port = a.port or find_port()
         if not port:
             sys.exit("no Pico found -- plug it in, or pass the port (e.g. COM5, /dev/ttyACM0)")
-        src = Source(port, a.ch, a.window, a.count, a.span)
+        src = Source(port, a.ch, a.window, a.count, a.span, ml)
         title_port = port
 
     state = {"ymax": float(a.ymax), "span": float(a.span), "paused": False}
-    unit = "pulses / window" if a.count else "Hz"
+    unit = "pulses / window" if a.count else ("mL/min  (%g p/L, +%g Hz)" % ml if ml else "Hz")
 
     fig, ax = plt.subplots(figsize=(10, 5))
     fig.canvas.manager.set_window_title("MCC-CTR4 CH%d  (%s, fw %s)" % (a.ch, title_port, src.fw)) \
